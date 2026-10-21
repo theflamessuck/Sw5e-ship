@@ -4,7 +4,16 @@ import { supabase } from '@/lib/supabase';
 export function useRoomSync<T>(roomCode: string, initialData: T) {
   const [data, setData] = useState<T>(initialData);
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const isIncomingUpdate = useRef<boolean>(false);
+  
+  // Track timestamps and debounce timer
+  const lastLocalUpdateRef = useRef<number>(Date.now());
+  const pendingSyncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const latestDataRef = useRef<T>(initialData);
+
+  // Keep latestDataRef in sync with state
+  useEffect(() => {
+    latestDataRef.current = data;
+  }, [data]);
 
   // 1. Initial Load & Realtime Subscription
   useEffect(() => {
@@ -12,22 +21,24 @@ export function useRoomSync<T>(roomCode: string, initialData: T) {
 
     const code = roomCode.trim().toUpperCase();
 
-    // Fetch existing room state if available
     async function loadRoom() {
       const { data: room, error } = await supabase
         .from('game_rooms')
-        .select('ship_state')
+        .select('ship_state, updated_at')
         .eq('room_code', code)
         .single();
 
       if (room && room.ship_state && Object.keys(room.ship_state).length > 0) {
-        isIncomingUpdate.current = true;
         setData(room.ship_state as T);
+        latestDataRef.current = room.ship_state as T;
       } else if (!room && !error) {
-        // Create the room entry on the fly if it does not exist
         await supabase
           .from('game_rooms')
-          .insert({ room_code: code, ship_state: initialData });
+          .insert({
+            room_code: code,
+            ship_state: initialData,
+            updated_at: new Date().toISOString(),
+          });
       }
     }
 
@@ -45,10 +56,17 @@ export function useRoomSync<T>(roomCode: string, initialData: T) {
           filter: `room_code=eq.${code}`,
         },
         (payload) => {
-          if (payload.new && payload.new.ship_state) {
-            isIncomingUpdate.current = true;
-            setData(payload.new.ship_state as T);
+          if (!payload.new || !payload.new.ship_state) return;
+
+          const remoteTimestamp = new Date(payload.new.updated_at).getTime();
+
+          // Discard remote updates that originated prior to our latest local user action
+          if (remoteTimestamp <= lastLocalUpdateRef.current) {
+            return;
           }
+
+          setData(payload.new.ship_state as T);
+          latestDataRef.current = payload.new.ship_state as T;
         }
       )
       .subscribe((status) => {
@@ -57,31 +75,46 @@ export function useRoomSync<T>(roomCode: string, initialData: T) {
 
     return () => {
       supabase.removeChannel(channel);
+      if (pendingSyncTimeoutRef.current) {
+        clearTimeout(pendingSyncTimeoutRef.current);
+      }
     };
   }, [roomCode]);
 
-  // 2. Broadcast local state changes back to Supabase
+  // 2. Local Update with Debounced Cloud Sync
   const updateRoomData = useCallback(
-    async (updater: (prev: T) => T) => {
+    (updater: (prev: T) => T) => {
+      const now = Date.now();
+      lastLocalUpdateRef.current = now;
+
+      // Optimistically update local screen immediately
       setData((prev) => {
         const next = updater(prev);
-
-        if (roomCode) {
-          const code = roomCode.trim().toUpperCase();
-          // Upsert room state to cloud
-          supabase
-            .from('game_rooms')
-            .upsert({
-              room_code: code,
-              ship_state: next,
-              updated_at: new Date().toISOString(),
-            })
-            .then(({ error }) => {
-              if (error) console.error('Failed to sync state:', error);
-            });
-        }
+        latestDataRef.current = next;
         return next;
       });
+
+      // Clear pending network push and debounce for 150ms
+      if (pendingSyncTimeoutRef.current) {
+        clearTimeout(pendingSyncTimeoutRef.current);
+      }
+
+      pendingSyncTimeoutRef.current = setTimeout(async () => {
+        if (!roomCode) return;
+        const code = roomCode.trim().toUpperCase();
+
+        const { error } = await supabase
+          .from('game_rooms')
+          .upsert({
+            room_code: code,
+            ship_state: latestDataRef.current,
+            updated_at: new Date(now).toISOString(),
+          });
+
+        if (error) {
+          console.error('Failed to sync room state to cloud:', error);
+        }
+      }, 150);
     },
     [roomCode]
   );
