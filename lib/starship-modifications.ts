@@ -565,7 +565,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 15)",
     description: "Standard hyperdrive slot - class 15 hyperdrive",
-    baseCost: 3500,
+    baseCost: 500,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
@@ -575,7 +575,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 8)",
     description: "This modification adds a hyperdrive slot on your ship and includes a class 8 hyperdrive",
-    baseCost: 3500,
+    baseCost: 1000,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
@@ -585,7 +585,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 5)",
     description: "This modification adds a hyperdrive slot on your ship and includes a class 5 hyperdrive",
-    baseCost: 3500,
+    baseCost: 2500,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
@@ -595,7 +595,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 4)",
     description: "This modification adds a hyperdrive slot on your ship and includes a class 4 hyperdrive",
-    baseCost: 3500,
+    baseCost: 5000,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
@@ -605,7 +605,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 3)",
     description: "This modification adds a hyperdrive slot on your ship and includes a class 3 hyperdrive",
-    baseCost: 3500,
+    baseCost: 7500,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
@@ -615,7 +615,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 2)",
     description: "This modification adds a hyperdrive slot on your ship and includes a class 2 hyperdrive",
-    baseCost: 3500,
+    baseCost: 10000,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
@@ -625,7 +625,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 1.5)",
     description: "This modification adds a hyperdrive slot on your ship and includes a class 1.5 hyperdrive",
-    baseCost: 3500,
+    baseCost: 12500,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
@@ -635,7 +635,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 1.0)",
     description: "This modification adds a hyperdrive slot on your ship and includes a class 1 hyperdrive",
-    baseCost: 3500,
+    baseCost: 15000,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
@@ -645,7 +645,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 0.75)",
     description: "This modification adds a hyperdrive slot on your ship and includes a class 0.75 hyperdrive",
-    baseCost: 3500,
+    baseCost: 25000,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
@@ -655,7 +655,7 @@ export const starshipModifications: StarshipModification[] = [
     type: "Operation system",
     name: "HYPERDRIVE SLOT (Class 0.5)",
     description: "This modification adds a hyperdrive slot on your ship and includes a class 0.5 hyperdrive",
-    baseCost: 3500,
+    baseCost: 50000,
     grade: "0",
     prerequisite: "None",
     requiresTargetWeapon: false
