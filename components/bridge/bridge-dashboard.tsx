@@ -21,6 +21,8 @@ import { STARSHIP_AMMUNITION } from "@/lib/starship-weapons"
 import { CodexStation } from "./codex-station"
 import { computeShipModifiers } from "@/lib/ship-modifiers"
 import { AlertOctagon, RefreshCw } from "lucide-react"
+import { useRoomSync } from "@/hooks/use-room-sync"
+import { RoomSelector } from "./room-selector"
 
 // ==========================================
 // CREW MANIFEST & TACTICAL MOVEMENT SCHEMAS
@@ -136,21 +138,62 @@ function getRawModifier(score: number): number {
   return Math.floor((score - 10) / 2)
 }
 
-export default function BridgeDashboard() {
-  const [maxFuel, setMaxFuel] = useState<number>(30)
-  const [currentFuel, setCurrentFuel] = useState<number>(30)
-  const [active, setActive] = useState<Station>("Weapons")
-  
-  const [currentDay, setCurrentDay] = useState<number>(1)
-  const [activeJourney, setActiveJourney] = useState<JourneyData | null>(null)
-  const [lastAstrogationDay, setLastAstrogationDay] = useState<number>(1)
-  const externalPendingCharts = currentDay > lastAstrogationDay ? 150 : 0
+// ==========================================
+// SHARED MULTIPLAYER ROOM STATE SCHEMA
+// ==========================================
 
-  // --- CARGO RATIONS / STOCKS STATE ---
-  const [cargoRations, setCargoRations] = useState<number>(60)
+export interface SyncedBridgeState {
+  maxFuel: number
+  currentFuel: number
+  currentDay: number
+  activeJourney: JourneyData | null
+  lastAstrogationDay: number
+  cargoRations: number
+  manifest: ManifestMember[]
+  tacticalMovement: TacticalMovementState
+  currentLocationPlanet: string
+  targetDestinationPlanet: string
+  systemDamageLevel: number
+  shipStatuses: ActiveStatus[]
+  isUsedCondition: boolean
+  spentHullDice: number
+  spentShieldDice: number
+  pendingTier: number | null
+  pinpointStrikesUsed: number
+  versatileSnubfighterUsed: number
+  evasiveManeuversUsed: number
+  versatileStarshipUsed: number
+  adaptiveArmorUsed: number
+  bestShipInVerseUsed: boolean
+  sFoilsMode: "locked" | "unlocked"
+  engineSpeedBoostTurns: number
+  shieldBoostTurns: number
+  boostActionUsed: boolean
+  selectedBoostType: "engines" | "shields" | "weapons" | null
+  boostFeedback: string | null
+  standingByUsed: boolean
+  leafOnTheWindUsed: boolean
+  ordnanceList: OrdnanceItem[]
+  shipConfig: ShipConfig
+  installedMods: Modification[]
+  installedSuites: InstalledSuite[]
+  transactions: Transaction[]
+  shieldState: { current: number; max: number; temp: number }
+  hullState: { current: number; max: number }
+  availablePowerDice: number
+  stationPools: Record<string, number>
+  sharedPoolDice: number
+  sensorContacts: SensorContact[]
+}
 
-  // --- CREW MANIFEST & TACTICAL MOVEMENT ---
-  const [manifest, setManifest] = useState<ManifestMember[]>([
+const INITIAL_SYNCED_STATE: SyncedBridgeState = {
+  maxFuel: 30,
+  currentFuel: 30,
+  currentDay: 1,
+  activeJourney: null,
+  lastAstrogationDay: 1,
+  cargoRations: 60,
+  manifest: [
     {
       id: "pc-1",
       name: "Captain Vance",
@@ -184,269 +227,45 @@ export default function BridgeDashboard() {
       hasTakenTurnThisRound: false,
       notes: "Diplomatic passenger from Coruscant",
     },
-  ])
-
-  const [tacticalMovement, setTacticalMovement] = useState<TacticalMovementState>({
-    spentFeet: 0,
-  })
-
-  // --- MANIFEST DISPATCH ACTIONS ---
-  const handleAddMember = (
-    newMember: Omit<ManifestMember, "id" | "assignedOrder" | "hasTakenTurnThisRound">
-  ) => {
-    const id = `manifest-${Date.now()}`
-    const location = newMember.isPassenger
-      ? "passenger_lounge"
-      : (newMember.location || "crew_quarters")
-
-    setManifest((prev) => [
-      ...prev,
-      {
-        ...newMember,
-        id,
-        location,
-        assignedOrder: Date.now(),
-        hasTakenTurnThisRound: false,
-      },
-    ])
-  }
-
-  const handleRemoveMember = (id: string) => {
-    setManifest((prev) => prev.filter((m) => m.id !== id))
-  }
-
-  const handleAssignLocation = (memberId: string, targetLocation: ShipCompartmentId) => {
-    setManifest((prev) => {
-      const member = prev.find((m) => m.id === memberId)
-      if (!member || member.isPassenger) return prev // Passengers remain in the lounge
-
-      const isTargetTurret = targetLocation.startsWith("turret-")
-      return prev.map((m) => {
-        // Enforce max 1 person per turret
-        if (isTargetTurret && m.location === targetLocation && m.id !== memberId) {
-          return {
-            ...m,
-            location: "crew_quarters" as ShipCompartmentId,
-            assignedOrder: Date.now(),
-          }
-        }
-        if (m.id === memberId) {
-          return {
-            ...m,
-            location: targetLocation,
-            assignedOrder: Date.now(),
-          }
-        }
-        return m
-      })
-    })
-  }
-
-  const handleToggleTurnTaken = (memberId: string) => {
-    setManifest((prev) =>
-      prev.map((m) =>
-        m.id === memberId
-          ? { ...m, hasTakenTurnThisRound: !m.hasTakenTurnThisRound }
-          : m
-      )
-    )
-  }
-
-  const handleUpdateInitiative = (memberId: string, initiative: number) => {
-    setManifest((prev) =>
-      prev.map((m) =>
-        m.id === memberId ? { ...m, individualInitiative: initiative } : m
-      )
-    )
-  }
-
-  const handleSpendMovement = (feet: number) => {
-    setTacticalMovement((prev) => ({
-      ...prev,
-      spentFeet: Math.max(0, prev.spentFeet + feet),
-    }))
-  }
-
-  const handleResetMovement = () => {
-    setTacticalMovement({ spentFeet: 0 })
-  }
-
-  // --- DAY ADVANCE & RATION DEPLETION (SAFE FUNCTIONAL UPDATER) ---
-  const handleAdvanceCampaignDay = (
-    newDay?: number | ((prev: number) => number)
-  ) => {
-    setCurrentDay((prevDay) => {
-      let resolvedTarget: number
-      if (typeof newDay === "function") {
-        resolvedTarget = newDay(prevDay)
-      } else if (typeof newDay === "number") {
-        resolvedTarget = newDay
-      } else {
-        resolvedTarget = prevDay + 1
-      }
-
-      const daysPassed = Math.max(0, resolvedTarget - prevDay)
-      if (daysPassed > 0) {
-        const dailyDepletion = manifest.length * daysPassed
-        setCargoRations((prevRations) => Math.max(0, prevRations - dailyDepletion))
-      }
-
-      return resolvedTarget
-    })
-  }
-
-  // --- DYNAMIC ASTROGATION CHART SYNC STATUS ---
-  const astrogationAdvantage: "advantage" | "disadvantage" | "normal" = useMemo(() => {
-    const daysSinceSync = Math.max(0, currentDay - lastAstrogationDay)
-    if (daysSinceSync < 1) return "advantage"
-    if (daysSinceSync >= 7) return "disadvantage"
-    return "normal"
-  }, [currentDay, lastAstrogationDay])
-
-  // --- PERSISTENT VESSEL GALACTIC LOCATION ---
-  const [currentLocationPlanet, setCurrentLocationPlanet] = useState<string>("Corellia")
-  const [targetDestinationPlanet, setTargetDestinationPlanet] = useState<string>("")
-
-  // --- ELEVATED SYSTEM DAMAGE LEVEL (0-6) & SLOWED STATUS ---
-  const [systemDamageLevel, setSystemDamageLevel] = useState<number>(0)
-
-  // --- ELEVATED ACTIVE SHIP STATUSES (PERSISTS ACROSS STATIONS) ---
-  const [shipStatuses, setShipStatuses] = useState<ActiveStatus[]>([])
-
-  // --- PERSISTENT LEVEL 5 USED CONDITION ---
-  const [isUsedCondition, setIsUsedCondition] = useState<boolean>(false)
-
-  // Status handlers
-  const handleAddStatus = (newStatus: ActiveStatus) => {
-    setShipStatuses((prev) => [...prev, newStatus])
-  }
-
-  const handleRemoveStatus = (statusId: string) => {
-    setShipStatuses((prev) => prev.filter((s) => s.id !== statusId))
-  }
-
-  // Robust helper to check statuses by substring matching both id and title
-  const hasStatus = (key: string) =>
-    shipStatuses.some(
-      (s) =>
-        s.id?.toLowerCase().includes(key.toLowerCase()) ||
-        s.title?.toLowerCase().includes(key.toLowerCase())
-    )
-
-  const isBlinded = hasStatus("blinded")
-  const isDisabled = hasStatus("disabled")
-  const isIonized = hasStatus("ionized")
-  const isInvisible = hasStatus("invisible")
-  const isStunned = hasStatus("stunned")
-  const isTractored = hasStatus("tractored")
-  const isStalled = hasStatus("stalled")
-  const isUsedStatus = hasStatus("used")
-
-  // Compound Used Condition Check
-  const effectiveIsUsed = isUsedCondition || isUsedStatus || systemDamageLevel >= 5
-
-  useEffect(() => {
-    if (effectiveIsUsed && !isUsedCondition) {
-      setIsUsedCondition(true)
-    }
-  }, [effectiveIsUsed, isUsedCondition])
-
-  const handleUpdateUsedConditionBridge = (used: boolean) => {
-    setIsUsedCondition(used)
-    if (!used) {
-      setShipStatuses((prev) =>
-        prev.filter(
-          (s) =>
-            !s.id?.toLowerCase().includes("used") &&
-            !s.title?.toLowerCase().includes("used")
-        )
-      )
-    } else {
-      if (!hasStatus("used")) {
-        handleAddStatus({
-          id: `used-${Date.now()}`,
-          title: "USED",
-          effect: "A used starship's value is reduced by half. When a deployed crew member on a used starship rolls a 1 on an ability check, attack roll, or saving throw, they must make a destruction saving throw. If the roll is 10 or higher, they succeed. On a failure, the ship suffers 1 level of system damage.",
-          duration: "Until Overhauled",
-        })
-      }
-    }
-  }
-
-  // Compound Slowed Calculation
-  const effectiveSlowedLevel = useMemo(() => {
-    let baseSlow = 0
-    if (isDisabled || isStunned || isTractored || isStalled) {
-      baseSlow = 4
-    }
-
-    const manualSlows = shipStatuses
-      .filter((s) => s.title.toLowerCase().includes("slowed") || (s.id && s.id.toLowerCase().includes("slowed")))
-      .map((s) => s.level ?? 0)
-      
-    const maxManualSlow = manualSlows.length > 0 ? Math.max(...manualSlows) : 0
-    const combinedSlow = Math.max(baseSlow, maxManualSlow)
-    const systemDamageSlow = systemDamageLevel >= 2 ? 1 : 0
-    
-    return Math.min(4, combinedSlow + systemDamageSlow)
-  }, [isDisabled, isStunned, isTractored, isStalled, shipStatuses, systemDamageLevel])
-
-  const isLevel6Blackout = systemDamageLevel >= 6
-
-  const [spentHullDice, setSpentHullDice] = useState<number>(0)
-  const [spentShieldDice, setSpentShieldDice] = useState<number>(0)
-  const [pendingTier, setPendingTier] = useState<number | null>(null)
-
-  const [pinpointStrikesUsed, setPinpointStrikesUsed] = useState<number>(0)
-  const [versatileSnubfighterUsed, setVersatileSnubfighterUsed] = useState<number>(0)
-
-  // --- MEDIUM SHIP TIER CHARGE TRACKERS ---
-  const [evasiveManeuversUsed, setEvasiveManeuversUsed] = useState<number>(0)
-  const [versatileStarshipUsed, setVersatileStarshipUsed] = useState<number>(0)
-  const [adaptiveArmorUsed, setAdaptiveArmorUsed] = useState<number>(0)
-  const [bestShipInVerseUsed, setBestShipInVerseUsed] = useState<boolean>(false)
-
-  // --- S-FOILS STANCE (ENGINES & WEAPONS SYNC) ---
-  const [sFoilsMode, setSFoilsMode] = useState<"locked" | "unlocked">("unlocked")
-
-  // --- ELEVATED ENGINEERING BOOST & SURGE STATES ---
-  const [engineSpeedBoostTurns, setEngineSpeedBoostTurns] = useState<number>(0)
-  const [shieldBoostTurns, setShieldBoostTurns] = useState<number>(0)
-  const [boostActionUsed, setBoostActionUsed] = useState<boolean>(false)
-  const [selectedBoostType, setSelectedBoostType] = useState<"engines" | "shields" | "weapons" | null>(null)
-  const [boostFeedback, setBoostFeedback] = useState<string | null>(null)
-
-  const [standingByUsed, setStandingByUsed] = useState<boolean>(false)
-  const [leafOnTheWindUsed, setLeafOnTheWindUsed] = useState<boolean>(false)
-
-  const [ordnanceList, setOrdnanceList] = useState<OrdnanceItem[]>(() =>
-    STARSHIP_AMMUNITION.map((ammo) => ({
-      id: ammo.id,
-      name: ammo.name,
-      category: ammo.launcherFamily,
-      currentReserve: ammo.name.toLowerCase().includes("concussion missile") ? 6 : ammo.name.toLowerCase().includes("proton torpedo") ? 4 : 0,
-      costPerUnit: ammo.cost,
-      damage: ammo.standardDamage,
-      damageType: ammo.damageType,
-      requisitionQty: 0,
-    }))
-  )
-
-  const pendingOrdnanceCost = useMemo(() => {
-    return ordnanceList.reduce((acc, it) => acc + it.requisitionQty * it.costPerUnit, 0)
-  }, [ordnanceList])
-
-  const pendingOrdnanceItems = useMemo(() => {
-    return ordnanceList
-      .filter((it) => it.requisitionQty > 0)
-      .map((it) => ({
-        name: it.name,
-        qty: it.requisitionQty,
-        cost: it.requisitionQty * it.costPerUnit,
-      }))
-  }, [ordnanceList])
-
-  const [shipConfig, setShipConfig] = useState<ShipConfig>({
+  ],
+  tacticalMovement: { spentFeet: 0 },
+  currentLocationPlanet: "Corellia",
+  targetDestinationPlanet: "",
+  systemDamageLevel: 0,
+  shipStatuses: [],
+  isUsedCondition: false,
+  spentHullDice: 0,
+  spentShieldDice: 0,
+  pendingTier: null,
+  pinpointStrikesUsed: 0,
+  versatileSnubfighterUsed: 0,
+  evasiveManeuversUsed: 0,
+  versatileStarshipUsed: 0,
+  adaptiveArmorUsed: 0,
+  bestShipInVerseUsed: false,
+  sFoilsMode: "unlocked",
+  engineSpeedBoostTurns: 0,
+  shieldBoostTurns: 0,
+  boostActionUsed: false,
+  selectedBoostType: null,
+  boostFeedback: null,
+  standingByUsed: false,
+  leafOnTheWindUsed: false,
+  ordnanceList: STARSHIP_AMMUNITION.map((ammo) => ({
+    id: ammo.id,
+    name: ammo.name,
+    category: ammo.launcherFamily,
+    currentReserve: ammo.name.toLowerCase().includes("concussion missile")
+      ? 6
+      : ammo.name.toLowerCase().includes("proton torpedo")
+      ? 4
+      : 0,
+    costPerUnit: ammo.cost,
+    damage: ammo.standardDamage,
+    damageType: ammo.damageType,
+    requisitionQty: 0,
+  })),
+  shipConfig: {
     name: "Queens Revenge",
     manufacturer: "Nubia Star Drives",
     model: "J-type Diplomatic (Medium)",
@@ -458,7 +277,7 @@ export default function BridgeDashboard() {
     paidAmount: 75000,
     reactorType: "Fuel Cell Reactor",
     powerCoupling: "Distributed Power Coupling",
-    armorType: "Lightweight Armor", 
+    armorType: "Lightweight Armor",
     shieldType: "Directional Shields",
     roleSpecialization: null,
     roleMastery: null,
@@ -534,13 +353,333 @@ export default function BridgeDashboard() {
       wisdom: 1,
       charisma: 3,
     },
-  })
+  },
+  installedMods: [
+    { ...MASTER_MODIFICATIONS[0], instanceId: "seed-fixed-hardpoint-1", location: "Bow" },
+  ],
+  installedSuites: [],
+  transactions: [
+    {
+      id: "tx-initial",
+      date: "Day 1",
+      description: "Initial Ship Account Balance & Baseline Registry",
+      amount: 2500000,
+      category: "Income",
+      type: "credit",
+    },
+  ],
+  shieldState: { current: 28, max: 28, temp: 0 },
+  hullState: { current: 33, max: 33 },
+  availablePowerDice: 4,
+  stationPools: {
+    engines: 1,
+    communications: 1,
+    weapons: 1,
+    sensors: 1,
+    defense: 1,
+  },
+  sharedPoolDice: 2,
+  sensorContacts: [
+    {
+      id: "1",
+      name: "Derelict Cargo Pod",
+      classification: "Debris",
+      distance: "14,200 km",
+      scanDc: 10,
+      isRevealed: false,
+      gmNotes: "Contains 2 units of scrap metal and a cracked navigation log.",
+    },
+  ],
+}
 
-  const [installedMods, setInstalledMods] = useState<Modification[]>([
-    { ...MASTER_MODIFICATIONS[0], instanceId: "seed-fixed-hardpoint-1", location: "Bow" }
-  ])
+export default function BridgeDashboard() {
+  // Local UI-only state: which console tab is viewed locally on this device
+  const [active, setActive] = useState<Station>("Weapons")
+  const [roomCode, setRoomCode] = useState<string>("DEFAULT")
 
-  const [installedSuites, setInstalledSuites] = useState<InstalledSuite[]>([])
+  // Real-time synchronization hook connected to Supabase
+  const { data: roomState, updateRoomData, isConnected } = useRoomSync<SyncedBridgeState>(
+    roomCode,
+    INITIAL_SYNCED_STATE
+  )
+
+  // Unpack synced state
+  const {
+    maxFuel,
+    currentFuel,
+    currentDay,
+    activeJourney,
+    lastAstrogationDay,
+    cargoRations,
+    manifest,
+    tacticalMovement,
+    currentLocationPlanet,
+    targetDestinationPlanet,
+    systemDamageLevel,
+    shipStatuses,
+    isUsedCondition,
+    spentHullDice,
+    spentShieldDice,
+    pendingTier,
+    pinpointStrikesUsed,
+    versatileSnubfighterUsed,
+    evasiveManeuversUsed,
+    versatileStarshipUsed,
+    adaptiveArmorUsed,
+    bestShipInVerseUsed,
+    sFoilsMode,
+    engineSpeedBoostTurns,
+    shieldBoostTurns,
+    boostActionUsed,
+    selectedBoostType,
+    boostFeedback,
+    standingByUsed,
+    leafOnTheWindUsed,
+    ordnanceList,
+    shipConfig,
+    installedMods,
+    installedSuites,
+    transactions,
+    shieldState,
+    hullState,
+    availablePowerDice,
+    stationPools,
+    sharedPoolDice,
+    sensorContacts,
+  } = roomState
+
+  const externalPendingCharts = currentDay > lastAstrogationDay ? 150 : 0
+
+  // --- CREW MANIFEST & TACTICAL ACTIONS ---
+  const handleAddMember = (
+    newMember: Omit<ManifestMember, "id" | "assignedOrder" | "hasTakenTurnThisRound">
+  ) => {
+    const id = `manifest-${Date.now()}`
+    const location = newMember.isPassenger
+      ? "passenger_lounge"
+      : (newMember.location || "crew_quarters")
+
+    updateRoomData((prev) => ({
+      ...prev,
+      manifest: [
+        ...prev.manifest,
+        {
+          ...newMember,
+          id,
+          location,
+          assignedOrder: Date.now(),
+          hasTakenTurnThisRound: false,
+        },
+      ],
+    }))
+  }
+
+  const handleRemoveMember = (id: string) => {
+    updateRoomData((prev) => ({
+      ...prev,
+      manifest: prev.manifest.filter((m) => m.id !== id),
+    }))
+  }
+
+  const handleAssignLocation = (memberId: string, targetLocation: ShipCompartmentId) => {
+    updateRoomData((prev) => {
+      const member = prev.manifest.find((m) => m.id === memberId)
+      if (!member || member.isPassenger) return prev
+
+      const isTargetTurret = targetLocation.startsWith("turret-")
+      const updatedManifest = prev.manifest.map((m) => {
+        if (isTargetTurret && m.location === targetLocation && m.id !== memberId) {
+          return {
+            ...m,
+            location: "crew_quarters" as ShipCompartmentId,
+            assignedOrder: Date.now(),
+          }
+        }
+        if (m.id === memberId) {
+          return {
+            ...m,
+            location: targetLocation,
+            assignedOrder: Date.now(),
+          }
+        }
+        return m
+      })
+
+      return { ...prev, manifest: updatedManifest }
+    })
+  }
+
+  const handleToggleTurnTaken = (memberId: string) => {
+    updateRoomData((prev) => ({
+      ...prev,
+      manifest: prev.manifest.map((m) =>
+        m.id === memberId ? { ...m, hasTakenTurnThisRound: !m.hasTakenTurnThisRound } : m
+      ),
+    }))
+  }
+
+  const handleUpdateInitiative = (memberId: string, initiative: number) => {
+    updateRoomData((prev) => ({
+      ...prev,
+      manifest: prev.manifest.map((m) =>
+        m.id === memberId ? { ...m, individualInitiative: initiative } : m
+      ),
+    }))
+  }
+
+  const handleSpendMovement = (feet: number) => {
+    updateRoomData((prev) => ({
+      ...prev,
+      tacticalMovement: {
+        spentFeet: Math.max(0, prev.tacticalMovement.spentFeet + feet),
+      },
+    }))
+  }
+
+  const handleResetMovement = () => {
+    updateRoomData((prev) => ({
+      ...prev,
+      tacticalMovement: { spentFeet: 0 },
+    }))
+  }
+
+  // --- DAY ADVANCE & RATION DEPLETION ---
+  const handleAdvanceCampaignDay = (newDay?: number | ((prev: number) => number)) => {
+    updateRoomData((prev) => {
+      let resolvedTarget: number
+      if (typeof newDay === "function") {
+        resolvedTarget = newDay(prev.currentDay)
+      } else if (typeof newDay === "number") {
+        resolvedTarget = newDay
+      } else {
+        resolvedTarget = prev.currentDay + 1
+      }
+
+      const daysPassed = Math.max(0, resolvedTarget - prev.currentDay)
+      const dailyDepletion = daysPassed > 0 ? prev.manifest.length * daysPassed : 0
+      const nextRations = Math.max(0, prev.cargoRations - dailyDepletion)
+
+      return {
+        ...prev,
+        currentDay: resolvedTarget,
+        cargoRations: nextRations,
+      }
+    })
+  }
+
+  // --- DYNAMIC ASTROGATION CHART SYNC STATUS ---
+  const astrogationAdvantage: "advantage" | "disadvantage" | "normal" = useMemo(() => {
+    const daysSinceSync = Math.max(0, currentDay - lastAstrogationDay)
+    if (daysSinceSync < 1) return "advantage"
+    if (daysSinceSync >= 7) return "disadvantage"
+    return "normal"
+  }, [currentDay, lastAstrogationDay])
+
+  // Status handlers
+  const handleAddStatus = (newStatus: ActiveStatus) => {
+    updateRoomData((prev) => ({
+      ...prev,
+      shipStatuses: [...prev.shipStatuses, newStatus],
+    }))
+  }
+
+  const handleRemoveStatus = (statusId: string) => {
+    updateRoomData((prev) => ({
+      ...prev,
+      shipStatuses: prev.shipStatuses.filter((s) => s.id !== statusId),
+    }))
+  }
+
+  const hasStatus = (key: string) =>
+    shipStatuses.some(
+      (s) =>
+        s.id?.toLowerCase().includes(key.toLowerCase()) ||
+        s.title?.toLowerCase().includes(key.toLowerCase())
+    )
+
+  const isBlinded = hasStatus("blinded")
+  const isDisabled = hasStatus("disabled")
+  const isIonized = hasStatus("ionized")
+  const isInvisible = hasStatus("invisible")
+  const isStunned = hasStatus("stunned")
+  const isTractored = hasStatus("tractored")
+  const isStalled = hasStatus("stalled")
+  const isUsedStatus = hasStatus("used")
+
+  const effectiveIsUsed = isUsedCondition || isUsedStatus || systemDamageLevel >= 5
+
+  useEffect(() => {
+    if (effectiveIsUsed && !isUsedCondition) {
+      updateRoomData((prev) => ({ ...prev, isUsedCondition: true }))
+    }
+  }, [effectiveIsUsed, isUsedCondition, updateRoomData])
+
+  const handleUpdateUsedConditionBridge = (used: boolean) => {
+    updateRoomData((prev) => {
+      let nextStatuses = prev.shipStatuses
+      if (!used) {
+        nextStatuses = prev.shipStatuses.filter(
+          (s) =>
+            !s.id?.toLowerCase().includes("used") &&
+            !s.title?.toLowerCase().includes("used")
+        )
+      } else if (!prev.shipStatuses.some((s) => s.title.toLowerCase().includes("used"))) {
+        nextStatuses = [
+          ...prev.shipStatuses,
+          {
+            id: `used-${Date.now()}`,
+            title: "USED",
+            effect:
+              "A used starship's value is reduced by half. When a deployed crew member on a used starship rolls a 1 on an ability check, attack roll, or saving throw, they must make a destruction saving throw. If the roll is 10 or higher, they succeed. On a failure, the ship suffers 1 level of system damage.",
+            duration: "Until Overhauled",
+          },
+        ]
+      }
+      return {
+        ...prev,
+        isUsedCondition: used,
+        shipStatuses: nextStatuses,
+      }
+    })
+  }
+
+  // Compound Slowed Calculation
+  const effectiveSlowedLevel = useMemo(() => {
+    let baseSlow = 0
+    if (isDisabled || isStunned || isTractored || isStalled) {
+      baseSlow = 4
+    }
+
+    const manualSlows = shipStatuses
+      .filter(
+        (s) =>
+          s.title.toLowerCase().includes("slowed") ||
+          (s.id && s.id.toLowerCase().includes("slowed"))
+      )
+      .map((s) => s.level ?? 0)
+
+    const maxManualSlow = manualSlows.length > 0 ? Math.max(...manualSlows) : 0
+    const combinedSlow = Math.max(baseSlow, maxManualSlow)
+    const systemDamageSlow = systemDamageLevel >= 2 ? 1 : 0
+
+    return Math.min(4, combinedSlow + systemDamageSlow)
+  }, [isDisabled, isStunned, isTractored, isStalled, shipStatuses, systemDamageLevel])
+
+  const isLevel6Blackout = systemDamageLevel >= 6
+
+  const pendingOrdnanceCost = useMemo(() => {
+    return ordnanceList.reduce((acc, it) => acc + it.requisitionQty * it.costPerUnit, 0)
+  }, [ordnanceList])
+
+  const pendingOrdnanceItems = useMemo(() => {
+    return ordnanceList
+      .filter((it) => it.requisitionQty > 0)
+      .map((it) => ({
+        name: it.name,
+        qty: it.requisitionQty,
+        cost: it.requisitionQty * it.costPerUnit,
+      }))
+  }, [ordnanceList])
 
   const activeSizeKey = ((shipConfig.size as string)?.toLowerCase() ?? "small") as ShipSize
   const activeSizeRules = SHIP_SIZE_RULES[activeSizeKey] || SHIP_SIZE_RULES.small
@@ -556,16 +695,50 @@ export default function BridgeDashboard() {
       roleSpecialization: shipConfig.roleSpecialization,
       roleMastery: shipConfig.roleMastery,
     })
-  }, [shipConfig.tier, activeSizeKey, installedMods, installedSuites, sFoilsMode, shipConfig.roleSpecialization, shipConfig.roleMastery])
+  }, [
+    shipConfig.tier,
+    activeSizeKey,
+    installedMods,
+    installedSuites,
+    sFoilsMode,
+    shipConfig.roleSpecialization,
+    shipConfig.roleMastery,
+  ])
 
   const effectiveStats = useMemo(() => {
     return {
-      strength: shipConfig.stats.strength + (shipConfig.tierStatBoosts?.strength || 0) + (activeTypeRules?.strengthMod || 0) + shipModifiers.statDeltas.strength,
-      dexterity: shipConfig.stats.dexterity + (shipConfig.tierStatBoosts?.dexterity || 0) + (activeSizeRules.dexterityMod || 0) + (activeTypeRules?.dexterityMod || 0) + shipModifiers.statDeltas.dexterity,
-      constitution: shipConfig.stats.constitution + (shipConfig.tierStatBoosts?.constitution || 0) + (activeSizeRules.constitutionMod || 0) + (activeTypeRules?.constitutionMod || 0) + shipModifiers.statDeltas.constitution,
-      intelligence: shipConfig.stats.intelligence + (shipConfig.tierStatBoosts?.intelligence || 0) + (activeTypeRules?.intelligenceMod || 0) + shipModifiers.statDeltas.intelligence,
-      wisdom: shipConfig.stats.wisdom + (shipConfig.tierStatBoosts?.wisdom || 0) + (activeTypeRules?.wisdomMod || 0) + shipModifiers.statDeltas.wisdom,
-      charisma: shipConfig.stats.charisma + (shipConfig.tierStatBoosts?.charisma || 0) + (activeTypeRules?.charismaMod || 0) + shipModifiers.statDeltas.charisma,
+      strength:
+        shipConfig.stats.strength +
+        (shipConfig.tierStatBoosts?.strength || 0) +
+        (activeTypeRules?.strengthMod || 0) +
+        shipModifiers.statDeltas.strength,
+      dexterity:
+        shipConfig.stats.dexterity +
+        (shipConfig.tierStatBoosts?.dexterity || 0) +
+        (activeSizeRules.dexterityMod || 0) +
+        (activeTypeRules?.dexterityMod || 0) +
+        shipModifiers.statDeltas.dexterity,
+      constitution:
+        shipConfig.stats.constitution +
+        (shipConfig.tierStatBoosts?.constitution || 0) +
+        (activeSizeRules.constitutionMod || 0) +
+        (activeTypeRules?.constitutionMod || 0) +
+        shipModifiers.statDeltas.constitution,
+      intelligence:
+        shipConfig.stats.intelligence +
+        (shipConfig.tierStatBoosts?.intelligence || 0) +
+        (activeTypeRules?.intelligenceMod || 0) +
+        shipModifiers.statDeltas.intelligence,
+      wisdom:
+        shipConfig.stats.wisdom +
+        (shipConfig.tierStatBoosts?.wisdom || 0) +
+        (activeTypeRules?.wisdomMod || 0) +
+        shipModifiers.statDeltas.wisdom,
+      charisma:
+        shipConfig.stats.charisma +
+        (shipConfig.tierStatBoosts?.charisma || 0) +
+        (activeTypeRules?.charismaMod || 0) +
+        shipModifiers.statDeltas.charisma,
     }
   }, [shipConfig.stats, shipConfig.tierStatBoosts, activeSizeRules, activeTypeRules, shipModifiers.statDeltas])
 
@@ -579,8 +752,9 @@ export default function BridgeDashboard() {
 
     keys.forEach((key) => {
       let rawMod = getRawModifier(effectiveStats[key])
-      const isProficient = shipConfig.saveProficiencies?.[key] || shipModifiers.savingThrowProficiencies.has(key)
-      
+      const isProficient =
+        shipConfig.saveProficiencies?.[key] || shipModifiers.savingThrowProficiencies.has(key)
+
       if (isNimble && key !== "dexterity") {
         rawMod += halfDexMod
       }
@@ -588,16 +762,28 @@ export default function BridgeDashboard() {
       newThrows[key] = rawMod + (isProficient ? shipConfig.proficiencyBonus : 0)
     })
     return newThrows as ShipConfig["savingThrows"]
-  }, [effectiveStats, shipConfig.saveProficiencies, shipConfig.proficiencyBonus, shipModifiers.savingThrowProficiencies, activeSizeKey, shipConfig.tier])
+  }, [
+    effectiveStats,
+    shipConfig.saveProficiencies,
+    shipConfig.proficiencyBonus,
+    shipModifiers.savingThrowProficiencies,
+    activeSizeKey,
+    shipConfig.tier,
+  ])
 
   const effectiveSkills = useMemo(() => {
     const calculated: Record<string, number> = {}
     Object.entries(shipConfig.skillTiers).forEach(([skillName, tier]) => {
-      const governingStat = Object.entries(STAT_SKILLS_MAP).find(([_, skills]) => (skills as readonly string[]).includes(skillName))?.[0] as keyof ShipConfig["stats"] | undefined
+      const governingStat = Object.entries(STAT_SKILLS_MAP).find(([_, skills]) =>
+        (skills as readonly string[]).includes(skillName)
+      )?.[0] as keyof ShipConfig["stats"] | undefined
       const statScore = governingStat ? effectiveStats[governingStat] : 8
       let baseMod = getRawModifier(statScore)
 
-      if (shipConfig.roleSpecialization === "Scout" && (skillName === "scan" || skillName === "probe")) {
+      if (
+        shipConfig.roleSpecialization === "Scout" &&
+        (skillName === "scan" || skillName === "probe")
+      ) {
         baseMod += 1
       }
 
@@ -622,8 +808,9 @@ export default function BridgeDashboard() {
 
       let bonusMultiplier = 0
       if (effectiveTier === "proficient") bonusMultiplier = 1
-      else if (["expert", "mastery", "high-mastery", "grand-mastery"].includes(effectiveTier as string)) bonusMultiplier = 2
-      calculated[skillName] = baseMod + (bonusMultiplier * pb)
+      else if (["expert", "mastery", "high-mastery", "grand-mastery"].includes(effectiveTier as string))
+        bonusMultiplier = 2
+      calculated[skillName] = baseMod + bonusMultiplier * pb
     })
     return calculated
   }, [shipConfig.skillTiers, shipConfig.roleSpecialization, shipConfig.roleMastery, effectiveStats, shipConfig.proficiencyBonus, shipModifiers])
@@ -668,28 +855,27 @@ export default function BridgeDashboard() {
       isUsed: effectiveIsUsed,
       shipStatuses,
     }
-  }, [shipConfig, effectiveStats, effectiveSavingThrows, effectiveSkills, shipModifiers, systemDamageLevel, effectiveSlowedLevel, isIonized, isStalled, isStunned, effectiveIsUsed, shipStatuses])
-
-  const [transactions, setTransactions] = useState<Transaction[]>([
-    {
-      id: "tx-initial",
-      date: `Day ${currentDay}`,
-      description: "Initial Ship Account Balance & Baseline Registry",
-      amount: 2500000,
-      category: "Income",
-      type: "credit",
-    }
+  }, [
+    shipConfig,
+    effectiveStats,
+    effectiveSavingThrows,
+    effectiveSkills,
+    shipModifiers,
+    systemDamageLevel,
+    effectiveSlowedLevel,
+    isIonized,
+    isStalled,
+    isStunned,
+    effectiveIsUsed,
+    shipStatuses,
   ])
 
-  const totalMaxShields = shipConfig.maxShields + installedMods.reduce((sum, mod) => sum + ((mod as any).shieldBonus || 0), 0)
-  const totalMaxHull = shipConfig.baseHull + installedMods.reduce((sum, mod) => sum + ((mod as any).hullBonus || 0), 0)
-
-  const [shieldState, setShieldState] = useState({ 
-    current: shipConfig.maxShields, 
-    max: shipConfig.maxShields,
-    temp: 0,
-  })
-  const [hullState, setHullState] = useState({ current: shipConfig.baseHull, max: shipConfig.baseHull })
+  const totalMaxShields =
+    shipConfig.maxShields +
+    installedMods.reduce((sum, mod) => sum + ((mod as any).shieldBonus || 0), 0)
+  const totalMaxHull =
+    shipConfig.baseHull +
+    installedMods.reduce((sum, mod) => sum + ((mod as any).hullBonus || 0), 0)
 
   const totalShields = {
     current: Math.min(shieldState.current, totalMaxShields),
@@ -703,176 +889,239 @@ export default function BridgeDashboard() {
   }
 
   const setTotalShields = (
-    update: 
-      | { current: number; max: number; temp?: number } 
-      | ((prev: { current: number; max: number; temp: number }) => { current: number; max: number; temp?: number })
-  ) => {
-    queueMicrotask(() => {
-      if (typeof update === "function") {
-        setShieldState(prev => {
-          const res = update({ current: prev.current, max: totalMaxShields, temp: prev.temp })
-          return { 
-            current: res.current, 
-            max: totalMaxShields, 
-            temp: res.temp !== undefined ? res.temp : prev.temp 
-          }
+    update:
+      | { current: number; max: number; temp?: number }
+      | ((prev: { current: number; max: number; temp: number }) => {
+          current: number
+          max: number
+          temp?: number
         })
-      } else {
-        setShieldState(prev => ({ 
-          current: update.current, 
-          max: totalMaxShields, 
-          temp: update.temp !== undefined ? update.temp : prev.temp 
-        }))
+  ) => {
+    updateRoomData((prev) => {
+      const prevShield = {
+        current: prev.shieldState.current,
+        max: totalMaxShields,
+        temp: prev.shieldState.temp,
+      }
+      const res = typeof update === "function" ? update(prevShield) : update
+      return {
+        ...prev,
+        shieldState: {
+          current: Math.min(totalMaxShields, res.current),
+          max: totalMaxShields,
+          temp: res.temp !== undefined ? res.temp : prev.shieldState.temp,
+        },
       }
     })
   }
 
-  const setTotalHull = (update: { current: number; max: number } | ((prev: { current: number; max: number }) => { current: number; max: number })) => {
-    queueMicrotask(() => {
-      if (typeof update === "function") {
-        setHullState(prev => update({ current: prev.current, max: totalMaxHull }))
-      } else {
-        setHullState({ current: update.current, max: totalMaxHull })
+  const setTotalHull = (
+    update:
+      | { current: number; max: number }
+      | ((prev: { current: number; max: number }) => { current: number; max: number })
+  ) => {
+    updateRoomData((prev) => {
+      const prevHull = { current: prev.hullState.current, max: totalMaxHull }
+      const res = typeof update === "function" ? update(prevHull) : update
+      return {
+        ...prev,
+        hullState: {
+          current: Math.min(totalMaxHull, res.current),
+          max: totalMaxHull,
+        },
       }
     })
   }
-
-  const [availablePowerDice, setAvailablePowerDice] = useState<number>(shipConfig.maxPowerDice)
-
-  const [stationPools, setStationPools] = useState<Record<string, number>>({
-    engines: 1,
-    communications: 1,
-    weapons: 1,
-    sensors: 1,
-    defense: 1,
-  })
-
-  const [sharedPoolDice, setSharedPoolDice] = useState<number>(2)
-
-  const [sensorContacts, setSensorContacts] = useState<SensorContact[]>([
-    {
-      id: "1",
-      name: "Derelict Cargo Pod",
-      classification: "Debris",
-      distance: "14,200 km",
-      scanDc: 10,
-      isRevealed: false,
-      gmNotes: "Contains 2 units of scrap metal and a cracked navigation log."
-    }
-  ])
 
   const handleAddTransaction = (newTx: Omit<Transaction, "id">) => {
-    const txWithId = { ...newTx, id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}` }
-    setTransactions(prev => [txWithId, ...prev])
+    const txWithId = {
+      ...newTx,
+      id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    }
+    updateRoomData((prev) => ({
+      ...prev,
+      transactions: [txWithId, ...prev.transactions],
+    }))
   }
 
   const handleCompleteOrCancelJourney = (arrivedAtDestination?: boolean) => {
-    if (activeJourney) {
-      if (arrivedAtDestination) {
-        setCurrentLocationPlanet(activeJourney.destination)
-        setTargetDestinationPlanet("")
-      }
-    }
-    setActiveJourney(null)
+    updateRoomData((prev) => ({
+      ...prev,
+      currentLocationPlanet:
+        arrivedAtDestination && prev.activeJourney
+          ? prev.activeJourney.destination
+          : prev.currentLocationPlanet,
+      targetDestinationPlanet: arrivedAtDestination ? "" : prev.targetDestinationPlanet,
+      activeJourney: null,
+    }))
   }
 
   const handleEmergencyDropOut = (dropoutRegion: string) => {
     const deepSpaceName = `Deep Space (${dropoutRegion})`
-    setCurrentLocationPlanet(deepSpaceName)
-    setTargetDestinationPlanet("")
-    setActiveJourney(null)
+    updateRoomData((prev) => ({
+      ...prev,
+      currentLocationPlanet: deepSpaceName,
+      targetDestinationPlanet: "",
+      activeJourney: null,
+    }))
   }
 
   const handleFullShipReset = (startingDay: number, startingFunds: number) => {
-    setShipConfig({
-      name: "",
-      manufacturer: "",
-      model: "",
-      size: "Small",
-      shipType: "Freighter",
-      tier: 0,
-      proficiencyBonus: 2,
-      shipCost: 0,
-      paidAmount: 0,
-      powerCoupling: "Direct Power Coupling",
-      armorType: "Lightweight Armor",                  
-      baseHull: 40,
-      baseShields: 24,
-      maxShields: 24,
-      maxPowerDice: 4,
-      powerDieType: "d1",
-      recoveryRate: 1,
-      roleSpecialization: null,
-      roleMastery: null,
-      extraSuiteCapacity: 0,
-      tierStatBoosts: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
-      tierAsiHistory: {},
-      tierRolls: {},
-      stats: { strength: 10, dexterity: 14, constitution: 13, intelligence: 15, wisdom: 12, charisma: 8 },
-      saveProficiencies: { strength: false, dexterity: true, constitution: true, intelligence: false, wisdom: false, charisma: false },
-      skillTiers: { boost: "none", ram: "none", hide: "none", maneuver: "none", patch: "none", regulation: "none", astrogation: "none", data: "none", probe: "none", scan: "none", impress: "none", interfere: "none", menace: "none", swindle: "none" },
-      skills: { boost: 0, ram: 0, hide: 0, maneuver: 0, patch: 0, regulation: 0, astrogation: 0, data: 0, probe: 0, scan: 0, impress: 0, interfere: 0, menace: 0, swindle: 0 },
-      savingThrows: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
-    } as any)
-
-    setCurrentDay(startingDay)
-    setLastAstrogationDay(startingDay)
-    setCargoRations(60)
-    setManifest([])
-    setTacticalMovement({ spentFeet: 0 })
-    setActiveJourney(null)
-    setCurrentLocationPlanet("Corellia")
-    setTargetDestinationPlanet("")
-    setSystemDamageLevel(0)
-    setShipStatuses([])
-    setIsUsedCondition(false)
-    setSpentHullDice(0)
-    setSpentShieldDice(0)
-    setPinpointStrikesUsed(0)
-    setVersatileSnubfighterUsed(0)
-    setEvasiveManeuversUsed(0)
-    setVersatileStarshipUsed(0)
-    setAdaptiveArmorUsed(0)
-    setBestShipInVerseUsed(false)
-    setEngineSpeedBoostTurns(0)
-    setShieldBoostTurns(0)
-    setBoostActionUsed(false)
-    setSelectedBoostType(null)
-    setBoostFeedback(null)
-    setStandingByUsed(false)
-    setLeafOnTheWindUsed(false)
-    setSFoilsMode("unlocked")
-    setCurrentFuel(maxFuel)
-    setHullState({ current: 40, max: 40 })
-    setShieldState({ current: 24, max: 24, temp: 0 })
-    setAvailablePowerDice(4)
-    setSharedPoolDice(2)
-    setStationPools({ engines: 1, communications: 1, weapons: 1, sensors: 1, defense: 1 })
-
-    setOrdnanceList(
-      STARSHIP_AMMUNITION.map((ammo) => ({
+    updateRoomData((prev) => ({
+      ...prev,
+      shipConfig: {
+        name: "",
+        manufacturer: "",
+        model: "",
+        size: "Small",
+        shipType: "Freighter",
+        tier: 0,
+        proficiencyBonus: 2,
+        shipCost: 0,
+        paidAmount: 0,
+        powerCoupling: "Direct Power Coupling",
+        armorType: "Lightweight Armor",
+        baseHull: 40,
+        baseShields: 24,
+        maxShields: 24,
+        maxPowerDice: 4,
+        powerDieType: "d1",
+        recoveryRate: 1,
+        roleSpecialization: null,
+        roleMastery: null,
+        extraSuiteCapacity: 0,
+        tierStatBoosts: {
+          strength: 0,
+          dexterity: 0,
+          constitution: 0,
+          intelligence: 0,
+          wisdom: 0,
+          charisma: 0,
+        },
+        tierAsiHistory: {},
+        tierRolls: {},
+        stats: {
+          strength: 10,
+          dexterity: 14,
+          constitution: 13,
+          intelligence: 15,
+          wisdom: 12,
+          charisma: 8,
+        },
+        saveProficiencies: {
+          strength: false,
+          dexterity: true,
+          constitution: true,
+          intelligence: false,
+          wisdom: false,
+          charisma: false,
+        },
+        skillTiers: {
+          boost: "none",
+          ram: "none",
+          hide: "none",
+          maneuver: "none",
+          patch: "none",
+          regulation: "none",
+          astrogation: "none",
+          data: "none",
+          probe: "none",
+          scan: "none",
+          impress: "none",
+          interfere: "none",
+          menace: "none",
+          swindle: "none",
+        },
+        skills: {
+          boost: 0,
+          ram: 0,
+          hide: 0,
+          maneuver: 0,
+          patch: 0,
+          regulation: 0,
+          astrogation: 0,
+          data: 0,
+          probe: 0,
+          scan: 0,
+          impress: 0,
+          interfere: 0,
+          menace: 0,
+          swindle: 0,
+        },
+        savingThrows: {
+          strength: 0,
+          dexterity: 0,
+          constitution: 0,
+          intelligence: 0,
+          wisdom: 0,
+          charisma: 0,
+        },
+      } as any,
+      currentDay: startingDay,
+      lastAstrogationDay: startingDay,
+      cargoRations: 60,
+      manifest: [],
+      tacticalMovement: { spentFeet: 0 },
+      activeJourney: null,
+      currentLocationPlanet: "Corellia",
+      targetDestinationPlanet: "",
+      systemDamageLevel: 0,
+      shipStatuses: [],
+      isUsedCondition: false,
+      spentHullDice: 0,
+      spentShieldDice: 0,
+      pinpointStrikesUsed: 0,
+      versatileSnubfighterUsed: 0,
+      evasiveManeuversUsed: 0,
+      versatileStarshipUsed: 0,
+      adaptiveArmorUsed: 0,
+      bestShipInVerseUsed: false,
+      engineSpeedBoostTurns: 0,
+      shieldBoostTurns: 0,
+      boostActionUsed: false,
+      selectedBoostType: null,
+      boostFeedback: null,
+      standingByUsed: false,
+      leafOnTheWindUsed: false,
+      sFoilsMode: "unlocked",
+      currentFuel: prev.maxFuel,
+      hullState: { current: 40, max: 40 },
+      shieldState: { current: 24, max: 24, temp: 0 },
+      availablePowerDice: 4,
+      sharedPoolDice: 2,
+      stationPools: { engines: 1, communications: 1, weapons: 1, sensors: 1, defense: 1 },
+      ordnanceList: STARSHIP_AMMUNITION.map((ammo) => ({
         id: ammo.id,
         name: ammo.name,
         category: ammo.launcherFamily,
-        currentReserve: ammo.name.toLowerCase().includes("concussion missile") ? 6 : ammo.name.toLowerCase().includes("proton torpedo") ? 4 : 0,
+        currentReserve: ammo.name.toLowerCase().includes("concussion missile")
+          ? 6
+          : ammo.name.toLowerCase().includes("proton torpedo")
+          ? 4
+          : 0,
         costPerUnit: ammo.cost,
         damage: ammo.standardDamage,
         damageType: ammo.damageType,
         requisitionQty: 0,
-      }))
-    )
-
-    setTransactions([
-      { id: `tx-reset-${Date.now()}`, date: `Day ${startingDay}`, description: "Initial Ship Account Balance", amount: startingFunds, category: "Income", type: "credit" }
-    ])
-
-    setInstalledMods([])
-    setInstalledSuites([])
+      })),
+      transactions: [
+        {
+          id: `tx-reset-${Date.now()}`,
+          date: `Day ${startingDay}`,
+          description: "Initial Ship Account Balance",
+          amount: startingFunds,
+          category: "Income",
+          type: "credit",
+        },
+      ],
+      installedMods: [],
+      installedSuites: [],
+    }))
   }
 
   const handleInstallMod = (mod: Modification): boolean => {
     if (mod.name === "Fixed Hardpoint") {
-      let maxHardpoints = 2 
+      let maxHardpoints = 2
       switch (shipConfig.size.toLowerCase()) {
         case "tiny":
         case "small":
@@ -892,150 +1141,234 @@ export default function BridgeDashboard() {
           maxHardpoints = 2
       }
 
-      const consumedHardpoints = installedMods.filter(m => m.name === "Fixed Hardpoint").length
+      const consumedHardpoints = installedMods.filter((m) => m.name === "Fixed Hardpoint").length
 
       if (consumedHardpoints >= maxHardpoints) {
-        alert(`Installation Failed: This ${shipConfig.size} frame supports a maximum of ${maxHardpoints} Fixed Hardpoints (${consumedHardpoints}/${maxHardpoints} in use).`)
+        alert(
+          `Installation Failed: This ${shipConfig.size} frame supports a maximum of ${maxHardpoints} Fixed Hardpoints (${consumedHardpoints}/${maxHardpoints} in use).`
+        )
         return false
       }
     }
 
-    setInstalledMods(prev => [...prev, mod])
-    
-    handleAddTransaction({
-      date: `Day ${currentDay}`,
-      description: `Installed Modification: ${mod.name} (${mod.station})`,
-      category: "Refit",
-      amount: mod.cost,
-      type: "debit",
-    })
+    updateRoomData((prev) => ({
+      ...prev,
+      installedMods: [...prev.installedMods, mod],
+      transactions: [
+        {
+          id: `tx-${Date.now()}`,
+          date: `Day ${prev.currentDay}`,
+          description: `Installed Modification: ${mod.name} (${mod.station})`,
+          category: "Refit",
+          amount: mod.cost,
+          type: "debit",
+        },
+        ...prev.transactions,
+      ],
+    }))
 
     return true
   }
 
   const handleRemoveMod = (instanceId: string) => {
-    const targetMod = installedMods.find(m => m.instanceId === instanceId)
-    setInstalledMods(prev => {
+    const targetMod = installedMods.find((m) => m.instanceId === instanceId)
+    updateRoomData((prev) => {
       const toRemove = new Set<string>([instanceId])
       let changed = true
       while (changed) {
         changed = false
-        for (const m of prev) {
-          if (m.instanceId && m.mountedOnInstanceId && toRemove.has(m.mountedOnInstanceId) && !toRemove.has(m.instanceId)) {
+        for (const m of prev.installedMods) {
+          if (
+            m.instanceId &&
+            m.mountedOnInstanceId &&
+            toRemove.has(m.mountedOnInstanceId) &&
+            !toRemove.has(m.instanceId)
+          ) {
             toRemove.add(m.instanceId)
             changed = true
           }
         }
       }
-      return prev.filter(m => !m.instanceId || !toRemove.has(m.instanceId))
-    })
 
-    if (targetMod) {
-      handleAddTransaction({
-        date: `Day ${currentDay}`,
-        description: `Refund / Uninstalled Modification: ${targetMod.name}`,
-        category: "Refit",
-        amount: Math.round(targetMod.cost * 0.5),
-        type: "credit",
-      })
-    }
+      const nextMods = prev.installedMods.filter(
+        (m) => !m.instanceId || !toRemove.has(m.instanceId)
+      )
+      const nextTx = targetMod
+        ? [
+            {
+              id: `tx-${Date.now()}`,
+              date: `Day ${prev.currentDay}`,
+              description: `Refund / Uninstalled Modification: ${targetMod.name}`,
+              category: "Refit",
+              amount: Math.round(targetMod.cost * 0.5),
+              type: "credit" as const,
+            },
+            ...prev.transactions,
+          ]
+        : prev.transactions
+
+      return {
+        ...prev,
+        installedMods: nextMods,
+        transactions: nextTx,
+      }
+    })
   }
 
   const handleUpdateSuites = (newSuites: InstalledSuite[]) => {
-    if (newSuites.length > installedSuites.length) {
-      const addedSuite = newSuites.find(s => !installedSuites.some(existing => existing.id === s.id))
-      if (addedSuite && addedSuite.cost > 0) {
-        handleAddTransaction({
-          date: `Day ${currentDay}`,
-          description: `Installed Vessel Suite: ${addedSuite.name}`,
-          category: "Refit",
-          amount: addedSuite.cost,
-          type: "debit",
-        })
-      } else if (addedSuite && addedSuite.cost === 0) {
-        handleAddTransaction({
-          date: `Day ${currentDay}`,
-          description: `Installed Vessel Suite: ${addedSuite.name} (Free Role Allocation Claim)`,
-          category: "Refit",
-          amount: 0,
-          type: "credit",
-        })
+    updateRoomData((prev) => {
+      let newTransactions = prev.transactions
+      if (newSuites.length > prev.installedSuites.length) {
+        const addedSuite = newSuites.find((s) => !prev.installedSuites.some((e) => e.id === s.id))
+        if (addedSuite && addedSuite.cost > 0) {
+          newTransactions = [
+            {
+              id: `tx-${Date.now()}`,
+              date: `Day ${prev.currentDay}`,
+              description: `Installed Vessel Suite: ${addedSuite.name}`,
+              category: "Refit",
+              amount: addedSuite.cost,
+              type: "debit",
+            },
+            ...prev.transactions,
+          ]
+        } else if (addedSuite && addedSuite.cost === 0) {
+          newTransactions = [
+            {
+              id: `tx-${Date.now()}`,
+              date: `Day ${prev.currentDay}`,
+              description: `Installed Vessel Suite: ${addedSuite.name} (Free Role Allocation Claim)`,
+              category: "Refit",
+              amount: 0,
+              type: "credit",
+            },
+            ...prev.transactions,
+          ]
+        }
       }
-    }
 
-    setInstalledSuites(newSuites)
+      return {
+        ...prev,
+        installedSuites: newSuites,
+        transactions: newTransactions,
+      }
+    })
   }
 
   const handleSaveShipConfig = (newConfig: ShipConfig) => {
-    setShipConfig(newConfig)
-    setHullState(prev => ({ current: Math.min(prev.current, newConfig.baseHull), max: newConfig.baseHull }))
-    setShieldState(prev => ({ current: Math.min(prev.current, newConfig.maxShields), max: newConfig.maxShields, temp: prev.temp }))
-    setAvailablePowerDice(prev => Math.min(prev, newConfig.maxPowerDice))
-    setPendingTier(null)
+    updateRoomData((prev) => ({
+      ...prev,
+      shipConfig: newConfig,
+      hullState: {
+        current: Math.min(prev.hullState.current, newConfig.baseHull),
+        max: newConfig.baseHull,
+      },
+      shieldState: {
+        current: Math.min(prev.shieldState.current, newConfig.maxShields),
+        max: newConfig.maxShields,
+        temp: prev.shieldState.temp,
+      },
+      availablePowerDice: Math.min(prev.availablePowerDice, newConfig.maxPowerDice),
+      pendingTier: null,
+    }))
   }
 
   const handleAddContact = (newContact: Omit<SensorContact, "id">) => {
     const contactWithId = { ...newContact, id: Date.now().toString() }
-    setSensorContacts(prev => [...prev, contactWithId])
+    updateRoomData((prev) => ({
+      ...prev,
+      sensorContacts: [...prev.sensorContacts, contactWithId],
+    }))
   }
 
   const handleRemoveContact = (id: string) => {
-    setSensorContacts(prev => prev.filter(c => c.id !== id))
+    updateRoomData((prev) => ({
+      ...prev,
+      sensorContacts: prev.sensorContacts.filter((c) => c.id !== id),
+    }))
   }
 
   const handleToggleReveal = (id: string) => {
-    setSensorContacts(prev => prev.map(c => c.id === id ? { ...c, isRevealed: !c.isRevealed } : c))
+    updateRoomData((prev) => ({
+      ...prev,
+      sensorContacts: prev.sensorContacts.map((c) =>
+        c.id === id ? { ...c, isRevealed: !c.isRevealed } : c
+      ),
+    }))
   }
 
   const handleUpdateContact = (id: string, updates: Partial<SensorContact>) => {
-    setSensorContacts(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))
+    updateRoomData((prev) => ({
+      ...prev,
+      sensorContacts: prev.sensorContacts.map((c) =>
+        c.id === id ? { ...c, ...updates } : c
+      ),
+    }))
   }
 
   // --- CYCLE REACTOR (ROUND RESET + MOVEMENT/TURN RESETS) ---
   const handleCycleReactor = (generatedAmount?: number) => {
-    const amountToAdd = generatedAmount !== undefined ? generatedAmount : shipConfig.recoveryRate
-    if (availablePowerDice < shipConfig.maxPowerDice) {
-      setAvailablePowerDice(prev => Math.min(shipConfig.maxPowerDice, prev + amountToAdd))
-    }
+    updateRoomData((prev) => {
+      const amountToAdd =
+        generatedAmount !== undefined ? generatedAmount : prev.shipConfig.recoveryRate
+      const nextPower = Math.min(
+        prev.shipConfig.maxPowerDice,
+        prev.availablePowerDice + amountToAdd
+      )
 
-    // Reset combat actions and split movement
-    setManifest(prev => prev.map(m => ({ ...m, hasTakenTurnThisRound: false })))
-    setTacticalMovement({ spentFeet: 0 })
+      const nextShieldTurns = Math.max(0, prev.shieldBoostTurns - 1)
+      const nextTempShields =
+        prev.shieldBoostTurns === 1 && nextShieldTurns === 0 ? 0 : prev.shieldState.temp
 
-    setBoostActionUsed(false)
-    setSelectedBoostType(null)
-    setBoostFeedback(null)
-
-    setEngineSpeedBoostTurns((prev) => Math.max(0, prev - 1))
-
-    setShieldBoostTurns((prev) => {
-      const next = Math.max(0, prev - 1)
-      if (prev === 1 && next === 0) {
-        setTotalShields((s) => ({ ...s, temp: 0 }))
+      return {
+        ...prev,
+        availablePowerDice: nextPower,
+        manifest: prev.manifest.map((m) => ({ ...m, hasTakenTurnThisRound: false })),
+        tacticalMovement: { spentFeet: 0 },
+        boostActionUsed: false,
+        selectedBoostType: null,
+        boostFeedback: null,
+        engineSpeedBoostTurns: Math.max(0, prev.engineSpeedBoostTurns - 1),
+        shieldBoostTurns: nextShieldTurns,
+        shieldState: {
+          ...prev.shieldState,
+          temp: nextTempShields,
+        },
       }
-      return next
     })
   }
 
-  const handleConsumePowerDice = (amount: number = 1) => {
+  const handleConsumePowerDice = (amount: number = 1): boolean => {
     if (availablePowerDice >= amount) {
-      setAvailablePowerDice(prev => Math.max(0, prev - amount))
+      updateRoomData((prev) => ({
+        ...prev,
+        availablePowerDice: Math.max(0, prev.availablePowerDice - amount),
+      }))
       return true
     }
     return false
   }
 
-  const handleConsumeStationPower = (stationKey: string, amount: number = 1) => {
+  const handleConsumeStationPower = (stationKey: string, amount: number = 1): boolean => {
     const coupling = shipConfig?.powerCoupling ?? "Direct Power Coupling"
     const isHubAndSpoke = coupling === "Hub and Spoke Coupling"
 
     if ((stationPools[stationKey] ?? 0) >= amount) {
-      setStationPools(prev => ({ ...prev, [stationKey]: Math.max(0, prev[stationKey] - amount) }))
+      updateRoomData((prev) => ({
+        ...prev,
+        stationPools: {
+          ...prev.stationPools,
+          [stationKey]: Math.max(0, (prev.stationPools[stationKey] ?? 0) - amount),
+        },
+      }))
       return true
     }
 
     if (isHubAndSpoke && sharedPoolDice >= amount) {
-      setSharedPoolDice(prev => Math.max(0, prev - amount))
+      updateRoomData((prev) => ({
+        ...prev,
+        sharedPoolDice: Math.max(0, prev.sharedPoolDice - amount),
+      }))
       return true
     }
 
@@ -1043,49 +1376,83 @@ export default function BridgeDashboard() {
   }
 
   const handleApplyFullRecharge = (payload: RechargeResultPayload) => {
-    setTotalHull({ current: Math.min(totalMaxHull, payload.newHull), max: totalMaxHull })
-    setTotalShields({ current: totalMaxShields, max: totalMaxShields, temp: 0 })
-    setSpentHullDice(payload.newHullDiceSpent)
-    setSpentShieldDice(payload.newShieldDiceSpent)
-
     const coupling = shipConfig?.powerCoupling ?? "Direct Power Coupling"
-    const isHubAndSpoke = coupling.toLowerCase().includes("hub") || coupling.toLowerCase().includes("spoke")
+    const isHubAndSpoke =
+      coupling.toLowerCase().includes("hub") || coupling.toLowerCase().includes("spoke")
     const maxSharedPool = isHubAndSpoke ? 2 : shipConfig.maxPowerDice
 
-    setAvailablePowerDice(shipConfig.maxPowerDice)
-    if (isHubAndSpoke) {
-      setSharedPoolDice(maxSharedPool)
-    }
-
-    setPinpointStrikesUsed(0)
-    setEngineSpeedBoostTurns(0)
-    setShieldBoostTurns(0)
-    setBoostActionUsed(false)
-    setSelectedBoostType(null)
-    setBoostFeedback(null)
-
-    setStandingByUsed(false)
-    setLeafOnTheWindUsed(false)
-    setBestShipInVerseUsed(false)
-
-    handleAddTransaction({
-      date: `Day ${currentDay}`,
-      description: `Ship Recharge Conducted (Hull: ${payload.newHull}/${totalMaxHull} HP, Shields: 100%, Systems Refreshed, Standing By Surge Restored)`,
-      category: "Operations",
-      amount: 0,
-      type: "credit",
-    })
+    updateRoomData((prev) => ({
+      ...prev,
+      hullState: {
+        current: Math.min(totalMaxHull, payload.newHull),
+        max: totalMaxHull,
+      },
+      shieldState: {
+        current: totalMaxShields,
+        max: totalMaxShields,
+        temp: 0,
+      },
+      spentHullDice: payload.newHullDiceSpent,
+      spentShieldDice: payload.newShieldDiceSpent,
+      availablePowerDice: prev.shipConfig.maxPowerDice,
+      sharedPoolDice: isHubAndSpoke ? maxSharedPool : prev.sharedPoolDice,
+      pinpointStrikesUsed: 0,
+      engineSpeedBoostTurns: 0,
+      shieldBoostTurns: 0,
+      boostActionUsed: false,
+      selectedBoostType: null,
+      boostFeedback: null,
+      standingByUsed: false,
+      leafOnTheWindUsed: false,
+      bestShipInVerseUsed: false,
+      transactions: [
+        {
+          id: `tx-${Date.now()}`,
+          date: `Day ${prev.currentDay}`,
+          description: `Ship Recharge Conducted (Hull: ${payload.newHull}/${totalMaxHull} HP, Shields: 100%, Systems Refreshed, Standing By Surge Restored)`,
+          category: "Operations",
+          amount: 0,
+          type: "credit",
+        },
+        ...prev.transactions,
+      ],
+    }))
   }
 
-  const damageReduction = shipConfig.armorType === "Reinforced Armor" ? 6 : shipConfig.armorType === "Deflection Armor" ? 3 : 0
+  const damageReduction =
+    shipConfig.armorType === "Reinforced Armor"
+      ? 6
+      : shipConfig.armorType === "Deflection Armor"
+      ? 3
+      : 0
 
   return (
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-3 sm:p-4 lg:p-6">
+      {/* Top Bar with Live Room Code Linker */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-neutral-950/80 border border-neutral-800 p-2.5 rounded-lg shadow-sm">
+        <div className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_#06b6d4] animate-pulse" />
+          <span className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-300">
+            TRANSMISSION GRID // SW5E NET
+          </span>
+        </div>
+        <RoomSelector
+          currentRoom={roomCode}
+          onJoinRoom={(newCode) => setRoomCode(newCode)}
+          isConnected={isConnected}
+        />
+      </div>
+
       <HeaderBar
-        shipName={shipConfig.name} 
-        shipModel={shipConfig.model || (shipConfig as any).shipClass || (shipConfig as any).class || (shipConfig as any).type}
-        currentDay={currentDay} 
-        activeJourney={activeJourney} 
+        shipName={shipConfig.name}
+        shipModel={
+          shipConfig.model ||
+          (shipConfig as any).shipClass ||
+          (shipConfig as any).class ||
+          (shipConfig as any).type
+        }
+        currentDay={currentDay}
+        activeJourney={activeJourney}
         totalShields={totalShields}
         totalHull={totalHull}
         systemDamageLevel={systemDamageLevel}
@@ -1100,7 +1467,6 @@ export default function BridgeDashboard() {
           manifest={manifest}
         />
         <main className="min-w-0 flex-1 relative">
-          
           {/* LEVEL 6 EMERGENCY BLACKOUT OVERLAY */}
           {isLevel6Blackout && active !== "GM Station" ? (
             <div className="flex min-h-[500px] flex-col items-center justify-center gap-4 rounded-md border-2 border-red-600 bg-black/95 p-6 text-center font-mono shadow-[0_0_50px_rgba(239,68,68,0.4)] animate-pulse">
@@ -1109,7 +1475,7 @@ export default function BridgeDashboard() {
                 🚨 CATASTROPHIC SYSTEM FAILURE // ALL PRIMARY SYSTEMS OFFLINE
               </h2>
               <p className="max-w-md text-xs tracking-wider text-red-200 leading-relaxed">
-                Total blackout condition. Auxiliary power grid severed. All stations are disabled. 
+                Total blackout condition. Auxiliary power grid severed. All stations are disabled.
                 Vessel is inoperable. Abandon ship protocol engaged.
               </p>
 
@@ -1123,7 +1489,9 @@ export default function BridgeDashboard() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSystemDamageLevel(5)}
+                  onClick={() =>
+                    updateRoomData((prev) => ({ ...prev, systemDamageLevel: 5 }))
+                  }
                   className="px-4 py-2.5 rounded border border-red-500 bg-red-500/20 text-xs font-bold text-red-300 hover:bg-red-500/30 uppercase tracking-widest cursor-pointer flex items-center justify-center gap-2"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
@@ -1132,13 +1500,15 @@ export default function BridgeDashboard() {
               </div>
             </div>
           ) : active === "Ship Setup" ? (
-            <ShipSetup 
+            <ShipSetup
               initialConfig={shipConfig}
               currentDay={currentDay}
               onSaveConfig={handleSaveShipConfig}
               onFullReset={handleFullShipReset}
               externalPendingTier={pendingTier}
-              onClearPendingTier={() => setPendingTier(null)}
+              onClearPendingTier={() =>
+                updateRoomData((prev) => ({ ...prev, pendingTier: null }))
+              }
             />
           ) : active === "Crew" ? (
             <CrewStation
@@ -1153,7 +1523,7 @@ export default function BridgeDashboard() {
               installedMods={installedMods}
             />
           ) : active === "Weapons" ? (
-            <WeaponsStation 
+            <WeaponsStation
               availablePowerDice={stationPools["weapons"] ?? availablePowerDice}
               maxPowerDice={shipConfig.maxPowerDice}
               powerDieType={shipConfig.powerDieType}
@@ -1162,19 +1532,45 @@ export default function BridgeDashboard() {
               installedMods={installedMods}
               onRemoveMod={handleRemoveMod}
               stationPools={stationPools}
-              onUpdateStationPools={setStationPools}
+              onUpdateStationPools={(newPools) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  stationPools:
+                    typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                }))
+              }
               sharedPoolDice={sharedPoolDice}
-              onUpdateSharedPool={setSharedPoolDice}
+              onUpdateSharedPool={(newPool) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  sharedPoolDice:
+                    typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                }))
+              }
               standingByUsed={standingByUsed}
-              onUseStandingBy={() => setStandingByUsed(true)}
+              onUseStandingBy={() =>
+                updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+              }
               leafOnTheWindUsed={leafOnTheWindUsed}
-              onUseLeafOnTheWind={() => setLeafOnTheWindUsed(true)}
+              onUseLeafOnTheWind={() =>
+                updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+              }
               versatileTransportUsed={versatileStarshipUsed}
-              onUpdateVersatileTransportUsed={setVersatileStarshipUsed}
+              onUpdateVersatileTransportUsed={(val) =>
+                updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
+              }
               bestShipInVerseUsed={bestShipInVerseUsed}
-              onUpdateBestShipInVerseUsed={setBestShipInVerseUsed}
+              onUpdateBestShipInVerseUsed={(val) =>
+                updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
+              }
               ordnanceList={ordnanceList}
-              onUpdateOrdnanceList={setOrdnanceList}
+              onUpdateOrdnanceList={(newList) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  ordnanceList:
+                    typeof newList === "function" ? newList(prev.ordnanceList) : newList,
+                }))
+              }
               sFoilsMode={sFoilsMode}
               systemDamageLevel={systemDamageLevel}
               shipStatuses={shipStatuses}
@@ -1183,7 +1579,7 @@ export default function BridgeDashboard() {
               onToggleTurn={handleToggleTurnTaken}
             />
           ) : active === "Sensors" ? (
-            <SensorsStation 
+            <SensorsStation
               availablePowerDice={stationPools["sensors"] ?? availablePowerDice}
               maxPowerDice={shipConfig.maxPowerDice}
               powerDieType={shipConfig.powerDieType}
@@ -1197,17 +1593,37 @@ export default function BridgeDashboard() {
               installedMods={installedMods}
               onRemoveMod={handleRemoveMod}
               stationPools={stationPools}
-              onUpdateStationPools={setStationPools}
+              onUpdateStationPools={(newPools) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  stationPools:
+                    typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                }))
+              }
               sharedPoolDice={sharedPoolDice}
-              onUpdateSharedPool={setSharedPoolDice}
+              onUpdateSharedPool={(newPool) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  sharedPoolDice:
+                    typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                }))
+              }
               standingByUsed={standingByUsed}
-              onUseStandingBy={() => setStandingByUsed(true)}
+              onUseStandingBy={() =>
+                updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+              }
               leafOnTheWindUsed={leafOnTheWindUsed}
-              onUseLeafOnTheWind={() => setLeafOnTheWindUsed(true)}
+              onUseLeafOnTheWind={() =>
+                updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+              }
               versatileTransportUsed={versatileStarshipUsed}
-              onUpdateVersatileTransportUsed={setVersatileStarshipUsed}
+              onUpdateVersatileTransportUsed={(val) =>
+                updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
+              }
               bestShipInVerseUsed={bestShipInVerseUsed}
-              onUpdateBestShipInVerseUsed={setBestShipInVerseUsed}
+              onUpdateBestShipInVerseUsed={(val) =>
+                updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
+              }
               onRemoveContact={handleRemoveContact}
               systemDamageLevel={systemDamageLevel}
               isBlinded={isBlinded}
@@ -1216,7 +1632,7 @@ export default function BridgeDashboard() {
               onToggleTurn={handleToggleTurnTaken}
             />
           ) : active === "Defense" ? (
-            <DefenseStation 
+            <DefenseStation
               availablePowerDice={stationPools["defense"] ?? availablePowerDice}
               maxPowerDice={shipConfig.maxPowerDice}
               powerDieType={shipConfig.powerDieType}
@@ -1226,22 +1642,42 @@ export default function BridgeDashboard() {
               onShieldChange={(current, max, temp) => setTotalShields({ current, max, temp })}
               shipConfig={effectiveShipConfig}
               spentHullDice={spentHullDice}
-              onSpentHullDiceChange={setSpentHullDice}
+              onSpentHullDiceChange={(val) =>
+                updateRoomData((prev) => ({ ...prev, spentHullDice: val }))
+              }
               spentShieldDice={spentShieldDice}
-              onSpentShieldDiceChange={setSpentShieldDice}
+              onSpentShieldDiceChange={(val) =>
+                updateRoomData((prev) => ({ ...prev, spentShieldDice: val }))
+              }
               installedMods={installedMods}
               onRemoveMod={handleRemoveMod}
               stationPools={stationPools}
-              onUpdateStationPools={setStationPools}
+              onUpdateStationPools={(newPools) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  stationPools:
+                    typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                }))
+              }
               sharedPoolDice={sharedPoolDice}
-              onUpdateSharedPool={setSharedPoolDice}
+              onUpdateSharedPool={(newPool) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  sharedPoolDice:
+                    typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                }))
+              }
               currentShields={totalShields.current}
               maxShields={totalShields.max}
               tempShields={totalShields.temp}
               standingByUsed={standingByUsed}
-              onUseStandingBy={() => setStandingByUsed(true)}
+              onUseStandingBy={() =>
+                updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+              }
               systemDamageLevel={systemDamageLevel}
-              onUpdateSystemDamageLevel={setSystemDamageLevel}
+              onUpdateSystemDamageLevel={(lvl) =>
+                updateRoomData((prev) => ({ ...prev, systemDamageLevel: lvl }))
+              }
               statuses={shipStatuses}
               onAddStatus={handleAddStatus}
               onRemoveStatus={handleRemoveStatus}
@@ -1250,7 +1686,7 @@ export default function BridgeDashboard() {
               onToggleTurn={handleToggleTurnTaken}
             />
           ) : active === "Engineering" ? (
-            <EngineeringStation 
+            <EngineeringStation
               maxPowerDice={shipConfig.maxPowerDice}
               availablePowerDice={availablePowerDice}
               powerDieType={shipConfig.powerDieType}
@@ -1263,23 +1699,38 @@ export default function BridgeDashboard() {
               shieldTemp={totalShields.temp}
               onShieldChange={(current, max, temp) => setTotalShields({ current, max, temp })}
               spentShieldDice={spentShieldDice}
-              onSpentShieldDiceChange={setSpentShieldDice}
+              onSpentShieldDiceChange={(val) =>
+                updateRoomData((prev) => ({ ...prev, spentShieldDice: val }))
+              }
               spentHullDice={spentHullDice}
-              onSpentHullDiceChange={setSpentHullDice}
-              onBoostSpeed={() => setEngineSpeedBoostTurns(2)}
+              onSpentHullDiceChange={(val) =>
+                updateRoomData((prev) => ({ ...prev, spentHullDice: val }))
+              }
+              onBoostSpeed={() =>
+                updateRoomData((prev) => ({ ...prev, engineSpeedBoostTurns: 2 }))
+              }
               onBoostShields={(rolledTemp) => {
-                setShieldBoostTurns(2)
-                setTotalShields((prev) => ({
+                updateRoomData((prev) => ({
                   ...prev,
-                  temp: (prev.temp || 0) + rolledTemp,
+                  shieldBoostTurns: 2,
+                  shieldState: {
+                    ...prev.shieldState,
+                    temp: (prev.shieldState.temp || 0) + rolledTemp,
+                  },
                 }))
               }}
               boostActionUsed={boostActionUsed}
-              onBoostActionUsedChange={setBoostActionUsed}
+              onBoostActionUsedChange={(val) =>
+                updateRoomData((prev) => ({ ...prev, boostActionUsed: val }))
+              }
               selectedBoostType={selectedBoostType}
-              onSelectedBoostTypeChange={setSelectedBoostType}
+              onSelectedBoostTypeChange={(val) =>
+                updateRoomData((prev) => ({ ...prev, selectedBoostType: val }))
+              }
               boostFeedback={boostFeedback}
-              onBoostFeedbackChange={setBoostFeedback}
+              onBoostFeedbackChange={(val) =>
+                updateRoomData((prev) => ({ ...prev, boostFeedback: val }))
+              }
               engineBoostTurnsRemaining={engineSpeedBoostTurns}
               shieldBoostTurnsRemaining={shieldBoostTurns}
               onPatchHull={(amount) => {
@@ -1297,23 +1748,43 @@ export default function BridgeDashboard() {
               installedMods={installedMods}
               onRemoveMod={handleRemoveMod}
               stationPools={stationPools}
-              onUpdateStationPools={setStationPools}
+              onUpdateStationPools={(newPools) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  stationPools:
+                    typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                }))
+              }
               sharedPoolDice={sharedPoolDice}
-              onUpdateSharedPool={setSharedPoolDice}
+              onUpdateSharedPool={(newPool) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  sharedPoolDice:
+                    typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                }))
+              }
               standingByUsed={standingByUsed}
-              onUseStandingBy={() => setStandingByUsed(true)}
+              onUseStandingBy={() =>
+                updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+              }
               leafOnTheWindUsed={leafOnTheWindUsed}
-              onUseLeafOnTheWind={() => setLeafOnTheWindUsed(true)}
+              onUseLeafOnTheWind={() =>
+                updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+              }
               versatileTransportUsed={versatileStarshipUsed}
-              onUpdateVersatileTransportUsed={setVersatileStarshipUsed}
+              onUpdateVersatileTransportUsed={(val) =>
+                updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
+              }
               bestShipInVerseUsed={bestShipInVerseUsed}
-              onUpdateBestShipInVerseUsed={setBestShipInVerseUsed}
+              onUpdateBestShipInVerseUsed={(val) =>
+                updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
+              }
               manifest={manifest}
               onAssignCrew={handleAssignLocation}
               onToggleTurn={handleToggleTurnTaken}
             />
           ) : active === "Ship Modifications" ? (
-            <ShipModifications 
+            <ShipModifications
               installedMods={installedMods}
               installedSuites={installedSuites}
               onInstallMod={handleInstallMod}
@@ -1323,17 +1794,25 @@ export default function BridgeDashboard() {
               maxMods={effectiveShipConfig.modSlots}
             />
           ) : active === "Cargo" ? (
-            <CargoStation 
+            <CargoStation
               installedMods={installedMods}
-              installedSuites={installedSuites} 
+              installedSuites={installedSuites}
               maxCapacityTons={effectiveShipConfig.cargoCapacity}
               cargoRations={cargoRations}
-              onUpdateRations={setCargoRations}
+              onUpdateRations={(newRations) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  cargoRations:
+                    typeof newRations === "function"
+                      ? newRations(prev.cargoRations)
+                      : newRations,
+                }))
+              }
               manifest={manifest}
               currentDay={currentDay}
             />
           ) : active === "Communications" ? (
-            <CommunicationsStation 
+            <CommunicationsStation
               availablePowerDice={stationPools["communications"] ?? availablePowerDice}
               maxPowerDice={shipConfig.maxPowerDice}
               powerDieType={shipConfig.powerDieType}
@@ -1346,17 +1825,37 @@ export default function BridgeDashboard() {
               installedMods={installedMods}
               onRemoveMod={handleRemoveMod}
               stationPools={stationPools}
-              onUpdateStationPools={setStationPools}
+              onUpdateStationPools={(newPools) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  stationPools:
+                    typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                }))
+              }
               sharedPoolDice={sharedPoolDice}
-              onUpdateSharedPool={setSharedPoolDice}
+              onUpdateSharedPool={(newPool) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  sharedPoolDice:
+                    typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                }))
+              }
               standingByUsed={standingByUsed}
-              onUseStandingBy={() => setStandingByUsed(true)}
+              onUseStandingBy={() =>
+                updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+              }
               leafOnTheWindUsed={leafOnTheWindUsed}
-              onUseLeafOnTheWind={() => setLeafOnTheWindUsed(true)}
+              onUseLeafOnTheWind={() =>
+                updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+              }
               versatileTransportUsed={versatileStarshipUsed}
-              onUpdateVersatileTransportUsed={setVersatileStarshipUsed}
+              onUpdateVersatileTransportUsed={(val) =>
+                updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
+              }
               bestShipInVerseUsed={bestShipInVerseUsed}
-              onUpdateBestShipInVerseUsed={setBestShipInVerseUsed}
+              onUpdateBestShipInVerseUsed={(val) =>
+                updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
+              }
               systemDamageLevel={systemDamageLevel}
               isDisabled={isDisabled}
               manifest={manifest}
@@ -1364,57 +1863,70 @@ export default function BridgeDashboard() {
               onToggleTurn={handleToggleTurnTaken}
             />
           ) : active === "Finance" ? (
-            <FinanceStation 
+            <FinanceStation
               externalShipTier={shipConfig.tier}
               onUpgradePurchased={(newTier) => {
-                setPendingTier(newTier)
+                updateRoomData((prev) => ({ ...prev, pendingTier: newTier }))
                 setActive("Ship Setup")
               }}
               onUpdateTier={(newTier) => {
-                setShipConfig((prev) => ({
+                updateRoomData((prev) => ({
                   ...prev,
-                  tier: newTier,
+                  shipConfig: {
+                    ...prev.shipConfig,
+                    tier: newTier,
+                  },
                 }))
               }}
               onTierReverted={(targetTier) => {
-                setShipConfig(prev => {
-                  const updatedRolls = { ...prev.tierRolls }
-                  for (let t = prev.tier; t > targetTier; t--) {
+                updateRoomData((prev) => {
+                  const updatedRolls = { ...prev.shipConfig.tierRolls }
+                  for (let t = prev.shipConfig.tier; t > targetTier; t--) {
                     delete updatedRolls[t]
                   }
                   return {
                     ...prev,
-                    tier: targetTier,
-                    tierRolls: updatedRolls,
-                    roleSpecialization: targetTier < 2 ? null : prev.roleSpecialization,
-                    roleMastery: targetTier < 4 ? null : prev.roleMastery,
-                    extraSuiteCapacity: targetTier < 2 ? 0 : prev.extraSuiteCapacity,
+                    shipConfig: {
+                      ...prev.shipConfig,
+                      tier: targetTier,
+                      tierRolls: updatedRolls,
+                      roleSpecialization:
+                        targetTier < 2 ? null : prev.shipConfig.roleSpecialization,
+                      roleMastery: targetTier < 4 ? null : prev.shipConfig.roleMastery,
+                      extraSuiteCapacity:
+                        targetTier < 2 ? 0 : prev.shipConfig.extraSuiteCapacity,
+                    },
                   }
                 })
               }}
               onPaymentSettlement={(chartsIncluded?: boolean, ordnanceIncluded?: boolean) => {
-                setSpentHullDice(0) 
-                setCurrentFuel(maxFuel)
-                setVersatileSnubfighterUsed(0)
-                setEvasiveManeuversUsed(0)
-                setVersatileStarshipUsed(0)
-                setAdaptiveArmorUsed(0)
+                updateRoomData((prev) => {
+                  const updatedOrdnance = ordnanceIncluded
+                    ? prev.ordnanceList.map((item) => ({
+                        ...item,
+                        currentReserve: item.currentReserve + item.requisitionQty,
+                        requisitionQty: 0,
+                      }))
+                    : prev.ordnanceList
 
-                if (chartsIncluded !== false && externalPendingCharts > 0) {
-                  setLastAstrogationDay(currentDay)
-                } else if (chartsIncluded === true) {
-                  setLastAstrogationDay(currentDay)
-                }
+                  const nextLastAstrogation =
+                    (chartsIncluded !== false && externalPendingCharts > 0) ||
+                    chartsIncluded === true
+                      ? prev.currentDay
+                      : prev.lastAstrogationDay
 
-                if (ordnanceIncluded) {
-                  setOrdnanceList((prev) =>
-                    prev.map((item) => ({
-                      ...item,
-                      currentReserve: item.currentReserve + item.requisitionQty,
-                      requisitionQty: 0,
-                    }))
-                  )
-                }
+                  return {
+                    ...prev,
+                    spentHullDice: 0,
+                    currentFuel: prev.maxFuel,
+                    versatileSnubfighterUsed: 0,
+                    evasiveManeuversUsed: 0,
+                    versatileStarshipUsed: 0,
+                    adaptiveArmorUsed: 0,
+                    lastAstrogationDay: nextLastAstrogation,
+                    ordnanceList: updatedOrdnance,
+                  }
+                })
               }}
               transactions={transactions}
               onAddTransaction={handleAddTransaction}
@@ -1433,13 +1945,20 @@ export default function BridgeDashboard() {
               externalPendingCharts={externalPendingCharts}
               pendingOrdnanceCost={pendingOrdnanceCost}
               pendingOrdnanceItems={pendingOrdnanceItems}
-              onRestockRations={(qty) => setCargoRations((prev) => prev + qty)}
+              onRestockRations={(qty) =>
+                updateRoomData((prev) => ({ ...prev, cargoRations: prev.cargoRations + qty }))
+              }
             />
           ) : active === "Engines" ? (
-            <EnginesStation 
+            <EnginesStation
               currentFuel={currentFuel}
-              onFuelChange={setCurrentFuel}
-              maxFuel={effectiveShipConfig.fuelCapacity}              
+              onFuelChange={(fuel) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  currentFuel: typeof fuel === "function" ? fuel(prev.currentFuel) : fuel,
+                }))
+              }
+              maxFuel={effectiveShipConfig.fuelCapacity}
               currentDay={currentDay}
               onUpdateDay={handleAdvanceCampaignDay}
               lastAstrogationSyncDay={lastAstrogationDay}
@@ -1453,38 +1972,82 @@ export default function BridgeDashboard() {
                   setActive("Navcomputer")
                 }
               }}
-              shipConfig={effectiveShipConfig} 
+              shipConfig={effectiveShipConfig}
               installedMods={installedMods}
               onRemoveMod={handleRemoveMod}
               stationPools={stationPools}
-              onUpdateStationPools={setStationPools}
+              onUpdateStationPools={(newPools) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  stationPools:
+                    typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                }))
+              }
               sharedPoolDice={sharedPoolDice}
-              onUpdateSharedPool={setSharedPoolDice}
+              onUpdateSharedPool={(newPool) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  sharedPoolDice:
+                    typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                }))
+              }
               pinpointStrikesUsed={pinpointStrikesUsed}
-              onUpdatePinpointStrikesUsed={setPinpointStrikesUsed}
+              onUpdatePinpointStrikesUsed={(val) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  pinpointStrikesUsed:
+                    typeof val === "function" ? val(prev.pinpointStrikesUsed) : val,
+                }))
+              }
               versatileSnubfighterUsed={versatileSnubfighterUsed}
-              onUpdateVersatileSnubfighterUsed={setVersatileSnubfighterUsed}
+              onUpdateVersatileSnubfighterUsed={(val) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  versatileSnubfighterUsed:
+                    typeof val === "function" ? val(prev.versatileSnubfighterUsed) : val,
+                }))
+              }
               evasiveManeuversUsed={evasiveManeuversUsed}
-              onUpdateEvasiveManeuversUsed={setEvasiveManeuversUsed}
+              onUpdateEvasiveManeuversUsed={(val) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  evasiveManeuversUsed:
+                    typeof val === "function" ? val(prev.evasiveManeuversUsed) : val,
+                }))
+              }
               adaptiveArmorUsed={adaptiveArmorUsed}
-              onUpdateAdaptiveArmorUsed={setAdaptiveArmorUsed}
-              onRecharge={() => {
-                setPinpointStrikesUsed(0)
-              }}
+              onUpdateAdaptiveArmorUsed={(val) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  adaptiveArmorUsed:
+                    typeof val === "function" ? val(prev.adaptiveArmorUsed) : val,
+                }))
+              }
+              onRecharge={() =>
+                updateRoomData((prev) => ({ ...prev, pinpointStrikesUsed: 0 }))
+              }
               isEngineBoosted={engineSpeedBoostTurns > 0}
               engineBoostTurnsRemaining={engineSpeedBoostTurns}
               standingByUsed={standingByUsed}
-              onUseStandingBy={() => setStandingByUsed(true)}
+              onUseStandingBy={() =>
+                updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+              }
               leafOnTheWindUsed={leafOnTheWindUsed}
-              onUseLeafOnTheWind={() => setLeafOnTheWindUsed(true)}
+              onUseLeafOnTheWind={() =>
+                updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+              }
               sFoilsMode={sFoilsMode}
-              onToggleSFoils={setSFoilsMode}
+              onToggleSFoils={(mode) =>
+                updateRoomData((prev) => ({ ...prev, sFoilsMode: mode }))
+              }
               currentHull={totalHull.current}
               maxHull={totalHull.max}
               currentShields={totalShields.current}
               maxShields={totalShields.max}
               systemDamageLevel={systemDamageLevel}
-              onUpdateSystemDamageLevel={setSystemDamageLevel}
+              onUpdateSystemDamageLevel={(lvl) =>
+                updateRoomData((prev) => ({ ...prev, systemDamageLevel: lvl }))
+              }
               effectiveSlowedLevel={effectiveSlowedLevel}
               manifest={manifest}
               onAssignCrew={handleAssignLocation}
@@ -1501,22 +2064,37 @@ export default function BridgeDashboard() {
               lastAstrogationSyncDay={lastAstrogationDay}
               activeJourney={activeJourney}
               onStartJourney={(journey) => {
-                setActiveJourney(journey)
-                setTargetDestinationPlanet(journey.destination)
+                updateRoomData((prev) => ({
+                  ...prev,
+                  activeJourney: journey,
+                  targetDestinationPlanet: journey.destination,
+                }))
               }}
               onCancelJourney={() => handleCompleteOrCancelJourney(false)}
               onArriveAtDestination={() => handleCompleteOrCancelJourney(true)}
               onEmergencyDropOut={handleEmergencyDropOut}
               currentLocationPlanet={currentLocationPlanet}
-              onUpdateCurrentLocationPlanet={setCurrentLocationPlanet}
+              onUpdateCurrentLocationPlanet={(planet) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  currentLocationPlanet:
+                    typeof planet === "function" ? planet(prev.currentLocationPlanet) : planet,
+                }))
+              }
               targetDestinationPlanet={targetDestinationPlanet}
-              onUpdateTargetDestinationPlanet={setTargetDestinationPlanet}
+              onUpdateTargetDestinationPlanet={(dest) =>
+                updateRoomData((prev) => ({
+                  ...prev,
+                  targetDestinationPlanet:
+                    typeof dest === "function" ? dest(prev.targetDestinationPlanet) : dest,
+                }))
+              }
               onBackToEngines={() => setActive("Engines")}
               installedMods={installedMods}
               onRemoveMod={handleRemoveMod}
             />
           ) : active === "GM Station" ? (
-            <GmStation 
+            <GmStation
               contacts={sensorContacts}
               onAddContact={handleAddContact}
               onRemoveContact={handleRemoveContact}
@@ -1529,7 +2107,7 @@ export default function BridgeDashboard() {
               installedMods={installedMods}
             />
           ) : active === "Codex" ? (
-            <CodexStation />          
+            <CodexStation />
           ) : (
             <OfflineStation name={active} />
           )}
