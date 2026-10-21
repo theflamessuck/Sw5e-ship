@@ -9,7 +9,7 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'U.S.S. ATHENA // TAC-BRIDGE',
+  title: 'Spaceship Control',
   description: 'Starship bridge tactical terminal dashboard',
   generator: 'v0.app',
   icons: {
