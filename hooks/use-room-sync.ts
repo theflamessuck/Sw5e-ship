@@ -1,44 +1,84 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 
-export function useRoomSync<T>(roomCode: string, initialData: T) {
+export interface RoomSyncStatus {
+  isPinRequired: boolean;
+  isUnlocked: boolean;
+  hasStoredPin: boolean;
+}
+
+export function useRoomSync<T>(roomCode: string, initialData: T, providedPin?: string) {
   const [data, setData] = useState<T>(initialData);
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  
-  // Track timestamps and debounce timer
+  const [syncStatus, setSyncStatus] = useState<RoomSyncStatus>({
+    isPinRequired: false,
+    isUnlocked: false,
+    hasStoredPin: false,
+  });
+
   const lastLocalUpdateRef = useRef<number>(Date.now());
   const pendingSyncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const latestDataRef = useRef<T>(initialData);
 
-  // Keep latestDataRef in sync with state
   useEffect(() => {
     latestDataRef.current = data;
   }, [data]);
 
-  // 1. Initial Load & Realtime Subscription
+  // 1. Initial Load & Realtime Subscription with PIN validation
   useEffect(() => {
     if (!roomCode) return;
 
     const code = roomCode.trim().toUpperCase();
+    const pin = providedPin ? providedPin.trim() : null;
 
     async function loadRoom() {
       const { data: room, error } = await supabase
         .from('game_rooms')
-        .select('ship_state, updated_at')
+        .select('ship_state, updated_at, access_pin')
         .eq('room_code', code)
         .single();
 
-      if (room && room.ship_state && Object.keys(room.ship_state).length > 0) {
-        setData(room.ship_state as T);
-        latestDataRef.current = room.ship_state as T;
+      if (room) {
+        const storedPin = room.access_pin;
+        const requiresPin = Boolean(storedPin && storedPin.trim() !== '');
+
+        if (requiresPin && storedPin !== pin) {
+          setSyncStatus({
+            isPinRequired: true,
+            isUnlocked: false,
+            hasStoredPin: true,
+          });
+          setIsConnected(false);
+          return;
+        }
+
+        // Room is authorized or does not require a PIN
+        setSyncStatus({
+          isPinRequired: false,
+          isUnlocked: true,
+          hasStoredPin: requiresPin,
+        });
+
+        if (room.ship_state && Object.keys(room.ship_state).length > 0) {
+          setData(room.ship_state as T);
+          latestDataRef.current = room.ship_state as T;
+        }
       } else if (!room && !error) {
+        // Brand new room creation
         await supabase
           .from('game_rooms')
           .insert({
             room_code: code,
             ship_state: initialData,
+            access_pin: pin,
             updated_at: new Date().toISOString(),
           });
+
+        setSyncStatus({
+          isPinRequired: false,
+          isUnlocked: true,
+          hasStoredPin: Boolean(pin),
+        });
       }
     }
 
@@ -57,6 +97,13 @@ export function useRoomSync<T>(roomCode: string, initialData: T) {
         },
         (payload) => {
           if (!payload.new || !payload.new.ship_state) return;
+
+          // Disconnect and lock if the remote PIN has changed and local does not match
+          if (payload.new.access_pin && payload.new.access_pin !== pin) {
+            setSyncStatus({ isPinRequired: true, isUnlocked: false, hasStoredPin: true });
+            setIsConnected(false);
+            return;
+          }
 
           const remoteTimestamp = new Date(payload.new.updated_at).getTime();
 
@@ -79,22 +126,22 @@ export function useRoomSync<T>(roomCode: string, initialData: T) {
         clearTimeout(pendingSyncTimeoutRef.current);
       }
     };
-  }, [roomCode]);
+  }, [roomCode, providedPin]);
 
-  // 2. Local Update with Debounced Cloud Sync
+  // 2. Debounced Cloud Sync
   const updateRoomData = useCallback(
     (updater: (prev: T) => T) => {
+      if (syncStatus.isPinRequired && !syncStatus.isUnlocked) return;
+
       const now = Date.now();
       lastLocalUpdateRef.current = now;
 
-      // Optimistically update local screen immediately
       setData((prev) => {
         const next = updater(prev);
         latestDataRef.current = next;
         return next;
       });
 
-      // Clear pending network push and debounce for 150ms
       if (pendingSyncTimeoutRef.current) {
         clearTimeout(pendingSyncTimeoutRef.current);
       }
@@ -103,21 +150,46 @@ export function useRoomSync<T>(roomCode: string, initialData: T) {
         if (!roomCode) return;
         const code = roomCode.trim().toUpperCase();
 
-        const { error } = await supabase
-          .from('game_rooms')
-          .upsert({
-            room_code: code,
-            ship_state: latestDataRef.current,
-            updated_at: new Date(now).toISOString(),
-          });
+        const payload: Record<string, any> = {
+          room_code: code,
+          ship_state: latestDataRef.current,
+          updated_at: new Date(now).toISOString(),
+        };
 
-        if (error) {
-          console.error('Failed to sync room state to cloud:', error);
+        if (providedPin) {
+          payload.access_pin = providedPin.trim();
         }
+
+        const { error } = await supabase.from('game_rooms').upsert(payload);
+        if (error) console.error('Failed to sync room state to cloud:', error);
       }, 150);
+    },
+    [roomCode, providedPin, syncStatus]
+  );
+
+  // 3. Helper to update/clear PIN
+  const setRoomPin = useCallback(
+    async (newPin: string | null) => {
+      if (!roomCode) return;
+      const code = roomCode.trim().toUpperCase();
+      const cleanPin = newPin && newPin.trim() !== '' ? newPin.trim() : null;
+
+      const { error } = await supabase
+        .from('game_rooms')
+        .update({ access_pin: cleanPin })
+        .eq('room_code', code);
+
+      if (!error) {
+        setSyncStatus((prev) => ({
+          ...prev,
+          hasStoredPin: Boolean(cleanPin),
+          isPinRequired: false,
+          isUnlocked: true,
+        }));
+      }
     },
     [roomCode]
   );
 
-  return { data, updateRoomData, isConnected };
+  return { data, updateRoomData, isConnected, syncStatus, setRoomPin };
 }

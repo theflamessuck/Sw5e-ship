@@ -125,6 +125,10 @@ interface EnginesStationProps {
   onUpdateRetroThrustersUsed?: (used: boolean | ((prev: boolean) => boolean)) => void
   versatileSnubfighterUsed?: number
   onUpdateVersatileSnubfighterUsed?: (count: number | ((prev: number) => number)) => void
+  versatileTransportUsed?: number
+  onUpdateVersatileTransportUsed?: (count: number | ((prev: number) => number)) => void
+  bestShipInVerseUsed?: boolean
+  onUpdateBestShipInVerseUsed?: (used: boolean | ((prev: boolean) => boolean)) => void
   evasiveManeuversUsed?: number
   onUpdateEvasiveManeuversUsed?: (count: number | ((prev: number) => number)) => void
   adaptiveArmorUsed?: number
@@ -186,6 +190,10 @@ export function EnginesStation({
   onUpdateRetroThrustersUsed,
   versatileSnubfighterUsed: externalVersatileUsed,
   onUpdateVersatileSnubfighterUsed,
+  versatileTransportUsed,
+  onUpdateVersatileTransportUsed,
+  bestShipInVerseUsed,
+  onUpdateBestShipInVerseUsed,
   evasiveManeuversUsed = 0,
   onUpdateEvasiveManeuversUsed,
   adaptiveArmorUsed = 0,
@@ -243,27 +251,22 @@ export function EnginesStation({
     else setInternalSFoilsMode(newMode)
   }
 
-  // Power Coupling Logic[cite: 2]
+  // Power Coupling Logic[cite: 2, 3]
   const powerCoupling = shipConfig?.powerCoupling ?? shipConfig?.couplingType ?? "Direct Power Coupling"
   const isDistributed = powerCoupling.toLowerCase().includes("distributed")
   const isHubAndSpoke = powerCoupling.toLowerCase().includes("hub") || powerCoupling.toLowerCase().includes("spoke")
   const isDirect = !isDistributed && !isHubAndSpoke
 
-  const currentStationDice = stationPools["engines"] ?? (isHubAndSpoke ? 1 : isDistributed ? 2 : availablePowerDice)
+  const currentStationDice = stationPools["engines"] ?? 0
   const effectiveMax = isDirect ? maxPowerDice : (isDistributed ? 2 : 1)
-  const effectiveAvailable = Math.min(
-    effectiveMax,
-    isDirect ? availablePowerDice : currentStationDice
-  )
+  const effectiveAvailable = isDirect ? availablePowerDice : currentStationDice
 
   const isSuperiorityFighterSpec = shipConfig?.roleSpecialization === "Superiority Fighter"
   const isSuperiorityFighterMastery = shipConfig?.roleMastery === "Superiority Fighter"
-  const isCourierSpec = shipConfig?.roleSpecialization === "Courier"
 
   const rawTurningSpeed = (shipConfig as any)?.turningSpeed ?? 150
   let finalTurningSpeed = effectiveSlowedLevel >= 4 ? 0 : rawTurningSpeed
   let turningOverflowSpeed = 0
-  let turningReductionApplied = false
 
   if (isSuperiorityFighterMastery && effectiveSlowedLevel < 4) {
     if (finalTurningSpeed - 50 <= 0) {
@@ -271,7 +274,6 @@ export function EnginesStation({
       turningOverflowSpeed = 50
     } else {
       finalTurningSpeed -= 50
-      turningReductionApplied = true
     }
   }
 
@@ -303,13 +305,16 @@ export function EnginesStation({
     return 0
   }, [effectiveSlowedLevel])
 
-  const handleCustomConsume = (amount: number = 1) => {
-    if (isDirect) return onConsumePowerDice?.(amount)
+  const handleCustomConsume = (amount: number = 1): boolean => {
+    if (isDirect) {
+      return !!onConsumePowerDice?.(amount)
+    }
+
     if (currentStationDice >= amount) {
       if (onUpdateStationPools) {
         onUpdateStationPools((prev) => ({
           ...prev,
-          engines: Math.max(0, (prev["engines"] ?? (isHubAndSpoke ? 1 : 2)) - amount),
+          engines: Math.max(0, (prev["engines"] ?? 0) - amount),
         }))
       }
       return true
@@ -341,7 +346,6 @@ export function EnginesStation({
   const fuelMax = maxFuel ?? 30
   const [fuelRemaining, setFuelRemaining] = useState<number>(currentFuel ?? 30)
   const [totalFuelUsed, setTotalFuelUsed] = useState<number>(0)
-  const fuelCostPerUnit = 100
 
   useEffect(() => {
     if (currentFuel !== undefined) setFuelRemaining(currentFuel)
@@ -456,7 +460,7 @@ export function EnginesStation({
 
     setInitiationProcedures((prev) => Math.min(targetProcedures, prev + evalResult.gained))
     setLastDuressRollLog(
-      `Check: d20 [${duressCondition !== "normal" ? `${rollA}, ${rollB} -> Kept${keptD20}` : keptD20}] + Mod (${pilotModInput >= 0 ? `+${pilotModInput}` : pilotModInput}) = ${total} (${evalResult.label})`
+      `Check: d20 [${duressCondition !== "normal" ? `${rollA}, ${rollB} -> Kept ${keptD20}` : keptD20}] + Mod (${pilotModInput >= 0 ? `+${pilotModInput}` : pilotModInput}) = ${total} (${evalResult.label})`
     )
   }
 
@@ -1021,121 +1025,55 @@ export function EnginesStation({
           </div>
         </section>
 
-        {/* RIGHT COLUMN: COMBAT RESOURCES */}
-        <section className="rounded-md border border-cyan-neon/60 bg-bridge-panel p-3 shadow-[0_0_15px_rgba(0,255,255,0.06)] flex flex-col justify-between gap-2.5">
-          <div className="flex justify-between items-center border-b border-bridge-border/60 pb-1.5">
-            <div className="flex items-center gap-1.5">
-              <Zap className="h-4 w-4 text-cyan-neon" />
-              <h3 className="text-xs font-bold tracking-[0.15em] text-cyan-neon uppercase">
-                Combat Resources
-              </h3>
-            </div>
-            <span className="text-[9px] text-muted-foreground uppercase">
-              {powerCoupling}
-            </span>
-          </div>
-
-          {/* Inline Power Pool Bar */}
-          <div className="bg-black/50 p-2.5 rounded border border-bridge-border/60 flex flex-col gap-2">
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-bold uppercase text-[10px]">
-                Station Dice ({powerDieType.toUpperCase()}):
-              </span>
-              <span className="text-cyan-neon font-black font-mono">
-                {effectiveAvailable} / {effectiveMax}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 w-full">
-              {Array.from({ length: effectiveMax }).map((_, i) => (
-                <span
-                  key={i}
-                  className={`h-2 flex-1 rounded-xs transition-all ${
-                    i < effectiveAvailable
-                      ? "bg-cyan-neon shadow-[0_0_8px_rgba(0,255,255,0.7)]"
-                      : "bg-slate-900 border border-bridge-border/60"
-                  }`}
-                />
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                type="button"
-                disabled={effectiveAvailable <= 0}
-                onClick={() => handleCustomConsume(1)}
-                className="flex-1 py-1 rounded border border-cyan-neon/60 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-cyan-neon text-[10px] font-bold uppercase transition disabled:opacity-30 cursor-pointer shadow-[0_0_8px_rgba(0,255,255,0.15)]"
-              >
-                Consume Station Die (-1)
-              </button>
-            </div>
-          </div>
-
-          {/* Hub-and-Spoke Shared Reactor Strip */}
+        {/* RIGHT COLUMN: COMBAT RESOURCES (STANDARD COMPONENT) */}
+        <section className="flex flex-col rounded-md border border-cyan-neon/60 bg-bridge-panel p-3 shadow-[0_0_15px_rgba(0,255,255,0.06)] justify-between gap-2.5">
+          <CombatResources 
+            availablePowerDice={effectiveAvailable}
+            maxPowerDice={effectiveMax}
+            powerDieType={powerDieType}
+            onConsumePowerDice={handleCustomConsume}
+            standingByUsed={standingByUsed}
+            onUseStandingBy={onUseStandingBy}
+            leafOnTheWindUsed={leafOnTheWindUsed}
+            onUseLeafOnTheWind={onUseLeafOnTheWind}
+            versatileTransportUsed={versatileTransportUsed}
+            onUpdateVersatileTransportUsed={onUpdateVersatileTransportUsed}
+            bestShipInVerseUsed={bestShipInVerseUsed}
+            onUpdateBestShipInVerseUsed={onUpdateBestShipInVerseUsed}
+            shipTier={shipConfig?.tier ?? 0}
+            shipSize={shipConfig?.size}
+          />
+          
           {isHubAndSpoke && (
-            <div className="bg-amber-950/20 border border-amber-500/30 p-2 rounded flex flex-col gap-1.5">
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="text-amber-400 font-bold uppercase">Shared Reactor Bus:</span>
-                <span className="font-bold text-amber-300 font-mono">{sharedPoolDice} / 2</span>
+            <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
+                <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
               </div>
-              <div className="flex items-center gap-1 w-full">
+              <div className="flex items-center gap-1.5 w-full">
                 {Array.from({ length: 2 }).map((_, i) => (
                   <span
                     key={i}
-                    className={`h-1.5 flex-1 rounded-xs ${
-                      i < sharedPoolDice
-                        ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]"
-                        : "bg-black/90 border border-bridge-border/60"
+                    className={`h-2.5 flex-1 rounded-xs inline-block ${
+                      i < sharedPoolDice 
+                        ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
+                        : "bg-black/80 border border-bridge-border"
                     }`}
                   />
                 ))}
               </div>
+
               {!canSpendStation && canSpendShared && (
                 <button
                   type="button"
                   onClick={() => handleCustomConsume(1)}
-                  className="w-full mt-0.5 rounded bg-amber-500/20 border border-amber-400/60 py-0.5 text-[9px] font-bold text-amber-300 hover:bg-amber-500/30 cursor-pointer"
+                  className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
                 >
-                  Spend Shared Die ({sharedPoolDice} Left)
+                  CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
                 </button>
               )}
             </div>
           )}
-
-          {/* Reaction Triggers */}
-          <div className="flex items-center gap-1.5 pt-1 border-t border-bridge-border/40">
-            {onUseStandingBy && (
-              <button
-                type="button"
-                onClick={onUseStandingBy}
-                disabled={standingByUsed}
-                className={`flex-1 py-1 px-1 rounded text-[9px] font-bold uppercase border transition cursor-pointer ${
-                  standingByUsed
-                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
-                    : "border-cyan-500/40 bg-cyan-950/30 text-cyan-300 hover:bg-cyan-950/50"
-                }`}
-                title="Use Reaction: Standing By"
-              >
-                {standingByUsed ? "Standing By (Used)" : "Standing By (Rx)"}
-              </button>
-            )}
-
-            {shipTier >= 3 && onUseLeafOnTheWind && (
-              <button
-                type="button"
-                onClick={onUseLeafOnTheWind}
-                disabled={leafOnTheWindUsed}
-                className={`flex-1 py-1 px-1 rounded text-[9px] font-bold uppercase border transition cursor-pointer ${
-                  leafOnTheWindUsed
-                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
-                    : "border-emerald-500/40 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-950/50"
-                }`}
-                title="Tier 3 Reaction: Leaf on the Wind"
-              >
-                {leafOnTheWindUsed ? "Leaf on Wind (Used)" : "Leaf on Wind"}
-              </button>
-            )}
-          </div>
         </section>
       </div>
 
