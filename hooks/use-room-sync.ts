@@ -5,15 +5,22 @@ export interface RoomSyncStatus {
   isPinRequired: boolean;
   isUnlocked: boolean;
   hasStoredPin: boolean;
+  isCreationBlocked: boolean;
 }
 
-export function useRoomSync<T>(roomCode: string, initialData: T, providedPin?: string) {
+export function useRoomSync<T>(
+  roomCode: string,
+  initialData: T,
+  providedPin?: string,
+  masterCreationKey?: string
+) {
   const [data, setData] = useState<T>(initialData);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [syncStatus, setSyncStatus] = useState<RoomSyncStatus>({
     isPinRequired: false,
     isUnlocked: false,
     hasStoredPin: false,
+    isCreationBlocked: false,
   });
 
   const lastLocalUpdateRef = useRef<number>(Date.now());
@@ -24,21 +31,23 @@ export function useRoomSync<T>(roomCode: string, initialData: T, providedPin?: s
     latestDataRef.current = data;
   }, [data]);
 
-  // 1. Initial Load & Realtime Subscription with PIN validation
+  // 1. Initial Load & Realtime Subscription
   useEffect(() => {
     if (!roomCode) return;
 
     const code = roomCode.trim().toUpperCase();
     const pin = providedPin ? providedPin.trim() : null;
+    const expectedCreationKey = process.env.NEXT_PUBLIC_CREATION_KEY;
 
     async function loadRoom() {
       const { data: room, error } = await supabase
         .from('game_rooms')
         .select('ship_state, updated_at, access_pin')
         .eq('room_code', code)
-        .single();
+        .maybeSingle();
 
       if (room) {
+        // Room exists in database -> verify room PIN
         const storedPin = room.access_pin;
         const requiresPin = Boolean(storedPin && storedPin.trim() !== '');
 
@@ -47,16 +56,18 @@ export function useRoomSync<T>(roomCode: string, initialData: T, providedPin?: s
             isPinRequired: true,
             isUnlocked: false,
             hasStoredPin: true,
+            isCreationBlocked: false,
           });
           setIsConnected(false);
           return;
         }
 
-        // Room is authorized or does not require a PIN
+        // Room is authorized
         setSyncStatus({
           isPinRequired: false,
           isUnlocked: true,
           hasStoredPin: requiresPin,
+          isCreationBlocked: false,
         });
 
         if (room.ship_state && Object.keys(room.ship_state).length > 0) {
@@ -64,7 +75,19 @@ export function useRoomSync<T>(roomCode: string, initialData: T, providedPin?: s
           latestDataRef.current = room.ship_state as T;
         }
       } else if (!room && !error) {
-        // Brand new room creation
+        // Room does not exist -> verify Master Shipyard Key
+        if (expectedCreationKey && masterCreationKey !== expectedCreationKey) {
+          setSyncStatus({
+            isPinRequired: false,
+            isUnlocked: false,
+            hasStoredPin: false,
+            isCreationBlocked: true,
+          });
+          setIsConnected(false);
+          return;
+        }
+
+        // Key matched or no restriction configured -> create the room
         await supabase
           .from('game_rooms')
           .insert({
@@ -78,6 +101,7 @@ export function useRoomSync<T>(roomCode: string, initialData: T, providedPin?: s
           isPinRequired: false,
           isUnlocked: true,
           hasStoredPin: Boolean(pin),
+          isCreationBlocked: false,
         });
       }
     }
@@ -98,16 +122,19 @@ export function useRoomSync<T>(roomCode: string, initialData: T, providedPin?: s
         (payload) => {
           if (!payload.new || !payload.new.ship_state) return;
 
-          // Disconnect and lock if the remote PIN has changed and local does not match
           if (payload.new.access_pin && payload.new.access_pin !== pin) {
-            setSyncStatus({ isPinRequired: true, isUnlocked: false, hasStoredPin: true });
+            setSyncStatus({
+              isPinRequired: true,
+              isUnlocked: false,
+              hasStoredPin: true,
+              isCreationBlocked: false,
+            });
             setIsConnected(false);
             return;
           }
 
           const remoteTimestamp = new Date(payload.new.updated_at).getTime();
 
-          // Discard remote updates that originated prior to our latest local user action
           if (remoteTimestamp <= lastLocalUpdateRef.current) {
             return;
           }
@@ -126,12 +153,14 @@ export function useRoomSync<T>(roomCode: string, initialData: T, providedPin?: s
         clearTimeout(pendingSyncTimeoutRef.current);
       }
     };
-  }, [roomCode, providedPin]);
+  }, [roomCode, providedPin, masterCreationKey]);
 
   // 2. Debounced Cloud Sync
   const updateRoomData = useCallback(
     (updater: (prev: T) => T) => {
-      if (syncStatus.isPinRequired && !syncStatus.isUnlocked) return;
+      if ((syncStatus.isPinRequired && !syncStatus.isUnlocked) || syncStatus.isCreationBlocked) {
+        return;
+      }
 
       const now = Date.now();
       lastLocalUpdateRef.current = now;

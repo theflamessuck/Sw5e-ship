@@ -20,7 +20,7 @@ import { SHIP_SIZE_RULES, SHIP_TYPE_RULES, ShipSize } from "@/lib/ship-rules"
 import { STARSHIP_AMMUNITION } from "@/lib/starship-weapons"
 import { CodexStation } from "./codex-station"
 import { computeShipModifiers } from "@/lib/ship-modifiers"
-import { AlertOctagon, RefreshCw } from "lucide-react"
+import { AlertOctagon, RefreshCw, Radio } from "lucide-react"
 import { useRoomSync } from "@/hooks/use-room-sync"
 import { RoomSelector } from "./room-selector"
 
@@ -394,10 +394,13 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
 
 export default function BridgeDashboard() {
   const [active, setActive] = useState<Station>("Weapons")
-  const [roomCode, setRoomCode] = useState<string>("DEFAULT")
+  const [roomCode, setRoomCode] = useState<string>("")
   const [roomPin, setRoomPin] = useState<string>("")
+  const [creationKey, setCreationKey] = useState<string>("")
+  const [creationKeyInput, setCreationKeyInput] = useState<string>("")
+  const [isMounted, setIsMounted] = useState<boolean>(false)
 
-  // Read ?room= and ?pin= from URL or localStorage on startup
+  // Read ?room= and ?pin= from URL or localStorage on startup, then flag as mounted
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search)
@@ -417,17 +420,19 @@ export default function BridgeDashboard() {
         const savedPin = localStorage.getItem("sw5e_room_pin")
         if (savedPin) setRoomPin(savedPin)
       }
+
+      setIsMounted(true)
     }
   }, [])
 
-  // Hook handles authentication and sync
+  // Hook handles authentication, creation key, and sync
   const {
     data: roomState,
     updateRoomData,
     isConnected,
     syncStatus,
     setRoomPin: updateCloudPin,
-  } = useRoomSync<SyncedBridgeState>(roomCode, INITIAL_SYNCED_STATE, roomPin)
+  } = useRoomSync<SyncedBridgeState>(roomCode, INITIAL_SYNCED_STATE, roomPin, creationKey)
 
   const handleJoinRoom = (newCode: string, newPin?: string) => {
     const code = newCode.trim().toUpperCase()
@@ -1179,7 +1184,6 @@ export default function BridgeDashboard() {
           maxHardpoints = 3
           break
         case "huge":
-        case "gargantuan":
           maxHardpoints = 5
           break
         default:
@@ -1471,6 +1475,16 @@ export default function BridgeDashboard() {
       ? 3
       : 0
 
+  // Guard against SSR hydration mismatch by rendering a clean loading screen until mounted
+  if (!isMounted) {
+    return (
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col items-center justify-center p-6 font-mono text-neutral-400">
+        <span className="h-8 w-8 animate-spin border-2 border-cyan-500 border-t-transparent rounded-full" />
+        <p className="mt-3 text-xs tracking-widest uppercase">INITIALIZING BRIDGE SYSTEMS...</p>
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-3 sm:p-4 lg:p-6">
       {/* Top Bar with Live Room Code Linker */}
@@ -1491,15 +1505,65 @@ export default function BridgeDashboard() {
         />
       </div>
 
-      {/* ACCESS RESTRICTED SCREEN OVERLAY IF PIN LOCKED */}
-      {syncStatus.isPinRequired && !syncStatus.isUnlocked ? (
+      {/* 0. UNLINKED GATE (DEFAULT LANDING SCREEN BEFORE ANY ROOM CODE IS ENTERED) */}
+      {!roomCode ? (
+        <div className="flex min-h-[480px] flex-col items-center justify-center gap-4 rounded-md border border-neutral-800 bg-neutral-950/90 p-8 text-center font-mono shadow-2xl">
+          <div className="relative flex items-center justify-center">
+            <span className="h-16 w-16 animate-pulse rotate-45 border-2 border-cyan-500/40" />
+            <Radio className="absolute h-7 w-7 text-cyan-400" />
+          </div>
+          <h2 className="text-lg sm:text-xl font-bold tracking-[0.25em] text-cyan-400 uppercase mt-2">
+            AWAITING SIGNAL LINK // TRANSMISSION OFFLINE
+          </h2>
+          <p className="max-w-md text-xs tracking-wider text-neutral-400 leading-relaxed">
+            No starship link is established. Enter your assigned vessel callsign into the transmission grid above and click <strong className="text-neutral-200">LINK</strong> to access tactical consoles[cite: 7].
+          </p>
+          <div className="flex items-center gap-2 text-[10px] text-neutral-600 uppercase tracking-widest mt-4">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500/50" />
+            Supabase Relay Standing By
+          </div>
+        </div>
+      ) : syncStatus.isCreationBlocked ? (
+        /* 1. RESTRICTED SHIPYARD OVERLAY (MASTER KEY REQUIRED TO BUILD NEW SHIP) */
+        <div className="flex min-h-[450px] flex-col items-center justify-center gap-4 rounded-md border-2 border-amber-500/80 bg-black/90 p-6 text-center font-mono shadow-[0_0_40px_rgba(245,158,11,0.2)]">
+          <span className="text-4xl">🛠️</span>
+          <h2 className="text-xl sm:text-2xl font-bold tracking-widest text-amber-400 uppercase">
+            RESTRICTED SHIPYARD // AUTHORIZATION REQUIRED
+          </h2>
+          <p className="max-w-md text-xs tracking-wider text-neutral-300 leading-relaxed">
+            Vessel registration <strong className="text-amber-400">{roomCode}</strong> does not exist in the database[cite: 7]. A Master Shipyard Authorization Key is required to commission a new vessel[cite: 7].
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              setCreationKey(creationKeyInput.trim())
+            }}
+            className="flex flex-col sm:flex-row items-center gap-2 mt-2"
+          >
+            <input
+              type="password"
+              placeholder="MASTER KEY"
+              value={creationKeyInput}
+              onChange={(e) => setCreationKeyInput(e.target.value)}
+              className="bg-neutral-950 border border-neutral-700 rounded px-3 py-1.5 text-center text-xs text-neutral-100 font-mono tracking-widest focus:outline-none focus:border-amber-400"
+            />
+            <button
+              type="submit"
+              className="px-4 py-1.5 rounded border border-amber-400/80 bg-amber-500/20 text-xs font-bold uppercase text-amber-300 hover:bg-amber-500/30 transition cursor-pointer"
+            >
+              Authorize &amp; Build
+            </button>
+          </form>
+        </div>
+      ) : syncStatus.isPinRequired && !syncStatus.isUnlocked ? (
+        /* 2. ACCESS RESTRICTED SCREEN OVERLAY IF PIN LOCKED */
         <div className="flex min-h-[450px] flex-col items-center justify-center gap-4 rounded-md border-2 border-rose-500/80 bg-black/90 p-6 text-center font-mono shadow-[0_0_40px_rgba(244,63,94,0.3)]">
           <span className="text-4xl">🔒</span>
           <h2 className="text-xl sm:text-2xl font-bold tracking-widest text-rose-400 uppercase">
             SECURITY LOCK ENGAGED // ACCESS RESTRICTED
           </h2>
           <p className="max-w-md text-xs tracking-wider text-rose-200 leading-relaxed">
-            This vessel is protected by a security PIN. Enter the PIN in the transmission bar at the top and click <strong>LINK</strong> to authenticate.
+            This vessel is protected by a security PIN[cite: 7]. Enter the PIN in the transmission bar at the top and click <strong>LINK</strong> to authenticate[cite: 7].
           </p>
         </div>
       ) : (
