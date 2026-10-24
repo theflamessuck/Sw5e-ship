@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { 
   Cpu, 
   Zap, 
@@ -34,7 +34,10 @@ import {
   Lock,
   Unlock,
   Clock,
-  UserMinus
+  UserMinus,
+  Flame,
+  PowerOff,
+  X
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { StationModifications, Modification } from "./ship-modifications"
@@ -50,6 +53,8 @@ export interface RechargeResultPayload {
 }
 
 interface EngineeringStationProps {
+  isPoweredOn?: boolean
+  onSetPoweredOn?: (powered: boolean) => void
   maxPowerDice?: number
   availablePowerDice?: number
   powerDieType?: string
@@ -128,6 +133,8 @@ const getBaseDiceBySize = (size?: string): number => {
 }
 
 export function EngineeringStation({
+  isPoweredOn = true,
+  onSetPoweredOn,
   maxPowerDice,
   availablePowerDice,
   powerDieType,
@@ -253,6 +260,146 @@ export function EngineeringStation({
 
   const maxSharedPool = isDirect ? effectiveMaxPowerDice : (isHubAndSpoke ? 2 : 0)
   const maxStationCapacity = isDistributed ? 2 : (isHubAndSpoke ? 1 : 0)
+
+  // --- STARTUP / SCRAM PROCEDURES MODAL STATE ---
+  const [showStartupModal, setShowStartupModal] = useState<boolean>(false)
+  const [forcedStartupSafety, setForcedStartupSafety] = useState<boolean>(false)
+  const [initiationProcedures, setInitiationProcedures] = useState<number>(isPoweredOn ? 10 : 0)
+  const targetProcedures = 10
+
+  useEffect(() => {
+    if (isPoweredOn && initiationProcedures < targetProcedures) {
+      setInitiationProcedures(10)
+    } else if (!isPoweredOn && initiationProcedures >= targetProcedures) {
+      setInitiationProcedures(0)
+    }
+  }, [isPoweredOn])
+
+  const normalStartupTime = useMemo(() => {
+    switch (shipSize.toLowerCase()) {
+      case "tiny": return "1 Minute"
+      case "small": return "2 Minutes"
+      case "medium": return "5 Minutes"
+      case "large": return "10 Minutes"
+      case "huge": return "30 Minutes"
+      case "gargantuan": return "60 Minutes"
+      default: return "5 Minutes"
+    }
+  }, [shipSize])
+
+  const duressCondition: "advantage" | "disadvantage" | "normal" = useMemo(() => {
+    if (currentActualHull < effectiveHullMax) return "disadvantage"
+    if (currentActualHull >= effectiveHullMax && currentActualShields >= effectiveShieldMax) return "advantage"
+    return "normal"
+  }, [currentActualHull, effectiveHullMax, currentActualShields, effectiveShieldMax])
+
+  const defaultEngMod = shipConfig?.skills?.regulation ?? effectiveConstitutionMod
+  const [engModInput, setEngModInput] = useState<number>(defaultEngMod)
+  const [manualProcInput, setManualProcInput] = useState<string>("")
+  const [lastDuressRollLog, setLastDuressRollLog] = useState<string | null>(null)
+  const [mishapResultLog, setMishapResultLog] = useState<string | null>(null)
+
+  const evaluateDuressCheck = (total: number): { gained: number; label: string } => {
+    if (total >= 30) return { gained: 5, label: "30+ : PERFECT (+5 Procedures)" }
+    if (total >= 26) return { gained: 4, label: "26-29 : MASTERFUL (+4 Procedures)" }
+    if (total >= 21) return { gained: 3, label: "21-25 : EXCELLENT (+3 Procedures)" }
+    if (total >= 16) return { gained: 2, label: "16-20 : BREAKTHROUGH (+2 Procedures)" }
+    if (total >= 10) return { gained: 1, label: "10-15 : ADEQUATE (+1 Procedure)" }
+    return { gained: 0, label: "≤ 9 : FAILED (0 Procedures)" }
+  }
+
+  const handleRollDuressCheck = () => {
+    let rollA = Math.floor(Math.random() * 20) + 1
+    let rollB = Math.floor(Math.random() * 20) + 1
+    let keptD20 = rollA
+
+    if (duressCondition === "advantage") {
+      keptD20 = Math.max(rollA, rollB)
+    } else if (duressCondition === "disadvantage") {
+      keptD20 = Math.min(rollA, rollB)
+    }
+
+    const total = keptD20 + engModInput
+    const evalResult = evaluateDuressCheck(total)
+
+    setInitiationProcedures((prev) => Math.min(targetProcedures, prev + evalResult.gained))
+    setLastDuressRollLog(
+      `Check: d20 [${duressCondition !== "normal" ? `${rollA}, ${rollB} -> Kept ${keptD20}` : keptD20}] + Mod (${engModInput >= 0 ? `+${engModInput}` : engModInput}) = ${total} (${evalResult.label})`
+    )
+  }
+
+  const handleApplyManualProcedures = (e: React.FormEvent) => {
+    e.preventDefault()
+    const val = parseInt(manualProcInput, 10)
+    if (!isNaN(val)) {
+      setInitiationProcedures((prev) => Math.min(targetProcedures, Math.max(0, prev + val)))
+      setManualProcInput("")
+    }
+  }
+
+  const handleResetStartup = () => {
+    setInitiationProcedures(0)
+    setLastDuressRollLog(null)
+    setMishapResultLog(null)
+    setForcedStartupSafety(false)
+    if (onSetPoweredOn) onSetPoweredOn(false)
+  }
+
+  const handleShutdownShip = () => {
+    if (confirm("CONFIRM REACTOR SCRAM: Shut down main reactor and drop ship to cold & dark?")) {
+      setInitiationProcedures(0)
+      setMishapResultLog("🛑 REACTOR SCRAMMED: Vessel power grid offline.")
+      setForcedStartupSafety(false)
+      if (onSetPoweredOn) onSetPoweredOn(false)
+      setShowStartupModal(false)
+    }
+  }
+
+  const resolveMishapTableRoll = (dieRoll: number, bonus: number, isRecursiveSecondRoll: boolean = false): string => {
+    const total = dieRoll + bonus
+    let description = ""
+
+    if (dieRoll === 20 && bonus === 0) {
+      description = "Natural 20 with 0 procedures! Ship is unscathed, but starts with 0 power dice available."
+    } else if (total >= 20) {
+      description = `Total ${total} (20+): The ship suffers no adverse consequences.`
+    } else if (total >= 18) {
+      description = `Total ${total} (18-19): Navcomputer is disabled until ship recharges.`
+    } else if (total >= 15) {
+      description = `Total ${total} (15-17): Ship gains 1 level of slowed until ship recharges.`
+    } else if (total >= 12) {
+      description = `Total ${total} (12-14): Ship is blinded until ship recharges.`
+    } else if (total >= 9) {
+      description = `Total ${total} (9-11): Ship gains 1 level of system damage.`
+    } else if (total >= 6) {
+      description = `Total ${total} (6-8): Ship gains 2 levels of system damage.`
+    } else if (total >= 3) {
+      description = `Total ${total} (3-5): Ship gains 3 levels of system damage.`
+    } else {
+      description = `Total ${total} (1-2): Ship gains 4 levels of system damage.`
+    }
+
+    if (dieRoll === 1 && !isRecursiveSecondRoll) {
+      const secondDie = Math.floor(Math.random() * 20) + 1
+      const extraDesc = resolveMishapTableRoll(secondDie, bonus, true)
+      description += ` ⚠️ NATURAL 1 ROLLED! Must roll again on mishap table: [Roll 2: d20(${secondDie})+${bonus}] -> ${extraDesc}`
+    }
+
+    return description
+  }
+
+  const handleEngageStartup = () => {
+    if (initiationProcedures >= targetProcedures) {
+      setMishapResultLog("✅ Optimal Start-Up: All 10 initiation procedures completed cleanly. Primary reactor online.")
+      if (onSetPoweredOn) onSetPoweredOn(true)
+      return
+    }
+
+    const d20 = Math.floor(Math.random() * 20) + 1
+    const resultText = resolveMishapTableRoll(d20, initiationProcedures)
+    setMishapResultLog(`⚠️ FORCED TAKEOFF (Roll ${d20} + ${initiationProcedures} proc): ${resultText}`)
+    if (onSetPoweredOn) onSetPoweredOn(true)
+  }
 
   // --- MODIFICATION FEATURE DETECTION ---
   const hasPowerBackup = installedMods.some((m) => m.name.toUpperCase().includes("POWER BACKUP"))
@@ -414,7 +561,7 @@ export function EngineeringStation({
           }
         } else {
           const sharedSpace = effectiveMaxPowerDice - updatedShared
-          const toAdd = Math.min(diceLeftToAllocate, Math.max(0, sharedSpace))
+          const toAdd = Math.min(diceLeftToAllocate, sharedSpace)
           updatedShared += toAdd
           diceLeftToAllocate -= toAdd
           if (toAdd > 0) {
@@ -652,26 +799,60 @@ export function EngineeringStation({
           <div className="flex items-center gap-2">
             <Cpu className="h-5 w-5 text-cyan-neon" />
             <h2 className="text-glow-cyan text-sm font-bold tracking-[0.25em] text-cyan-neon">
-              ENGINEERING & REACTOR CORE CONSOLE
+              ENGINEERING &amp; REACTOR CORE CONSOLE
             </h2>
           </div>
           <p className="text-xs tracking-wider text-muted-foreground/70 mt-1">
             COUPLING MODE: <span className="text-amber-400 font-bold">{powerCoupling}</span>
             <span className="mx-2 text-muted-foreground">|</span>
             REACTOR: <span className="text-cyan-neon font-bold">{getFullReactorDisplayName(rawReactorType)}</span>
+            <span className="mx-2 text-muted-foreground">|</span>
+            STATE:{" "}
+            <span className={isPoweredOn ? "text-emerald-400 font-bold" : "text-amber-400 font-bold animate-pulse"}>
+              {isPoweredOn ? "ONLINE" : "COLD & DARK"}
+            </span>
           </p>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {/* Main Power Controls */}
+          <button
+            type="button"
+            onClick={() => setShowStartupModal(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border transition cursor-pointer ${
+              isPoweredOn
+                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                : "border-amber-400/60 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(251,191,36,0.2)] animate-pulse"
+            }`}
+          >
+            <Flame className="h-3.5 w-3.5" />
+            <span>{isPoweredOn ? "Core: Online" : `Cold Start (${initiationProcedures}/10)`}</span>
+          </button>
+
+          {isPoweredOn && (
+            <button
+              type="button"
+              onClick={handleShutdownShip}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border border-rose-500/50 bg-rose-950/30 text-rose-300 hover:bg-rose-900/50 transition cursor-pointer"
+              title="Emergency SCRAM / Shutdown Ship"
+            >
+              <PowerOff className="h-3.5 w-3.5" />
+              <span>SCRAM</span>
+            </button>
+          )}
+
           {autoShieldRegen && (
-            <div className="rounded border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5 text-xs text-emerald-400 flex items-center gap-2">
-              <Shield className="h-4 w-4 text-emerald-400" />
-              AUTO-SHIELD REGEN ACTIVE (≤{shieldRegenThreshold}%)
+            <div className="rounded border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1.5 text-xs text-emerald-400 flex items-center gap-1.5">
+              <Shield className="h-3.5 w-3.5 text-emerald-400" />
+              <span className="text-[10px]">AUTO-REGEN</span>
             </div>
           )}
-          <div className="rounded border border-cyan-neon/30 bg-cyan-neon/5 px-3 py-1.5 text-xs text-cyan-neon flex items-center gap-2">
-            <Zap className="h-4 w-4 text-amber-400" />
-            {isDirect ? `CENTRAL POOL: ${sharedPoolDice} / ${maxSharedPool}` : isHubAndSpoke ? `SHARED POOL: ${sharedPoolDice} / ${maxSharedPool}` : "DISTRIBUTED COUPLING"}
+
+          <div className="rounded border border-cyan-neon/30 bg-cyan-neon/5 px-2.5 py-1.5 text-xs text-cyan-neon flex items-center gap-1.5">
+            <Zap className="h-3.5 w-3.5 text-amber-400" />
+            <span className="text-[10px]">
+              {isDirect ? `POOL: ${sharedPoolDice}/${maxSharedPool}` : isHubAndSpoke ? `SHARED: ${sharedPoolDice}/${maxSharedPool}` : "DISTRIBUTED"}
+            </span>
           </div>
         </div>
       </div>
@@ -1097,7 +1278,7 @@ export function EngineeringStation({
           <div className="flex items-center justify-between pb-3 border-b border-bridge-border mb-4">
             <h3 className="text-xs font-bold tracking-[0.2em] text-muted-foreground flex items-center gap-2">
               <Zap className="h-4 w-4 text-amber-400" />
-              REACTOR CORE & POWER DIE MATRIX
+              REACTOR CORE &amp; POWER DIE MATRIX
             </h3>
             <div className="flex items-center gap-2 text-xs">
               <span className="text-amber-400 font-bold uppercase">{powerCoupling}</span>
@@ -1383,7 +1564,7 @@ export function EngineeringStation({
                   Ship Recharge Protocol
                 </h3>
                 <span className="text-[10px] text-muted-foreground block">
-                  1-Hour Short Rest Maintenance Cycle & Hull Field Repairs
+                  1-Hour Short Rest Maintenance Cycle &amp; Hull Field Repairs
                 </span>
               </div>
             </div>
@@ -1565,7 +1746,7 @@ export function EngineeringStation({
                       className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600/30 hover:bg-emerald-600/40 border border-emerald-500/60 text-emerald-300 disabled:opacity-40 rounded text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_10px_rgba(16,185,129,0.2)] transition-all"
                     >
                       <CheckCircle2 className="h-4 w-4" />
-                      Apply +{calculatedHullRegained} HP & Complete Recharge
+                      Apply +{calculatedHullRegained} HP &amp; Complete Recharge
                     </button>
                   )}
                 </div>
@@ -1710,7 +1891,7 @@ export function EngineeringStation({
 
               <div className="rounded border border-bridge-border p-3 bg-black/30 flex flex-col gap-2 sm:col-span-2">
                 <span className="text-[10px] text-cyan-neon font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <Cpu className="h-3.5 w-3.5" /> Core Attribute Scores & Modifiers
+                  <Cpu className="h-3.5 w-3.5" /> Core Attribute Scores &amp; Modifiers
                 </span>
                 <div className="grid grid-cols-6 gap-2 text-xs pt-1 text-center">
                   <div className="rounded bg-bridge-panel p-1.5 border border-bridge-border">
@@ -1748,7 +1929,7 @@ export function EngineeringStation({
 
               <div className="rounded border border-bridge-border p-3 bg-black/30 flex flex-col gap-2 sm:col-span-3">
                 <span className="text-[10px] text-cyan-neon font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <Zap className="h-3.5 w-3.5" /> Operational Pools & Defense
+                  <Zap className="h-3.5 w-3.5" /> Operational Pools &amp; Defense
                 </span>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
                   <div>
@@ -1784,6 +1965,196 @@ export function EngineeringStation({
           </div>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* START-UP & DURESS INITIATION PROTOCOL MODAL */}
+      {/* ========================================================================= */}
+      {showStartupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
+          <div className="bg-bridge-panel border border-cyan-neon/70 rounded-md p-5 max-w-xl w-full flex flex-col gap-4 shadow-[0_0_25px_rgba(0,255,255,0.15)] max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-bridge-border/60 pb-2">
+              <div className="flex items-center gap-2">
+                <Flame className="h-4 w-4 text-amber-400" />
+                <h3 className="text-sm font-bold tracking-widest text-cyan-neon uppercase">
+                  Reactor Ignition &amp; Start-Up Protocol
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowStartupModal(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-slate-300">
+                Chassis Warm-Up: <strong className="text-amber-300">{normalStartupTime}</strong>
+              </span>
+              <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${
+                duressCondition === "advantage"
+                  ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                  : duressCondition === "disadvantage"
+                  ? "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse"
+                  : "bg-cyan-neon/10 text-cyan-neon border-cyan-neon/40"
+              }`}>
+                Integrity: {duressCondition.toUpperCase()} ({currentActualHull}/{effectiveHullMax} HP)
+              </span>
+            </div>
+
+            {/* Stepper Display */}
+            <div className="bg-black/60 p-3 rounded border border-bridge-border/60 flex flex-col gap-2">
+              <div className="flex justify-between text-xs">
+                <span className="font-bold text-slate-200">
+                  Procedures Completed: <strong className="text-cyan-neon text-sm">{initiationProcedures} / {targetProcedures}</strong>
+                </span>
+                <span className={`text-[10px] font-bold ${initiationProcedures >= targetProcedures ? "text-emerald-400" : "text-amber-300"}`}>
+                  {initiationProcedures >= targetProcedures ? "CORE ONLINE" : "COLD INITIATION"}
+                </span>
+              </div>
+              <div className="h-2.5 w-full bg-slate-900 rounded-sm overflow-hidden border border-bridge-border/50">
+                <div
+                  className={`h-full transition-all duration-300 ${
+                    initiationProcedures >= targetProcedures ? "bg-emerald-400" : "bg-cyan-neon"
+                  }`}
+                  style={{ width: `${Math.min(100, (initiationProcedures / targetProcedures) * 100)}%` }}
+                />
+              </div>
+              <div className="flex justify-end gap-1 font-mono pt-1">
+                <button
+                  onClick={() => setInitiationProcedures((prev) => Math.max(0, prev - 1))}
+                  className="px-2 py-0.5 bg-black border border-bridge-border text-xs rounded text-slate-300 cursor-pointer"
+                >
+                  -1
+                </button>
+                <button
+                  onClick={() => setInitiationProcedures((prev) => Math.min(targetProcedures, prev + 1))}
+                  className="px-2 py-0.5 bg-black border border-bridge-border text-xs rounded text-slate-300 cursor-pointer"
+                >
+                  +1
+                </button>
+              </div>
+            </div>
+
+            {/* Duress Engineering Check */}
+            <div className="bg-black/50 p-3 rounded border border-bridge-border/60 flex flex-col gap-2.5">
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-cyan-neon uppercase">Duress Regulation Check</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] text-muted-foreground uppercase">Mod:</span>
+                  <input
+                    type="number"
+                    value={engModInput}
+                    onChange={(e) => setEngModInput(parseInt(e.target.value, 10) || 0)}
+                    className="w-10 bg-black border border-bridge-border text-center rounded text-cyan-neon font-bold py-0.5 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleRollDuressCheck}
+                  disabled={initiationProcedures >= targetProcedures}
+                  className="flex-1 py-1.5 rounded border border-cyan-neon/60 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-xs font-bold text-cyan-neon uppercase disabled:opacity-40 cursor-pointer"
+                >
+                  Roll Regulation Check
+                </button>
+                <form onSubmit={handleApplyManualProcedures} className="flex gap-1">
+                  <input
+                    type="number"
+                    placeholder="+Manual"
+                    value={manualProcInput}
+                    onChange={(e) => setManualProcInput(e.target.value)}
+                    className="w-16 bg-black border border-bridge-border text-xs text-center text-slate-200 px-1 rounded"
+                  />
+                  <button
+                    type="submit"
+                    disabled={initiationProcedures >= targetProcedures}
+                    className="px-2 bg-slate-900 border border-bridge-border text-xs font-bold text-muted-foreground hover:text-white rounded disabled:opacity-40 cursor-pointer"
+                  >
+                    Add
+                  </button>
+                </form>
+              </div>
+
+              {lastDuressRollLog && (
+                <div className="text-[10px] font-mono text-amber-300 bg-black/60 p-1.5 rounded border border-bridge-border/40">
+                  {lastDuressRollLog}
+                </div>
+              )}
+            </div>
+
+            {/* Forced Ignition Interlock Trigger */}
+            <div className="border-t border-bridge-border/60 pt-3 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                {initiationProcedures < targetProcedures ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setForcedStartupSafety((prev) => !prev)}
+                      className={`p-1.5 rounded border transition cursor-pointer ${
+                        forcedStartupSafety
+                          ? "border-red-500 bg-red-500/20 text-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
+                          : "border-bridge-border bg-black/50 text-slate-500"
+                      }`}
+                      title="Safety Interlock: Click to enable emergency reactor ignition"
+                    >
+                      {forcedStartupSafety ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                    </button>
+                    <span className="text-[10px] text-muted-foreground">
+                      {forcedStartupSafety ? "IGNITION INTERLOCK DISENGAGED" : "Safety locked (Emergency start guarded)"}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-emerald-400 font-bold uppercase">Ready for Clean Core Ignition</span>
+                )}
+
+                <div className="flex items-center gap-2">
+                  {isPoweredOn && (
+                    <button
+                      type="button"
+                      onClick={handleShutdownShip}
+                      className="px-3 py-2 rounded border border-rose-500/60 bg-rose-950/40 text-rose-300 hover:bg-rose-900/50 text-xs font-bold uppercase cursor-pointer"
+                    >
+                      SCRAM Core
+                    </button>
+                  )}
+
+                  <button
+                    disabled={initiationProcedures < targetProcedures && !forcedStartupSafety}
+                    onClick={handleEngageStartup}
+                    className={`px-4 py-2 rounded text-xs font-bold uppercase transition cursor-pointer ${
+                      initiationProcedures >= targetProcedures
+                        ? "border border-emerald-400 bg-emerald-500/20 text-emerald-300 animate-pulse"
+                        : forcedStartupSafety
+                        ? "border border-amber-400 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                        : "border border-bridge-border bg-slate-900 text-slate-600 cursor-not-allowed"
+                    }`}
+                  >
+                    {initiationProcedures >= targetProcedures ? "Ignite Reactor Core" : `Force Core Start (${initiationProcedures}/10)`}
+                  </button>
+                </div>
+              </div>
+
+              {mishapResultLog && (
+                <div className="p-2 rounded bg-black/80 border border-amber-400/50 text-[11px] text-amber-300">
+                  {mishapResultLog}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between items-center text-[9px] text-muted-foreground border-t border-bridge-border/40 pt-2">
+              <button onClick={handleResetStartup} className="hover:text-white underline cursor-pointer">
+                Reset Startup State
+              </button>
+              <button onClick={() => setShowStartupModal(false)} className="hover:text-cyan-neon font-bold cursor-pointer">
+                Close Panel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

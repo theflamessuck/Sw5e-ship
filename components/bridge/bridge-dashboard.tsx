@@ -20,7 +20,7 @@ import { SHIP_SIZE_RULES, SHIP_TYPE_RULES, ShipSize } from "@/lib/ship-rules"
 import { STARSHIP_AMMUNITION } from "@/lib/starship-weapons"
 import { CodexStation } from "./codex-station"
 import { computeShipModifiers } from "@/lib/ship-modifiers"
-import { AlertOctagon, RefreshCw, Radio } from "lucide-react"
+import { AlertOctagon, RefreshCw, Radio, PowerOff } from "lucide-react"
 import { useRoomSync } from "@/hooks/use-room-sync"
 import { RoomSelector } from "./room-selector"
 
@@ -143,6 +143,7 @@ function getRawModifier(score: number): number {
 // ==========================================
 
 export interface SyncedBridgeState {
+  isPoweredOn: boolean
   maxFuel: number
   currentFuel: number
   currentDay: number
@@ -187,6 +188,7 @@ export interface SyncedBridgeState {
 }
 
 const INITIAL_SYNCED_STATE: SyncedBridgeState = {
+  isPoweredOn: true,
   maxFuel: 30,
   currentFuel: 30,
   currentDay: 1,
@@ -455,6 +457,7 @@ export default function BridgeDashboard() {
 
   // Unpack synced state
   const {
+    isPoweredOn = true,
     maxFuel,
     currentFuel,
     currentDay,
@@ -499,6 +502,34 @@ export default function BridgeDashboard() {
   } = roomState
 
   const externalPendingCharts = currentDay > lastAstrogationDay ? 150 : 0
+
+  // Power state handler
+  const handleSetPoweredOn = (powered: boolean) => {
+    updateRoomData((prev) => {
+      let nextStatuses = prev.shipStatuses
+      if (!powered) {
+        if (!nextStatuses.some((s) => s.id === "stalled-power-off")) {
+          nextStatuses = [
+            ...nextStatuses,
+            {
+              id: "stalled-power-off",
+              title: "STALLED // COLD REACTOR",
+              effect: "Main reactor is dark. Auxiliary emergency battery power only. Weapons, defense shields, sensors, and communications systems offline.",
+              duration: "Until Reactor Online",
+            },
+          ]
+        }
+      } else {
+        nextStatuses = nextStatuses.filter((s) => s.id !== "stalled-power-off")
+      }
+
+      return {
+        ...prev,
+        isPoweredOn: powered,
+        shipStatuses: nextStatuses,
+      }
+    })
+  }
 
   // --- CREW MANIFEST & TACTICAL ACTIONS ---
   const handleAddMember = (
@@ -696,7 +727,7 @@ export default function BridgeDashboard() {
   // Compound Slowed Calculation
   const effectiveSlowedLevel = useMemo(() => {
     let baseSlow = 0
-    if (isDisabled || isStunned || isTractored || isStalled) {
+    if (isDisabled || isStunned || isTractored || isStalled || !isPoweredOn) {
       baseSlow = 4
     }
 
@@ -713,7 +744,7 @@ export default function BridgeDashboard() {
     const systemDamageSlow = systemDamageLevel >= 2 ? 1 : 0
 
     return Math.min(4, combinedSlow + systemDamageSlow)
-  }, [isDisabled, isStunned, isTractored, isStalled, shipStatuses, systemDamageLevel])
+  }, [isDisabled, isStunned, isTractored, isStalled, isPoweredOn, shipStatuses, systemDamageLevel])
 
   const isLevel6Blackout = systemDamageLevel >= 6
 
@@ -1019,6 +1050,7 @@ export default function BridgeDashboard() {
   const handleFullShipReset = (startingDay: number, startingFunds: number) => {
     updateRoomData((prev) => ({
       ...prev,
+      isPoweredOn: true,
       shipConfig: {
         name: "",
         manufacturer: "",
@@ -1485,6 +1517,10 @@ export default function BridgeDashboard() {
     )
   }
 
+  const isDarkStation =
+    !isPoweredOn &&
+    ["Weapons", "Defense", "Sensors", "Communications"].includes(active)
+
   return (
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-3 sm:p-4 lg:p-6">
       {/* Top Bar with Live Room Code Linker */}
@@ -1621,6 +1657,36 @@ export default function BridgeDashboard() {
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
                       Auxiliary Reboot (Clear to Lvl 5)
+                    </button>
+                  </div>
+                </div>
+              ) : isDarkStation ? (
+                /* COLD & DARK / OFFLINE OVERLAY FOR TACTICAL STATIONS */
+                <div className="flex min-h-[460px] flex-col items-center justify-center gap-4 rounded-md border border-neutral-800 bg-black/90 p-8 text-center font-mono shadow-2xl">
+                  <div className="relative flex items-center justify-center">
+                    <span className="h-14 w-14 animate-pulse rotate-45 border-2 border-neutral-700" />
+                    <PowerOff className="absolute h-6 w-6 text-neutral-500" />
+                  </div>
+                  <h2 className="text-base sm:text-lg font-bold tracking-[0.25em] text-neutral-400 uppercase mt-2">
+                    {active.toUpperCase()} CONSOLE // COLD &amp; DARK
+                  </h2>
+                  <p className="max-w-md text-xs tracking-wider text-neutral-500 leading-relaxed">
+                    Main reactor is offline. Auxiliary power grid maintains life support and emergency batteries only. Primary bus, weapons capacitor, shield emitters, and tactical comms arrays remain unpowered.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-3 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setActive("Engines")}
+                      className="px-4 py-2 rounded border border-cyan-500/50 bg-cyan-950/40 text-xs font-bold text-cyan-300 hover:bg-cyan-900/50 uppercase tracking-widest cursor-pointer"
+                    >
+                      Go to Helm / Engines &rarr;
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActive("Engineering")}
+                      className="px-4 py-2 rounded border border-amber-500/50 bg-amber-950/40 text-xs font-bold text-amber-300 hover:bg-amber-900/50 uppercase tracking-widest cursor-pointer"
+                    >
+                      Go to Engineering &rarr;
                     </button>
                   </div>
                 </div>
@@ -1812,6 +1878,8 @@ export default function BridgeDashboard() {
                 />
               ) : active === "Engineering" ? (
                 <EngineeringStation
+                  isPoweredOn={isPoweredOn}
+                  onSetPoweredOn={handleSetPoweredOn}
                   maxPowerDice={shipConfig.maxPowerDice}
                   availablePowerDice={availablePowerDice}
                   powerDieType={shipConfig.powerDieType}
@@ -2076,6 +2144,8 @@ export default function BridgeDashboard() {
                 />
               ) : active === "Engines" ? (
                 <EnginesStation
+                  isPoweredOn={isPoweredOn}
+                  onSetPoweredOn={handleSetPoweredOn}
                   currentFuel={currentFuel}
                   onFuelChange={(fuel) =>
                     updateRoomData((prev) => ({

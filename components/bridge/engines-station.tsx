@@ -28,7 +28,9 @@ import {
   Lock,
   Unlock,
   X,
-  Zap
+  Zap,
+  Power,
+  PowerOff
 } from "lucide-react"
 
 type FlightEnvironment = "Space" | "Atmosphere" | "Underwater"
@@ -99,6 +101,8 @@ const PILOT_ACTIONS: PilotAction[] = [
 ]
 
 interface EnginesStationProps {
+  isPoweredOn?: boolean
+  onSetPoweredOn?: (powered: boolean) => void
   currentDay?: number
   lastAstrogationSyncDay?: number
   onUpdateDay?: (day: number | ((prev: number) => number), consumeRations?: boolean) => void
@@ -158,6 +162,8 @@ interface EnginesStationProps {
 }
 
 export function EnginesStation({
+  isPoweredOn = true,
+  onSetPoweredOn,
   currentDay = 42,
   lastAstrogationSyncDay = 38,
   onUpdateDay,
@@ -221,15 +227,15 @@ export function EnginesStation({
   onSpendMovement,
   onResetMovement,
 }: EnginesStationProps) {
-  // Modal Overlays[cite: 2]
+  // Modal Overlays[cite: 8]
   const [showStartupModal, setShowStartupModal] = useState(false)
   const [showActionModal, setShowActionModal] = useState(false)
   const [forcedStartupSafety, setForcedStartupSafety] = useState(false)
 
-  // Fast-Forward Input[cite: 2]
+  // Fast-Forward Input[cite: 8]
   const [awayMissionDaysInput, setAwayMissionDaysInput] = useState<string>("7")
 
-  // Crew assignment extraction[cite: 2]
+  // Crew assignment extraction[cite: 8]
   const assignedCrew = useMemo(() => {
     return manifest
       .filter((m) => m.location === "helm" && !m.isPassenger)
@@ -251,7 +257,7 @@ export function EnginesStation({
     else setInternalSFoilsMode(newMode)
   }
 
-  // Power Coupling Logic[cite: 2, 3]
+  // Power Coupling Logic[cite: 8]
   const powerCoupling = shipConfig?.powerCoupling ?? shipConfig?.couplingType ?? "Direct Power Coupling"
   const isDistributed = powerCoupling.toLowerCase().includes("distributed")
   const isHubAndSpoke = powerCoupling.toLowerCase().includes("hub") || powerCoupling.toLowerCase().includes("spoke")
@@ -420,8 +426,17 @@ export function EnginesStation({
     }
   }, [shipSize])
 
-  const [initiationProcedures, setInitiationProcedures] = useState<number>(0)
+  const [initiationProcedures, setInitiationProcedures] = useState<number>(isPoweredOn ? 10 : 0)
   const targetProcedures = 10
+
+  // Sync initiation counter if power state changes externally
+  useEffect(() => {
+    if (isPoweredOn && initiationProcedures < targetProcedures) {
+      setInitiationProcedures(10)
+    } else if (!isPoweredOn && initiationProcedures >= targetProcedures) {
+      setInitiationProcedures(0)
+    }
+  }, [isPoweredOn])
 
   const duressCondition: "advantage" | "disadvantage" | "normal" = useMemo(() => {
     if (currentHull < maxHull) return "disadvantage"
@@ -478,6 +493,17 @@ export function EnginesStation({
     setLastDuressRollLog(null)
     setMishapResultLog(null)
     setForcedStartupSafety(false)
+    if (onSetPoweredOn) onSetPoweredOn(false)
+  }
+
+  const handleShutdownShip = () => {
+    if (confirm("CONFIRM REACTOR SCRAM: Shut down main reactor and drop ship to cold & dark?")) {
+      setInitiationProcedures(0)
+      setMishapResultLog("🛑 REACTOR SCRAMMED: Vessel power grid offline.")
+      setForcedStartupSafety(false)
+      if (onSetPoweredOn) onSetPoweredOn(false)
+      setShowStartupModal(false)
+    }
   }
 
   const resolveMishapTableRoll = (dieRoll: number, bonus: number, isRecursiveSecondRoll: boolean = false): string => {
@@ -519,13 +545,15 @@ export function EnginesStation({
 
   const handleEngageStartup = () => {
     if (initiationProcedures >= targetProcedures) {
-      setMishapResultLog("✅ Optimal Start-Up: All 10 initiation procedures completed cleanly. Engines primed.")
+      setMishapResultLog("✅ Optimal Start-Up: All 10 initiation procedures completed cleanly. Primary reactor online.")
+      if (onSetPoweredOn) onSetPoweredOn(true)
       return
     }
 
     const d20 = Math.floor(Math.random() * 20) + 1
     const resultText = resolveMishapTableRoll(d20, initiationProcedures)
     setMishapResultLog(`⚠️ FORCED TAKEOFF (Roll ${d20} + ${initiationProcedures} proc): ${resultText}`)
+    if (onSetPoweredOn) onSetPoweredOn(true)
   }
 
   const handleActivatePinpointStrike = () => {
@@ -581,7 +609,7 @@ export function EnginesStation({
     onRecharge?.()
   }
 
-  // Speed & Environment Calculations[cite: 2]
+  // Speed & Environment Calculations[cite: 8]
   const envStats = useMemo(() => {
     const rawNominalSpeed = environment === "Underwater" ? 150 + Math.round(bonusSpeed / 2) : 300 + bonusSpeed
     const finalEffectiveSpeed = calculateSlowedSpeed(rawNominalSpeed, effectiveSlowedLevel)
@@ -734,14 +762,26 @@ export function EnginesStation({
                 type="button"
                 onClick={() => setShowStartupModal(true)}
                 className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border transition cursor-pointer ${
-                  initiationProcedures >= targetProcedures
+                  isPoweredOn
                     ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                    : "border-amber-400/60 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(251,191,36,0.2)]"
+                    : "border-amber-400/60 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(251,191,36,0.2)] animate-pulse"
                 }`}
               >
                 <Flame className="h-3 w-3" />
-                <span>Start-Up ({initiationProcedures}/10)</span>
+                <span>{isPoweredOn ? "Reactor: Online" : `Cold Start (${initiationProcedures}/10)`}</span>
               </button>
+
+              {isPoweredOn && (
+                <button
+                  type="button"
+                  onClick={handleShutdownShip}
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border border-rose-500/50 bg-rose-950/30 text-rose-300 hover:bg-rose-900/50 transition cursor-pointer"
+                  title="Emergency SCRAM / Shutdown Ship"
+                >
+                  <PowerOff className="h-3 w-3" />
+                  <span>SCRAM</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -754,7 +794,10 @@ export function EnginesStation({
             </div>
           </div>
           <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
-            {shipConfig?.name?.toUpperCase() || "VESSEL"} // HELM CONSOLE
+            {shipConfig?.name?.toUpperCase() || "VESSEL"} // HELM CONSOLE //{" "}
+            <span className={isPoweredOn ? "text-emerald-400 font-bold" : "text-amber-400 font-bold animate-pulse"}>
+              {isPoweredOn ? "MAIN REACTOR ACTIVE" : "COLD & DARK (AUX BATTERY)"}
+            </span>
           </p>
         </div>
 
@@ -900,7 +943,7 @@ export function EnginesStation({
         )}
       </div>
 
-      {/* Global Ship Stats Telemetry strip[cite: 2] */}
+      {/* Global Ship Stats Telemetry strip[cite: 8] */}
       <ShipStats shipConfig={shipConfig} proficiencyBonus={proficiencyBonus} />
 
       {/* ========================================================================= */}
@@ -1578,19 +1621,31 @@ export function EnginesStation({
                   <span className="text-xs text-emerald-400 font-bold uppercase">Ready for Clean Ignition</span>
                 )}
 
-                <button
-                  disabled={initiationProcedures < targetProcedures && !forcedStartupSafety}
-                  onClick={handleEngageStartup}
-                  className={`px-4 py-2 rounded text-xs font-bold uppercase transition cursor-pointer ${
-                    initiationProcedures >= targetProcedures
-                      ? "border border-emerald-400 bg-emerald-500/20 text-emerald-300 animate-pulse"
-                      : forcedStartupSafety
-                      ? "border border-amber-400 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
-                      : "border border-bridge-border bg-slate-900 text-slate-600 cursor-not-allowed"
-                  }`}
-                >
-                  {initiationProcedures >= targetProcedures ? "Engage Engines" : `Force Start (${initiationProcedures}/10)`}
-                </button>
+                <div className="flex items-center gap-2">
+                  {isPoweredOn && (
+                    <button
+                      type="button"
+                      onClick={handleShutdownShip}
+                      className="px-3 py-2 rounded border border-rose-500/60 bg-rose-950/40 text-rose-300 hover:bg-rose-900/50 text-xs font-bold uppercase cursor-pointer"
+                    >
+                      SCRAM Reactor
+                    </button>
+                  )}
+
+                  <button
+                    disabled={initiationProcedures < targetProcedures && !forcedStartupSafety}
+                    onClick={handleEngageStartup}
+                    className={`px-4 py-2 rounded text-xs font-bold uppercase transition cursor-pointer ${
+                      initiationProcedures >= targetProcedures
+                        ? "border border-emerald-400 bg-emerald-500/20 text-emerald-300 animate-pulse"
+                        : forcedStartupSafety
+                        ? "border border-amber-400 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                        : "border border-bridge-border bg-slate-900 text-slate-600 cursor-not-allowed"
+                    }`}
+                  >
+                    {initiationProcedures >= targetProcedures ? "Engage Engines" : `Force Start (${initiationProcedures}/10)`}
+                  </button>
+                </div>
               </div>
 
               {mishapResultLog && (
