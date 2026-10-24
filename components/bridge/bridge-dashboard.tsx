@@ -1528,8 +1528,8 @@ export default function BridgeDashboard() {
         <div className="flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_#06b6d4] animate-pulse" />
           <span className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-300">
-            TRANSMISSION GRID // SW5E NET
-          </span>
+          FENHAVEN STAR DRIVES // BRIDGE OS v2.4
+        </span>
         </div>
         <RoomSelector
           currentRoom={roomCode}

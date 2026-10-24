@@ -9,8 +9,8 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Spaceship Control',
-  description: 'Starship bridge tactical terminal dashboard',
+  title: 'Fenhaven Star Drives // Bridge OS',
+  description: 'Tactical Starship Management & Avionics Suite for SW5e',
   generator: 'v0.app',
   icons: {
     icon: [

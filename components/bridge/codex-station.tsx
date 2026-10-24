@@ -14,7 +14,8 @@ import {
   History, 
   Power, 
   Key, 
-  Flame 
+  Flame,
+  MessageSquare
 } from "lucide-react"
 
 type CodexCategory = "homebrew" | "combat" | "build" | "updates"
@@ -60,6 +61,32 @@ const SW5E_EXTERNAL_LINKS = [
 ]
 
 const CODEX_DATA: RuleEntry[] = [
+  {
+    id: "developer-manifesto",
+    title: "Developer's Transmission // Design Philosophy",
+    category: "build",
+    tag: "CREATOR'S NOTE",
+    content: "A note from the developer on the tabletop design theory and why this companion app was created:",
+    bullets: [
+      "The Core Philosophy: We want to keep your imagination engaged in the action instead of worring about bookeeping-to augment your imagination without supplanting it.",
+      "The Shared Bridge Problem: In most sci-fi tabletop RPGs, starship combat often collapses into a single pilot rolling initiative while the rest of the table spectates. Fenhaven Star Drives OS was designed so that every station carries genuine tactical weight, distinct responsibilities, and specialized actions.",
+      "Synchronized Tension: Space combat is defined by resource scarcity and trade-offs. Power allocation, damage spillover, and cold & dark states synchronize in real time across screens to spark natural table communication: diverting power to thrusters, rebooting scrambled sensor arrays, or holding off boarders.",
+      "Diegetic Pacing over Abstract Bookkeeping: Tracking environment-specific fuel burns, daily ration consumption, and authentic startup checklists grounds space travel into narrative beats and tense survival choices rather than hand-waved arithmetic.",
+      ],
+  },
+  {
+    id: "fenhaven-star-drives-architecture",
+    title: "Fenhaven Star Drives OS // Architecture & Registry",
+    category: "build",
+    tag: "SYSTEM ARCHITECTURE",
+    content: "Proprietary bridge management and tactical synchronization firmware developed by Fenhaven Star Drives:",
+    bullets: [
+      "Integrated Propulsion Grid: Unifies sublight throttle, turn arcs, and fuel consumption across vacuum, atmospheric, and aquatic environments.",
+      "Decentralized Bridge Bus: Synchronizes real-time power routing across Helm, Engineering, Weapons, Defense, Comms, and Sensors via Supabase state relays.",
+      "Fail-Safe Protocols: Features automated Cold & Dark lockdown on reactor scram, with duress restart calibration for emergency combat launches.",
+      "Multi-Tenant Isolation: Per-vessel PIN authorization and Master Shipyard Commissioning Keys guard against signal cross-talk and unauthorized dockyard refits.",
+    ],
+  },
   {
     id: "reactor-startup-and-scram",
     title: "Vessel Cold & Dark // Reactor SCRAM Protocol",
@@ -119,24 +146,12 @@ const CODEX_DATA: RuleEntry[] = [
     tag: "RELEASE NOTES",
     content: "Summary of recent platform improvements, bug fixes, and security patches:",
     bullets: [
+      "Fenhaven Star Drives OS Rebranding: Formalized avionics suite branding, architecture documentation, and developer design notes.",
       "Added Synchronized Cold & Dark / Reactor Ignition: Consoles for Weapons, Defense, Sensors, and Comms power down when main reactor is offline. Startup sequence and SCRAM controls active on Helm and Engineering.",
       "Restricted Shipyard Gate: Commissioning new vessels now requires a Master Shipyard Authorization Key (NEXT_PUBLIC_CREATION_KEY) to prevent unauthorized database room creation.",
       "Landing Standby Console: Root URL now presents an unlinked standby radar dish rather than defaulting to an open vessel.",
       "Hydration Mismatch Fix: Implemented an isMounted barrier to guarantee smooth server/client rendering with localStorage state.",
       "Real-Time Supabase Sync: PIN locking, turn taken flags, movement gauges, and reactor pools synchronize instantaneously across active player sessions.",
-    ],
-  },
-  {
-    id: "app-build-specs",
-    title: "Crucible Bridge OS Architecture",
-    category: "build",
-    tag: "DEV NOTES",
-    content: "Technical architecture specifications for this dashboard deployment.",
-    bullets: [
-      "Next.js App Router, React Client Component architecture, Tailwind CSS, Supabase Realtime.",
-      "Elevated Cross-Station Persistence: State for unmounting tabs lives centrally inside bridge-dashboard.tsx.",
-      "Coupling Engine: Dynamically routes power dice based on Direct, Distributed, or Hub and Spoke reactor couplings.",
-      "Security Protocols: Multi-tenant room isolation with per-ship access PINs and Master Shipyard commissioning interlocks.",
     ],
   },
 ]
@@ -177,7 +192,7 @@ export function CodexStation() {
           <div className="flex items-center gap-2">
             <BookOpen className="h-5 w-5 text-cyan-neon" />
             <h2 className="text-glow-cyan text-sm font-bold tracking-[0.25em] text-cyan-neon uppercase">
-              Vessel Codex &amp; Tactical Reference
+              Fenhaven Star Drives // Codex &amp; Tactical Reference
             </h2>
           </div>
           <p className="text-[10px] tracking-wider text-muted-foreground mt-1">
