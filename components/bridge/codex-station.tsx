@@ -1,9 +1,23 @@
 "use client"
 
 import { useState } from "react"
-import { BookOpen, Terminal, ShieldAlert, Wrench, Sparkles, ExternalLink, Globe, Compass, Cpu } from "lucide-react"
+import { 
+  BookOpen, 
+  Terminal, 
+  ShieldAlert, 
+  Wrench, 
+  Sparkles, 
+  ExternalLink, 
+  Globe, 
+  Compass, 
+  Cpu, 
+  History, 
+  Power, 
+  Key, 
+  Flame 
+} from "lucide-react"
 
-type CodexCategory = "homebrew" | "combat" | "build" | "vessel"
+type CodexCategory = "homebrew" | "combat" | "build" | "updates"
 
 interface RuleEntry {
   id: string
@@ -47,6 +61,19 @@ const SW5E_EXTERNAL_LINKS = [
 
 const CODEX_DATA: RuleEntry[] = [
   {
+    id: "reactor-startup-and-scram",
+    title: "Vessel Cold & Dark // Reactor SCRAM Protocol",
+    category: "homebrew",
+    tag: "ENGINEERING / HELM",
+    content: "Official ruling on cold start procedures and main reactor emergency shutdowns:",
+    bullets: [
+      "Cold & Dark State: When the main reactor is unpowered, auxiliary emergency battery circuits maintain life support and non-tactical avionics. Weapons, Defense, Sensors, and Tactical Communications stations enter a cold, unpowered standby mode.",
+      "Dual Control Access: Both the Helm (Engines) and Engineering consoles maintain independent command access to initiate the Start-Up Sequence or trigger an emergency SCRAM.",
+      "Start-Up Mechanics: Standard initialization requires 10 procedures (or passing Duress checks under fire). A safety interlock allows forced takeoffs with risk of mishap rolls (slowed, blinded, or system damage).",
+      "SCRAM Definition: An emergency reactor scram dumps control rods into the core, immediately killing primary power and forcing the vessel into cold & dark until re-ignited.",
+    ],
+  },
+  {
     id: "boost-shields-duration-ruling",
     title: "Boost Shields Duration Adjustment",
     category: "homebrew",
@@ -82,6 +109,21 @@ const CODEX_DATA: RuleEntry[] = [
       "At 0 HP, vessel becomes Disabled and crew must make DC 10 Destruction Saves at the start of each round.",
       "Three successes stabilize the vessel; three failures cause catastrophic loss.",
       "Every failure or critical breakdown check applies 1 level of Ship System Damage.",
+      "At Level 6 System Damage, vessel enters Catastrophic Blackout: all primary stations lock out except GM Override and Auxiliary Reboot.",
+    ],
+  },
+  {
+    id: "patch-notes-latest",
+    title: "Firmware Revision // Tactical Refits & Security",
+    category: "updates",
+    tag: "RELEASE NOTES",
+    content: "Summary of recent platform improvements, bug fixes, and security patches:",
+    bullets: [
+      "Added Synchronized Cold & Dark / Reactor Ignition: Consoles for Weapons, Defense, Sensors, and Comms power down when main reactor is offline. Startup sequence and SCRAM controls active on Helm and Engineering.",
+      "Restricted Shipyard Gate: Commissioning new vessels now requires a Master Shipyard Authorization Key (NEXT_PUBLIC_CREATION_KEY) to prevent unauthorized database room creation.",
+      "Landing Standby Console: Root URL now presents an unlinked standby radar dish rather than defaulting to an open vessel.",
+      "Hydration Mismatch Fix: Implemented an isMounted barrier to guarantee smooth server/client rendering with localStorage state.",
+      "Real-Time Supabase Sync: PIN locking, turn taken flags, movement gauges, and reactor pools synchronize instantaneously across active player sessions.",
     ],
   },
   {
@@ -91,9 +133,10 @@ const CODEX_DATA: RuleEntry[] = [
     tag: "DEV NOTES",
     content: "Technical architecture specifications for this dashboard deployment.",
     bullets: [
-      "Next.js App Router, React 19 Client Component architecture, Tailwind CSS.",
-      "Elevated Cross-Station Persistence: State for unmounting tabs lives inside bridge-dashboard.tsx.",
+      "Next.js App Router, React Client Component architecture, Tailwind CSS, Supabase Realtime.",
+      "Elevated Cross-Station Persistence: State for unmounting tabs lives centrally inside bridge-dashboard.tsx.",
       "Coupling Engine: Dynamically routes power dice based on Direct, Distributed, or Hub and Spoke reactor couplings.",
+      "Security Protocols: Multi-tenant room isolation with per-ship access PINs and Master Shipyard commissioning interlocks.",
     ],
   },
 ]
@@ -138,7 +181,7 @@ export function CodexStation() {
             </h2>
           </div>
           <p className="text-[10px] tracking-wider text-muted-foreground mt-1">
-            CAMPAIGN HOMEBREW RULES • STARSHIP COMBAT LOGIC • SYSTEM BUILD NOTES
+            CAMPAIGN HOMEBREW RULES • STARSHIP COMBAT LOGIC • REFIT &amp; BUILD NOTES
           </p>
         </div>
 
@@ -198,6 +241,7 @@ export function CodexStation() {
       <div className="flex flex-wrap gap-2">
         {[
           { id: "all", label: "All Logs", icon: Terminal },
+          { id: "updates", label: "Firmware Updates", icon: History },
           { id: "homebrew", label: "Homebrew Rules", icon: Sparkles },
           { id: "combat", label: "SW5e Combat", icon: ShieldAlert },
           { id: "build", label: "App & Build Notes", icon: Wrench },
