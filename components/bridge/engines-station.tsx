@@ -6,12 +6,14 @@ import { StationModifications, type Modification } from "./ship-modifications"
 import { ShipStats } from "./ship-stats"
 import type { JourneyData } from "./navcomputer-station"
 import type { ShipConfig } from "./ship-setup"
+import type { OrdnanceItem } from "./weapons-station"
 import type {
   ManifestMember,
   ShipCompartmentId,
   TacticalMovementState
 } from "./bridge-dashboard"
 import { getCrewRole } from "./bridge-dashboard"
+import { STARSHIP_AMMUNITION, STARSHIP_WEAPONS } from "@/lib/starship-weapons"
 import {
   Users,
   CheckCircle2,
@@ -30,11 +32,70 @@ import {
   X,
   Zap,
   Power,
-  PowerOff
+  PowerOff,
+  Crosshair,
+  AlertTriangle,
+  XCircle,
+  Dices,
+  Ban,
+  PackagePlus,
+  Undo2,
+  Eye,
+  ShieldAlert,
+  ShieldCheck,
+  Swords,
+  Target
 } from "lucide-react"
 
 type FlightEnvironment = "Space" | "Atmosphere" | "Underwater"
 type TransponderMode = "PRIMARY" | "SECURE_BACKUP"
+type LauncherFamily = "Missile launcher" | "Cluster pod" | "Torpedo launcher" | "Quaternary Ammunition"
+type HelmAttackType = "standard" | "attack_run" | "dogfight"
+
+interface LauncherLoadState {
+  ordnanceId: string | null
+  ordnanceName: string | null
+  loadedCount: number
+  maxCapacity: number
+  damage: string | null
+  damageType: string | null
+}
+
+function getLauncherFamily(weaponName: string): LauncherFamily | null {
+  const norm = weaponName.toLowerCase()
+  if (norm.includes("rocket") || norm.includes("cluster")) return "Cluster pod"
+  if (norm.includes("missile")) return "Missile launcher"
+  if (norm.includes("torpedo")) return "Torpedo launcher"
+  if (norm.includes("bomb") || norm.includes("mine") || norm.includes("layer") || norm.includes("deployer")) return "Quaternary Ammunition"
+  return null
+}
+
+function findArmedAmmoCatalog(launcherState: LauncherLoadState | null) {
+  if (!launcherState || !launcherState.ordnanceId) return null
+  return (
+    STARSHIP_AMMUNITION.find((a) => a.id === launcherState.ordnanceId) ||
+    STARSHIP_AMMUNITION.find((a) => a.name.toLowerCase() === (launcherState.ordnanceName || "").toLowerCase()) ||
+    null
+  )
+}
+
+function rollDiceFormula(formula: string): { individualRolls: number[]; totalDice: number } {
+  const matches = [...formula.matchAll(/(\d+)d(\d+)/g)]
+  const rolls: number[] = []
+  let total = 0
+
+  matches.forEach((m) => {
+    const count = parseInt(m[1], 10)
+    const sides = parseInt(m[2], 10)
+    for (let i = 0; i < count; i++) {
+      const roll = Math.floor(Math.random() * sides) + 1
+      rolls.push(roll)
+      total += roll
+    }
+  })
+
+  return { individualRolls: rolls, totalDice: total }
+}
 
 interface PilotAction {
   name: string
@@ -56,7 +117,7 @@ const PILOT_ACTIONS: PilotAction[] = [
   {
     name: "Attack Run",
     category: "Combat & Movement",
-    description: "When you move at least 150 feet towards a target, you may declare an Attack Run as an action. You must have a clear path towards your target, and nothing should hinder your path (such as difficult terrain or obstacles). If you finish this movement within range of your target, you may follow it with one of these options:\n• Fire: Make a ship weapon attack from a forward-facing limited arc without normal disadvantage. Tertiary/quaternary weapons deal additional damage equal to distance divided by 50 (up to ship's Strength modifier, min 1).\n• Ram: Make a Ram attempt with advantage on Strength (Ram). Success deals additional damage equal to distance divided by 50 (up to ship's Constitution modifier, min +1).\n• Conceal: Make a Dexterity (Hide) check to conceal your ship following Chapter 7 hiding rules."
+    description: "When you move at least 150 feet towards a target, you may declare an Attack Run as an action. You must have a clear path towards your target, and nothing should hinder your path (such as difficult terrain or obstacles). If you finish this movement within range of your target, you may follow it with one of these options:\n• Fire: Make a ship weapon attack from a forward-facing limited arc without normal disadvantage.\n• Ram: Make a Ram attempt with advantage on Strength (Ram).\n• Conceal: Make a Dexterity (Hide) check to conceal your ship following Chapter 7 hiding rules."
   },
   {
     name: "Dogfight",
@@ -119,6 +180,11 @@ interface EnginesStationProps {
   onFuelChange?: (fuel: number) => void
   installedMods?: Modification[]
   onRemoveMod?: (instanceId: string) => void
+  onUpdateMod?: (instanceId: string, updates: Partial<Modification>) => void
+  ordnanceList?: OrdnanceItem[]
+  onUpdateOrdnanceList?: (
+    newList: OrdnanceItem[] | ((prev: OrdnanceItem[]) => OrdnanceItem[])
+  ) => void
   stationPools?: Record<string, number>
   onUpdateStationPools?: React.Dispatch<React.SetStateAction<Record<string, number>>>
   sharedPoolDice?: number
@@ -174,12 +240,15 @@ export function EnginesStation({
   powerDieType = "d4",
   onConsumePowerDice = () => false,
   shipConfig,
-  proficiencyBonus,
+  proficiencyBonus = 2,
   currentFuel = 30,
   maxFuel = 30,
   onFuelChange,
   installedMods = [],
   onRemoveMod = () => {},
+  onUpdateMod,
+  ordnanceList = [],
+  onUpdateOrdnanceList,
   stationPools = {
     engines: 0,
     communications: 0,
@@ -227,15 +296,15 @@ export function EnginesStation({
   onSpendMovement,
   onResetMovement,
 }: EnginesStationProps) {
-  // Modal Overlays[cite: 8]
   const [showStartupModal, setShowStartupModal] = useState(false)
   const [showActionModal, setShowActionModal] = useState(false)
   const [forcedStartupSafety, setForcedStartupSafety] = useState(false)
-
-  // Fast-Forward Input[cite: 8]
   const [awayMissionDaysInput, setAwayMissionDaysInput] = useState<string>("7")
 
-  // Crew assignment extraction[cite: 8]
+  // Helm Firing Mode Selector: Standard (Disadv), Attack Run (150ft moved, straight), Dogfight (Maneuver opposed, straight)
+  const [helmAttackType, setHelmAttackType] = useState<HelmAttackType>("standard")
+
+  // Crew assignment extraction
   const assignedCrew = useMemo(() => {
     return manifest
       .filter((m) => m.location === "helm" && !m.isPassenger)
@@ -246,8 +315,6 @@ export function EnginesStation({
     return manifest.filter((m) => m.location !== "helm" && !m.isPassenger)
   }, [manifest])
 
-  const pilot = assignedCrew[0] || null
-
   const hasSFoils = installedMods.some((m) => m.name.toUpperCase().trim() === "S-FOILS")
   const [internalSFoilsMode, setInternalSFoilsMode] = useState<"locked" | "unlocked">("unlocked")
   const activeSFoilsMode = externalSFoilsMode ?? internalSFoilsMode
@@ -257,7 +324,336 @@ export function EnginesStation({
     else setInternalSFoilsMode(newMode)
   }
 
-  // Power Coupling Logic[cite: 8]
+  // =========================================================================
+  // PILOT WEAPONS FILTER & SYNCHRONIZATION
+  // =========================================================================
+  const isTurretMounted = (w: Modification): boolean => {
+    if (w.mountedOnInstanceId) {
+      const parent = installedMods.find((m) => m.instanceId === w.mountedOnInstanceId || m.id === w.mountedOnInstanceId)
+      if (parent && parent.name.toLowerCase().includes("turret")) return true
+    }
+    const loc = (w.location || "").toLowerCase()
+    return loc.includes("turret")
+  }
+
+  const getAssignedGunner = (w: Modification): ManifestMember | null => {
+    if (!isTurretMounted(w)) return null
+    const turretCompartmentId: ShipCompartmentId = `turret-${w.instanceId || w.id}`
+    return manifest.find((m) => m.location === turretCompartmentId && !m.isPassenger) || null
+  }
+
+  // Forward facing limited arc: Bow-mounted OR unmanned turrets (excluding structural hardpoints)
+  const forwardWeapons = useMemo(() => {
+    return installedMods.filter((mod) => {
+      if (mod.name === "Fixed Hardpoint" || mod.name === "Turret Hardpoint") return false
+
+      const isWeaponCategory =
+        mod.category === "Weapon System" ||
+        mod.station === "Weapons" ||
+        mod.category === "Weapon" ||
+        mod.category === "Ordnance"
+
+      if (!isWeaponCategory) return false
+
+      const loc = (mod.location || "").toLowerCase().trim()
+      const isBow = loc === "bow" || loc === "forward" || loc.includes("bow") || loc === ""
+
+      if (isTurretMounted(mod)) {
+        return !getAssignedGunner(mod)
+      }
+
+      return isBow
+    })
+  }, [installedMods, manifest])
+
+  const [localLauncherStates, setLocalLauncherStates] = useState<Record<string, LauncherLoadState>>({})
+
+  const getLauncherState = (instanceKey: string, weapon: Modification): LauncherLoadState => {
+    if (localLauncherStates[instanceKey]) return localLauncherStates[instanceKey]
+    const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === weapon.name.toLowerCase())
+    const capacity = weapon.reload || catalogDef?.reload || 4
+    return {
+      ordnanceId: null,
+      ordnanceName: null,
+      loadedCount: 0,
+      maxCapacity: capacity,
+      damage: null,
+      damageType: null,
+    }
+  }
+
+  const handleCoolMountedWeapon = (instanceId: string) => {
+    onUpdateMod?.(instanceId, { currentHeat: 0 } as any)
+  }
+
+  const [weaponArmModal, setWeaponArmModal] = useState<{ weapon: Modification } | null>(null)
+
+  const executeArmLauncher = (targetLauncher: Modification, ordnance: OrdnanceItem) => {
+    const key = targetLauncher.instanceId || targetLauncher.id
+    const state = getLauncherState(key, targetLauncher)
+
+    if (state.ordnanceId && state.ordnanceId !== ordnance.id && state.loadedCount > 0) {
+      alert(`Cannot mix warheads! ${targetLauncher.name} already contains ${state.ordnanceName}. Disarm it first.`)
+      return
+    }
+
+    if (ordnance.currentReserve <= 0) {
+      alert(`No ${ordnance.name} available in reserve!`)
+      return
+    }
+
+    const needed = state.maxCapacity - state.loadedCount
+    if (needed <= 0) {
+      alert(`${targetLauncher.name} is already at full capacity (${state.maxCapacity}/${state.maxCapacity}).`)
+      return
+    }
+
+    const transferAmount = Math.min(needed, ordnance.currentReserve)
+    const newLoadedTotal = state.loadedCount + transferAmount
+
+    onUpdateOrdnanceList?.((prev) =>
+      prev.map((o) => (o.id === ordnance.id ? { ...o, currentReserve: o.currentReserve - transferAmount } : o))
+    )
+
+    setLocalLauncherStates((prev) => ({
+      ...prev,
+      [key]: {
+        ordnanceId: ordnance.id,
+        ordnanceName: ordnance.name,
+        loadedCount: newLoadedTotal,
+        maxCapacity: state.maxCapacity,
+        damage: ordnance.damage,
+        damageType: ordnance.damageType,
+      },
+    }))
+
+    setWeaponArmModal(null)
+  }
+
+  const handleDisarmLauncher = (instanceKey: string, launcher: Modification) => {
+    const state = getLauncherState(instanceKey, launcher)
+    if (!state.ordnanceId || state.loadedCount <= 0) return
+
+    const ordnanceId = state.ordnanceId
+    const returnCount = state.loadedCount
+
+    onUpdateOrdnanceList?.((prev) =>
+      prev.map((o) => (o.id === ordnanceId ? { ...o, currentReserve: o.currentReserve + returnCount } : o))
+    )
+
+    setLocalLauncherStates((prev) => ({
+      ...prev,
+      [instanceKey]: {
+        ordnanceId: null,
+        ordnanceName: null,
+        loadedCount: 0,
+        maxCapacity: state.maxCapacity,
+        damage: null,
+        damageType: null,
+      },
+    }))
+  }
+
+  // Combat Stat Modifiers
+  const specialization = shipConfig?.roleSpecialization
+  const isAttackFighter = specialization === "Attack Fighter"
+  const isBomber = specialization === "Bomber"
+  const isGunshipSpec = specialization === "Gunship"
+
+  const rawWis = shipConfig?.stats?.wisdom ?? 10
+  const wisBoost = shipConfig?.tierStatBoosts?.wisdom ?? 0
+  const wisMod = Math.floor((rawWis + wisBoost - 10) / 2)
+
+  const rawStr = shipConfig?.stats?.strength ?? 10
+  const strBoost = shipConfig?.tierStatBoosts?.strength ?? 0
+  const strMod = Math.floor((rawStr + strBoost - 10) / 2)
+
+  const rawCon = shipConfig?.stats?.constitution ?? 10
+  const conBoost = shipConfig?.tierStatBoosts?.constitution ?? 0
+  const conScore = rawCon + conBoost
+
+  const computeAttackModDisplay = (weaponProperties: string[] = [], isPrimary: boolean = true) => {
+    const isSaturate = weaponProperties.some((p) => p.toLowerCase().includes("saturate"))
+    const baseMod = isSaturate ? Math.max(wisMod, strMod) : wisMod
+    const sFoilsAtkDelta = hasSFoils && isPrimary ? (activeSFoilsMode === "locked" ? -2 : 1) : 0
+    const boosted = baseMod + (isAttackFighter ? 1 : 0) + sFoilsAtkDelta
+
+    const sourceBreakdowns: string[] = []
+    sourceBreakdowns.push(`${baseMod >= 0 ? `+${baseMod}` : baseMod} from ${isSaturate ? "Strength/Wisdom" : "Wisdom"} Modifier`)
+    if (isAttackFighter) sourceBreakdowns.push("+1 from Attack Fighter Role Spec")
+    if (sFoilsAtkDelta !== 0) {
+      sourceBreakdowns.push(`${sFoilsAtkDelta > 0 ? `+${sFoilsAtkDelta}` : sFoilsAtkDelta} from S-Foils (${activeSFoilsMode === "locked" ? "Closed" : "Attack"})`)
+    }
+
+    return {
+      display: boosted >= 0 ? `+${boosted}` : `${boosted}`,
+      note: sourceBreakdowns.join(", "),
+      val: boosted,
+      sFoilsDelta: sFoilsAtkDelta,
+    }
+  }
+
+  const computeDamageDisplay = (rawDamage: string | null = "1d8", weaponProperties: string[] = []) => {
+    if (!rawDamage || rawDamage === "-" || rawDamage === "Payload") {
+      return { display: "Ordnance", note: null, flatTotal: 0, dicePart: null, sourceBreakdown: [] }
+    }
+
+    const isHeavy = weaponProperties.some((p) => p.toLowerCase().includes("heavy"))
+    const heavyBonus = isHeavy ? Math.max(1, Math.ceil(strMod / 2)) : 0
+    const gunshipBonus = isGunshipSpec ? 1 : 0
+    const totalFlat = strMod + heavyBonus + (isBomber ? 1 : 0) + gunshipBonus
+
+    const match = rawDamage.match(/^(\d+d\d+)(?:([+-])(\d+))?$/)
+    const dicePart = match ? match[1] : rawDamage
+    const innateFlat = match && match[3] ? parseInt(match[3], 10) * (match[2] === "-" ? -1 : 1) : 0
+    const finalFlat = innateFlat + totalFlat
+
+    let display = dicePart
+    if (finalFlat > 0) display = `${dicePart}+${finalFlat}`
+    else if (finalFlat < 0) display = `${dicePart}${finalFlat}`
+
+    const sourceBreakdown: string[] = []
+    if (strMod !== 0) sourceBreakdown.push(`${strMod >= 0 ? `+${strMod}` : strMod} from Strength Modifier`)
+    if (isHeavy) sourceBreakdown.push(`+${heavyBonus} from Heavy Weapon Trait`)
+    if (isBomber) sourceBreakdown.push("+1 from Bomber Role Spec")
+    if (isGunshipSpec) sourceBreakdown.push("+1 from Gunship Role Spec")
+    if (innateFlat !== 0) sourceBreakdown.push(`${innateFlat >= 0 ? `+${innateFlat}` : innateFlat} weapon innate`)
+
+    return { display, note: sourceBreakdown.length > 0 ? sourceBreakdown.join(", ") : null, flatTotal: finalFlat, dicePart, sourceBreakdown }
+  }
+
+  // --- ATTACK WIZARD STATE ---
+  const [activeWizardWeapon, setActiveWizardWeapon] = useState<Modification | null>(null)
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1)
+  const [firingMode, setFiringMode] = useState<"standard" | "rapid" | "burst">("standard")
+  const [rangeBracket, setRangeBracket] = useState<"normal" | "long" | "out">("normal")
+  const [togglePiercing, setTogglePiercing] = useState<boolean>(false)
+  const [toggleMelt, setToggleMelt] = useState<boolean>(false)
+  const [toggleDire, setToggleDire] = useState<boolean>(false)
+  
+  const [digitalRoll, setDigitalRoll] = useState<number | null>(null)
+  const [digitalRollPair, setDigitalRollPair] = useState<[number, number] | null>(null)
+  const [digitalDamageResult, setDigitalDamageResult] = useState<{ rolls: number[]; total: number } | null>(null)
+  const [manualAttackInput, setManualAttackInput] = useState<string>("")
+  const [manualDamageInput, setManualDamageInput] = useState<string>("")
+  const [attackOutcome, setAttackOutcome] = useState<"pending" | "hit" | "crit" | "miss" | "saved" | "failed">("pending")
+
+  const closeWizard = () => {
+    setActiveWizardWeapon(null)
+    setWizardStep(1)
+    setFiringMode("standard")
+    setRangeBracket("normal")
+    setTogglePiercing(false)
+    setToggleMelt(false)
+    setToggleDire(false)
+    setDigitalRoll(null)
+    setDigitalRollPair(null)
+    setDigitalDamageResult(null)
+    setManualAttackInput("")
+    setManualDamageInput("")
+    setAttackOutcome("pending")
+  }
+
+  const openWizard = (w: Modification) => {
+    if ((w as any).firedThisRound) {
+      alert("Weapon Fired: This weapon has already been fired this round. It will reset once the Reactor is Cycled.")
+      return
+    }
+
+    const isOrdnance = !!w.isOrdnanceLauncher
+    const key = w.instanceId || w.id
+    if (isOrdnance) {
+      const state = getLauncherState(key, w)
+      if (state.loadedCount <= 0) {
+        alert(`${w.name} has no warheads loaded! Arm it with ordnance before engaging.`)
+        return
+      }
+    }
+
+    if (helmAttackType === "attack_run" && tacticalMovement.spentFeet < 150) {
+      alert("Attack Run Requirement Unmet: An Attack Run requires moving at least 150 ft towards your target before firing. Spend movement first.")
+      return
+    }
+
+    setActiveWizardWeapon(w)
+    setWizardStep(1)
+    const currentHeat = (w as any).currentHeat || 0
+    const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === w.name.toLowerCase())
+    const maxHeat = typeof w.overheat === "number" && w.overheat > 0 ? w.overheat : catalogDef?.overheat ?? 4
+    const remainingHeadroom = Math.max(0, maxHeat - currentHeat)
+
+    const launcherState = isOrdnance ? getLauncherState(key, w) : null
+    const armedAmmoDef = findArmedAmmoCatalog(launcherState)
+
+    const activeRawProps = (isOrdnance && armedAmmoDef?.properties)
+      ? armedAmmoDef.properties
+      : (w.properties || catalogDef?.properties || [])
+    const props = activeRawProps.map((p: string) => p.toLowerCase())
+
+    const isAuto = props.some((p: string) => p.includes("auto"))
+    const hasBurst = props.some((p: string) => p.includes("burst")) || catalogDef?.burst !== undefined
+    const hasRapid = props.some((p: string) => p.includes("rapid")) || catalogDef?.rapid !== undefined
+    const burstRating = parseInt((props.find((p: string) => p.includes("burst")) || "1").replace(/[^0-9]/g, ""), 10) || (catalogDef?.burst ?? 1)
+    const rapidRating = parseInt((props.find((p: string) => p.includes("rapid")) || "2").replace(/[^0-9]/g, ""), 10) || (w.rapid ?? catalogDef?.rapid ?? 2)
+
+    if (!isAuto && remainingHeadroom >= 1) {
+      setFiringMode("standard")
+    } else if (hasRapid && remainingHeadroom >= rapidRating) {
+      setFiringMode("rapid")
+    } else if (hasBurst && remainingHeadroom >= burstRating) {
+      setFiringMode("burst")
+    } else {
+      setFiringMode(isAuto ? (hasBurst ? "burst" : "rapid") : "standard")
+    }
+
+    setRangeBracket("normal")
+    setTogglePiercing(false)
+    setToggleMelt(false)
+    setToggleDire(false)
+    setDigitalRoll(null)
+    setDigitalRollPair(null)
+    setDigitalDamageResult(null)
+    setManualAttackInput("")
+    setManualDamageInput("")
+    setAttackOutcome("pending")
+  }
+
+  const completeAttack = (heatCost: number) => {
+    if (!activeWizardWeapon) return
+    const key = activeWizardWeapon.instanceId || activeWizardWeapon.id
+    const isOrdnance = !!activeWizardWeapon.isOrdnanceLauncher
+
+    if (isOrdnance) {
+      setLocalLauncherStates((prev) => {
+        const state = prev[key]
+        if (!state) return prev
+        const newCount = Math.max(0, state.loadedCount - 1)
+        return {
+          ...prev,
+          [key]: {
+            ...state,
+            loadedCount: newCount,
+            ordnanceId: newCount === 0 ? null : state.ordnanceId,
+            ordnanceName: newCount === 0 ? null : state.ordnanceName,
+            damage: newCount === 0 ? null : state.damage,
+            damageType: newCount === 0 ? null : state.damageType,
+          },
+        }
+      })
+      onUpdateMod?.(key, { firedThisRound: true } as any)
+    } else {
+      const currentHeat = (activeWizardWeapon as any).currentHeat || 0
+      const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === activeWizardWeapon.name.toLowerCase())
+      const maxHeat = typeof activeWizardWeapon.overheat === "number" && activeWizardWeapon.overheat > 0
+        ? activeWizardWeapon.overheat
+        : catalogDef?.overheat ?? 4
+      const nextHeat = Math.min(maxHeat, currentHeat + heatCost)
+      onUpdateMod?.(key, { currentHeat: nextHeat, firedThisRound: true } as any)
+    }
+    closeWizard()
+  }
+
+  // Power Coupling Logic
   const powerCoupling = shipConfig?.powerCoupling ?? shipConfig?.couplingType ?? "Direct Power Coupling"
   const isDistributed = powerCoupling.toLowerCase().includes("distributed")
   const isHubAndSpoke = powerCoupling.toLowerCase().includes("hub") || powerCoupling.toLowerCase().includes("spoke")
@@ -429,7 +825,6 @@ export function EnginesStation({
   const [initiationProcedures, setInitiationProcedures] = useState<number>(isPoweredOn ? 10 : 0)
   const targetProcedures = 10
 
-  // Sync initiation counter if power state changes externally
   useEffect(() => {
     if (isPoweredOn && initiationProcedures < targetProcedures) {
       setInitiationProcedures(10)
@@ -609,7 +1004,6 @@ export function EnginesStation({
     onRecharge?.()
   }
 
-  // Speed & Environment Calculations[cite: 8]
   const envStats = useMemo(() => {
     const rawNominalSpeed = environment === "Underwater" ? 150 + Math.round(bonusSpeed / 2) : 300 + bonusSpeed
     const finalEffectiveSpeed = calculateSlowedSpeed(rawNominalSpeed, effectiveSlowedLevel)
@@ -748,9 +1142,7 @@ export function EnginesStation({
   return (
     <div className="flex flex-col gap-3.5 w-full font-mono">
 
-      {/* ========================================================================= */}
-      {/* 1. MASTER HEADER & INTEGRATED QUICK-ACTION ACCESS BAR                     */}
-      {/* ========================================================================= */}
+      {/* 1. MASTER HEADER & INTEGRATED QUICK-ACTION ACCESS BAR */}
       <header className="flex flex-col xl:flex-row items-start xl:items-center justify-between border-b border-bridge-border pb-2.5 gap-2.5">
         <div>
           <div className="flex items-center gap-3">
@@ -856,9 +1248,7 @@ export function EnginesStation({
         </div>
       </header>
 
-      {/* ========================================================================= */}
-      {/* 2. COMPACT CREW ROSTER HUD                                                */}
-      {/* ========================================================================= */}
+      {/* 2. COMPACT CREW ROSTER HUD */}
       <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
@@ -943,12 +1333,10 @@ export function EnginesStation({
         )}
       </div>
 
-      {/* Global Ship Stats Telemetry strip[cite: 8] */}
+      {/* Global Ship Stats Telemetry strip */}
       <ShipStats shipConfig={shipConfig} proficiencyBonus={proficiencyBonus} />
 
-      {/* ========================================================================= */}
-      {/* 3. ROW 1: SIDE-BY-SIDE TACTICAL MOVEMENT & COMBAT RESOURCES               */}
-      {/* ========================================================================= */}
+      {/* 3. TACTICAL MOVEMENT & COMBAT RESOURCES */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 items-stretch">
         
         {/* LEFT COLUMN: TACTICAL SPLIT-MOVEMENT */}
@@ -966,7 +1354,6 @@ export function EnginesStation({
           </div>
 
           <div className="flex flex-col gap-2 bg-black/50 p-2.5 rounded border border-bridge-border/60">
-            {/* Speed Gauge Readout */}
             <div>
               <div className="flex justify-between items-baseline mb-0.5">
                 <span className="text-muted-foreground uppercase text-[9px]">Speed Remaining:</span>
@@ -992,7 +1379,6 @@ export function EnginesStation({
               </div>
             </div>
 
-            {/* Slider Adjustment */}
             <div className="flex flex-col gap-0.5 pt-1">
               <div className="flex justify-between text-[9px] text-slate-300">
                 <span>Throttle Slider:</span>
@@ -1068,7 +1454,7 @@ export function EnginesStation({
           </div>
         </section>
 
-        {/* RIGHT COLUMN: COMBAT RESOURCES (STANDARD COMPONENT) */}
+        {/* RIGHT COLUMN: COMBAT RESOURCES */}
         <section className="flex flex-col rounded-md border border-cyan-neon/60 bg-bridge-panel p-3 shadow-[0_0_15px_rgba(0,255,255,0.06)] justify-between gap-2.5">
           <CombatResources 
             availablePowerDice={effectiveAvailable}
@@ -1121,8 +1507,332 @@ export function EnginesStation({
       </div>
 
       {/* ========================================================================= */}
-      {/* 4. ROW 2: PROPULSION / FUEL + CAMPAIGN TIME + HYPERSPACE VECTOR           */}
+      {/* 4. FORWARD-FACING LIMITED ARC BATTERIES & HARDPOINT FIRE CONTROLS          */}
       {/* ========================================================================= */}
+      <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
+        <div className="flex flex-col gap-2 mb-3 border-b border-bridge-border/60 pb-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Crosshair className="w-4 h-4 text-cyan-neon animate-pulse" />
+              <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
+                Forward Batteries &amp; Hardpoint Fire Controls ({forwardWeapons.length} Available)
+              </h3>
+            </div>
+            <span className="text-[10px] text-muted-foreground">
+              Bow mounts and unmanned turrets • Max 1 firing per round per weapon
+            </span>
+          </div>
+
+          {/* 3-WAY HELM FIRING SELECTOR SWITCH */}
+          <div className="flex flex-wrap items-center gap-2 pt-1.5">
+            <span className="text-[10px] uppercase font-bold text-slate-300 flex items-center gap-1">
+              <Swords className="h-3.5 w-3.5 text-cyan-neon" /> Attack Mode:
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setHelmAttackType("standard")}
+              className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase transition flex items-center gap-1 cursor-pointer border ${
+                helmAttackType === "standard"
+                  ? "bg-amber-500/20 border-amber-400 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.3)]"
+                  : "bg-black/60 border-slate-800 text-slate-400 hover:text-white"
+              }`}
+            >
+              <span>Standard Fire</span>
+              <span className="text-[8px] px-1 rounded bg-amber-950/60 text-amber-400 border border-amber-500/40">
+                Disadv
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setHelmAttackType("attack_run")}
+              className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase transition flex items-center gap-1 cursor-pointer border ${
+                helmAttackType === "attack_run"
+                  ? "bg-cyan-500/20 border-cyan-neon text-cyan-neon shadow-[0_0_8px_rgba(0,255,255,0.3)]"
+                  : "bg-black/60 border-slate-800 text-slate-400 hover:text-white"
+              }`}
+            >
+              <span>Attack Run</span>
+              <span className={`text-[8px] px-1 rounded border ${
+                tacticalMovement.spentFeet >= 150
+                  ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-400"
+                  : "bg-slate-900 border-slate-700 text-slate-400"
+              }`}>
+                {tacticalMovement.spentFeet >= 150 ? "150ft+ Moved" : `${tacticalMovement.spentFeet}/150ft`}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setHelmAttackType("dogfight")}
+              className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase transition flex items-center gap-1 cursor-pointer border ${
+                helmAttackType === "dogfight"
+                  ? "bg-purple-500/20 border-purple-400 text-purple-300 shadow-[0_0_8px_rgba(168,85,247,0.3)]"
+                  : "bg-black/60 border-slate-800 text-slate-400 hover:text-white"
+              }`}
+            >
+              <span>Dogfight</span>
+              <span className="text-[8px] px-1 rounded bg-purple-950/60 text-purple-400 border border-purple-500/40">
+                Maneuver Check
+              </span>
+            </button>
+          </div>
+
+          {/* Tactical Mode Feedback Notice */}
+          <div className="text-[10px] font-mono px-2.5 py-1.5 rounded bg-black/60 border border-bridge-border/60">
+            {helmAttackType === "standard" && (
+              <span className="text-amber-300">
+                ⚠️ <strong>Helm Standard Fire:</strong> Firing from the helm without an Attack Run or Dogfight imposes disadvantage on the attack roll.
+              </span>
+            )}
+            {helmAttackType === "attack_run" && (
+              <span className={tacticalMovement.spentFeet >= 150 ? "text-cyan-300" : "text-amber-400 font-bold"}>
+                {tacticalMovement.spentFeet >= 150 ? (
+                  <>✓ <strong>Attack Run Ready:</strong> 150+ ft forward movement completed. Weapon attack made without normal helm disadvantage.</>
+                ) : (
+                  <>⚠️ <strong>Attack Run Blocked:</strong> Requires at least 150 ft forward movement towards target in unobstructed space (Currently spent: {tacticalMovement.spentFeet} ft).</>
+                )}
+              </span>
+            )}
+            {helmAttackType === "dogfight" && (
+              <span className="text-purple-300">
+                ★ <strong>Dogfight Maneuver:</strong> Make an opposed Dexterity (Maneuvering) check. If successful, notify GM that the target has disadvantage on its next attack against your ship. Fire without normal helm disadvantage.
+              </span>
+            )}
+          </div>
+        </div>
+
+        {forwardWeapons.length === 0 ? (
+          <div className="p-4 rounded border border-dashed border-bridge-border/60 text-center text-xs text-muted-foreground">
+            No Bow-mounted weapons or unmanned forward turrets available.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {forwardWeapons.map((w) => {
+              const instanceKey = w.instanceId || w.id
+              const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === w.name.toLowerCase())
+              const isOrdnance = !!w.isOrdnanceLauncher
+              const heat = (w as any).currentHeat ?? 0
+              const maxHeat = typeof w.overheat === "number" && w.overheat > 0 ? w.overheat : catalogDef?.overheat ?? 4
+              const isOverheated = heat >= maxHeat
+              const isFiredThisRound = !!(w as any).firedThisRound
+
+              const launcherState = isOrdnance ? getLauncherState(instanceKey, w) : null
+              const isLauncherArmed = launcherState ? launcherState.loadedCount > 0 : false
+              const armedAmmoDef = isOrdnance ? findArmedAmmoCatalog(launcherState) : null
+              const isTurret = isTurretMounted(w)
+
+              const rawProps = isOrdnance && armedAmmoDef?.properties
+                ? armedAmmoDef.properties
+                : (w.properties || catalogDef?.properties || [])
+
+              const effectiveRangeDisplay = isOrdnance
+                ? (armedAmmoDef?.range || (isLauncherArmed ? "Payload" : "Empty"))
+                : (w.range || catalogDef?.range || "Payload")
+
+              const rawDmgString = isOrdnance ? (launcherState?.damage || null) : (w.damage || catalogDef?.damage)
+              const effectiveAtk = computeAttackModDisplay(rawProps, !isOrdnance)
+              const effectiveDmg = computeDamageDisplay(rawDmgString, rawProps)
+
+              return (
+                <div
+                  key={instanceKey}
+                  className={`rounded-lg border bg-black/40 p-4 flex flex-col justify-between gap-3 relative transition-all ${
+                    isFiredThisRound
+                      ? "border-slate-800 opacity-60"
+                      : isOverheated
+                      ? "border-red-500/80 shadow-[0_0_12px_rgba(239,68,68,0.2)]"
+                      : "border-bridge-border/80 hover:border-cyan-neon/60"
+                  }`}
+                >
+                  <div>
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="text-sm font-bold text-cyan-neon tracking-wide truncate">
+                            {w.name}
+                          </h4>
+                          <span className="text-[8px] font-bold uppercase px-1 rounded border border-bridge-border text-muted-foreground shrink-0">
+                            {isOrdnance ? "ORDNANCE" : (w.damageType || "ENERGY").toUpperCase()}
+                          </span>
+                          <span className="text-[8px] font-bold uppercase px-1.5 py-0.2 rounded border font-mono shrink-0 border-cyan-400/50 bg-cyan-950/40 text-cyan-300">
+                            {isTurret ? "UNMANNED TURRET (FWD)" : "BOW HARDPOINT"}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-bridge-border/40">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Compass className="w-3.5 h-3.5 text-cyan-neon shrink-0" />
+                            <span className="text-[10px] font-mono tracking-wider uppercase font-bold text-cyan-neon truncate">
+                              ARC: FORWARD CONE
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`text-[9px] font-bold px-2 py-0.5 rounded border shrink-0 ${
+                          isFiredThisRound
+                            ? "bg-slate-900 border-slate-700 text-slate-400"
+                            : isOrdnance
+                            ? isLauncherArmed
+                              ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                              : "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse"
+                            : isOverheated
+                            ? "bg-red-500/20 text-red-400 border-red-500/40"
+                            : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                        }`}
+                      >
+                        {isFiredThisRound
+                          ? "FIRED (ROUND LOCK)"
+                          : isOrdnance
+                          ? isLauncherArmed
+                            ? "ARMED"
+                            : "EMPTY"
+                          : isOverheated
+                          ? "OVERHEATED"
+                          : "READY"}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5 my-3 text-center">
+                      <div className="rounded border border-bridge-border/40 bg-bridge-panel/50 p-1.5 flex flex-col justify-between">
+                        <span className="block text-[8px] text-muted-foreground uppercase">ATK MOD</span>
+                        <span className="text-xs font-bold text-cyan-neon font-mono">{effectiveAtk.display}</span>
+                      </div>
+                      <div className="rounded border border-bridge-border/40 bg-bridge-panel/50 p-1.5 flex flex-col justify-between">
+                        <span className="block text-[8px] text-muted-foreground uppercase">DAMAGE</span>
+                        <span className="text-xs font-bold text-cyan-neon font-mono">{effectiveDmg.display}</span>
+                      </div>
+                      <div className="rounded border border-bridge-border/40 bg-bridge-panel/50 p-1.5 flex flex-col justify-between">
+                        <span className="block text-[8px] text-muted-foreground uppercase">RANGE (FT)</span>
+                        <span className="text-[10px] font-bold text-cyan-neon font-mono truncate px-0.5" title={effectiveRangeDisplay}>
+                          {effectiveRangeDisplay}
+                        </span>
+                      </div>
+                    </div>
+
+                    {!isOrdnance ? (
+                      <div className="flex flex-col gap-1 mb-2">
+                        <div className="flex justify-between text-[10px]">
+                          <span className="text-muted-foreground uppercase">Thermal Buildup</span>
+                          <span className={heat >= maxHeat ? "text-red-400 font-bold" : "text-cyan-neon"}>
+                            {heat} / {maxHeat} Heat (Overheat {maxHeat})
+                          </span>
+                        </div>
+                        <div className="h-2 w-full bg-slate-900 rounded-sm overflow-hidden border border-bridge-border/30">
+                          <div
+                            className={`h-full transition-all ${
+                              heat >= maxHeat ? "bg-red-500" : heat >= maxHeat * 0.75 ? "bg-amber-400" : "bg-cyan-neon"
+                            }`}
+                            style={{ width: `${Math.min(100, (heat / maxHeat) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-1.5 mb-2 rounded border border-bridge-border/60 bg-black/60 p-2.5 text-[10px] font-mono">
+                        <div className="flex justify-between items-center border-b border-bridge-border/40 pb-1">
+                          <span className="text-muted-foreground uppercase">WARHEAD ARMED:</span>
+                          <span className="font-bold text-cyan-neon">
+                            {launcherState?.ordnanceName ? launcherState.ordnanceName.toUpperCase() : "NONE LOADED"}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground uppercase">MAGAZINE TUBE:</span>
+                          <span className={`font-bold ${isLauncherArmed ? "text-emerald-400" : "text-red-400"}`}>
+                            {launcherState?.loadedCount ?? 0} / {launcherState?.maxCapacity ?? 4} LOADED
+                          </span>
+                        </div>
+
+                        <div className="flex gap-1 w-full my-0.5">
+                          {Array.from({ length: launcherState?.maxCapacity ?? 4 }).map((_, i) => (
+                            <span
+                              key={i}
+                              className={`h-1.5 flex-1 rounded-sm ${
+                                i < (launcherState?.loadedCount ?? 0)
+                                  ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"
+                                  : "bg-slate-800 border border-bridge-border/50"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/40">
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openWizard(w)}
+                        disabled={
+                          isFiredThisRound ||
+                          (!isOrdnance ? isOverheated : !isLauncherArmed) ||
+                          (helmAttackType === "attack_run" && tacticalMovement.spentFeet < 150)
+                        }
+                        className={`col-span-2 rounded border py-2 text-xs font-bold tracking-wider font-mono flex items-center justify-center gap-1.5 transition-all ${
+                          isFiredThisRound
+                            ? "bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed"
+                            : (!isOrdnance ? isOverheated : !isLauncherArmed)
+                            ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed opacity-40"
+                            : (helmAttackType === "attack_run" && tacticalMovement.spentFeet < 150)
+                            ? "bg-amber-950/20 border-amber-500/40 text-amber-500 cursor-not-allowed"
+                            : "border-cyan-neon/60 bg-cyan-neon/20 text-cyan-neon hover:bg-cyan-neon/30 shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
+                        }`}
+                      >
+                        {isFiredThisRound ? (
+                          <>
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>FIRED THIS ROUND</span>
+                          </>
+                        ) : (
+                          <>
+                            <Crosshair className="w-3.5 h-3.5 text-cyan-neon" />
+                            <span>ENGAGE TARGET</span>
+                          </>
+                        )}
+                      </button>
+
+                      {!isOrdnance ? (
+                        <button
+                          type="button"
+                          onClick={() => handleCoolMountedWeapon(instanceKey)}
+                          disabled={heat === 0}
+                          className="rounded border border-bridge-border bg-black/60 py-2 text-xs font-bold text-muted-foreground hover:text-cyan-neon hover:border-cyan-neon/40 disabled:opacity-30 font-mono cursor-pointer"
+                        >
+                          FLUSH
+                        </button>
+                      ) : !isLauncherArmed ? (
+                        <button
+                          type="button"
+                          onClick={() => setWeaponArmModal({ weapon: w })}
+                          className="rounded border border-emerald-500/60 bg-emerald-500/20 py-2 text-xs font-bold text-emerald-400 hover:bg-emerald-500/30 font-mono cursor-pointer tracking-wider flex items-center justify-center gap-1"
+                        >
+                          <PackagePlus className="w-3 h-3" />
+                          ARM
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleDisarmLauncher(instanceKey, w)}
+                          className="rounded border border-amber-500/60 bg-amber-500/20 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/30 font-mono cursor-pointer tracking-wider flex items-center justify-center gap-1"
+                        >
+                          <Undo2 className="w-3 h-3" />
+                          DISARM
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* 5. ROW 2: PROPULSION / FUEL + CAMPAIGN TIME + HYPERSPACE VECTOR */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 items-stretch">
         
         {/* CARD 1: FLIGHT DETAILS & FUEL RESERVES */}
@@ -1340,9 +2050,7 @@ export function EnginesStation({
         </section>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 5. ROW 3: CHASSIS TACTICAL MANEUVERS (TIER SPECIAL FEATURES)              */}
-      {/* ========================================================================= */}
+      {/* 6. CHASSIS TACTICAL MANEUVERS */}
       {(hasPinpointStrike || hasRetroThrusters || hasVersatileSnubfighter || hasEvasiveManeuvers || hasAdaptiveArmor) && (
         <section className="rounded-md border border-cyan-neon/60 bg-bridge-panel p-3 shadow-[0_0_15px_rgba(0,255,255,0.06)] flex flex-col gap-2.5">
           <div className="flex justify-between items-center border-b border-bridge-border/60 pb-1.5">
@@ -1478,9 +2186,711 @@ export function EnginesStation({
         />
       </section>
 
-      {/* ========================================================================= */}
-      {/* MODAL 1: DRILL-DOWN ENGINE START-UP & DURESS TAKEOFF                      */}
-      {/* ========================================================================= */}
+      {/* MODAL: ARM ORDNANCE */}
+      {weaponArmModal && (() => {
+        const weapon = weaponArmModal.weapon
+        const key = weapon.instanceId || weapon.id
+        const state = getLauncherState(key, weapon)
+        const family = getLauncherFamily(weapon.name)
+        const availableOptions = ordnanceList.filter((o) => o.category === family && o.currentReserve > 0)
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 font-mono">
+            <div className="w-full max-w-md rounded-lg border border-cyan-neon bg-slate-950 p-5 shadow-[0_0_30px_rgba(0,255,255,0.3)] flex flex-col gap-4">
+              <div className="flex justify-between items-center border-b border-bridge-border pb-2">
+                <div className="flex items-center gap-2">
+                  <PackagePlus className="w-4 h-4 text-cyan-neon" />
+                  <h3 className="text-xs font-bold tracking-wider text-cyan-neon uppercase">
+                    Arm Hardpoint // {weapon.name}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setWeaponArmModal(null)}
+                  className="text-muted-foreground hover:text-white cursor-pointer"
+                >
+                  <XCircle className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-300">
+                <p>Select which warhead payload to chamber into this tube (Max: {state.maxCapacity}):</p>
+                <span className="text-[10px] text-muted-foreground uppercase block mt-1">
+                  Chamber Category: <strong className="text-cyan-neon">{family}</strong>
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+                {availableOptions.length > 0 ? (
+                  availableOptions.map((ordnance) => (
+                    <button
+                      key={ordnance.id}
+                      onClick={() => executeArmLauncher(weapon, ordnance)}
+                      className="p-3 rounded border border-bridge-border bg-black/60 hover:border-emerald-400 hover:bg-emerald-500/10 text-left flex justify-between items-center transition-all cursor-pointer group"
+                    >
+                      <div>
+                        <span className="text-xs font-bold text-slate-100 group-hover:text-emerald-400 uppercase block">
+                          {ordnance.name}
+                        </span>
+                        <span className="text-[10px] text-amber-300 block">
+                          Payload: {ordnance.damage} {ordnance.damageType}
+                        </span>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-xs font-bold text-emerald-400 block font-mono">
+                          {ordnance.currentReserve} in Reserve
+                        </span>
+                        <span className="text-[9px] text-muted-foreground block uppercase">
+                          Click to Arm
+                        </span>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="p-4 text-center rounded border border-bridge-border/40 bg-black/40 text-xs text-amber-300">
+                    No compatible {family} ammunition in cargo reserves!
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => setWeaponArmModal(null)}
+                className="w-full py-1.5 rounded border border-bridge-border text-xs text-muted-foreground hover:text-white uppercase cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* FIRE CONTROL ATTACK WIZARD MODAL */}
+      {activeWizardWeapon && (() => {
+        const instanceKey = activeWizardWeapon.instanceId || activeWizardWeapon.id
+        const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === activeWizardWeapon.name.toLowerCase())
+        const isOrdnance = !!activeWizardWeapon.isOrdnanceLauncher
+        const launcherState = isOrdnance ? getLauncherState(instanceKey, activeWizardWeapon) : null
+        const armedAmmoDef = isOrdnance ? findArmedAmmoCatalog(launcherState) : null
+
+        const currentHeat = (activeWizardWeapon as any).currentHeat ?? 0
+        const maxHeat = typeof activeWizardWeapon.overheat === "number" && activeWizardWeapon.overheat > 0
+          ? activeWizardWeapon.overheat
+          : catalogDef?.overheat ?? 4
+        const remainingHeadroom = Math.max(0, maxHeat - currentHeat)
+
+        const activeRawProps = (isOrdnance && armedAmmoDef?.properties)
+          ? armedAmmoDef.properties
+          : (activeWizardWeapon.properties || catalogDef?.properties || [])
+        const props = activeRawProps.map((p: string) => p.toLowerCase())
+
+        const isAuto = props.some((p: string) => p.includes("auto"))
+        const hasBurst = props.some((p: string) => p.includes("burst")) || catalogDef?.burst !== undefined
+        const hasRapid = props.some((p: string) => p.includes("rapid")) || catalogDef?.rapid !== undefined
+        const burstProp = props.find((p: string) => p.includes("burst"))
+        const burstRating = parseInt((burstProp || "1").replace(/[^0-9]/g, ""), 10) || (catalogDef?.burst ?? 1)
+        const rapidProp = props.find((p: string) => p.includes("rapid"))
+        const rapidRating = parseInt((rapidProp || "2").replace(/[^0-9]/g, ""), 10) || (activeWizardWeapon.rapid ?? catalogDef?.rapid ?? 2)
+
+        const rangeStr = (isOrdnance && armedAmmoDef?.range)
+          ? armedAmmoDef.range
+          : (activeWizardWeapon.range || catalogDef?.range || "600/2400")
+        const [normalRange, maxRange] = rangeStr.split("/").map((v: string) => parseInt(v.trim(), 10) || 0)
+
+        const conProp = props.find((p: string) => p.startsWith("constitution"))
+        const conReq = conProp ? parseInt(conProp.split(" ")[1], 10) || 10 : (catalogDef?.constitutionSaveDC ?? null)
+        const failsCon = conReq !== null && conScore < conReq
+
+        const hasDire = props.some((p: string) => p.includes("dire"))
+        const hasPiercing = props.some((p: string) => p.includes("piercing"))
+        const hasMelt = props.some((p: string) => p.includes("melt"))
+        const hasHeavy = props.some((p: string) => p.includes("heavy"))
+        const hasSaturate = props.some((p: string) => p.includes("saturate"))
+        const keenProp = props.find((p: string) => p.includes("keen"))
+        const keenRating = keenProp ? parseInt(keenProp.replace(/[^0-9]/g, ""), 10) || 1 : 0
+        const critThreshold = 20 - keenRating
+
+        const heavyDmgBonus = hasHeavy ? Math.max(1, Math.ceil(strMod / 2)) : 0
+        const baseAttackAbilityMod = hasSaturate ? Math.max(strMod, wisMod) : wisMod
+
+        const sFoilsAtkDelta = hasSFoils && !isOrdnance ? (activeSFoilsMode === "locked" ? -2 : 1) : 0
+        let attackMod = baseAttackAbilityMod + (isAttackFighter ? 1 : 0) + sFoilsAtkDelta
+
+        const attackBreakdownParts: string[] = [
+          `${baseAttackAbilityMod >= 0 ? `+${baseAttackAbilityMod}` : baseAttackAbilityMod} from ${hasSaturate ? "Strength/Wisdom" : "Wisdom"} Modifier`,
+        ]
+        if (isAttackFighter) attackBreakdownParts.push("+1 from Attack Fighter Role Spec")
+        if (sFoilsAtkDelta !== 0) {
+          attackBreakdownParts.push(`${sFoilsAtkDelta > 0 ? `+${sFoilsAtkDelta}` : sFoilsAtkDelta} from S-Foils (${activeSFoilsMode === "locked" ? "Closed / Cruise" : "Attack Position"})`)
+        }
+
+        if (togglePiercing) {
+          attackMod += 1
+          attackBreakdownParts.push("+1 from Piercing Stance")
+        }
+        if (toggleDire) {
+          attackMod -= 1
+          attackBreakdownParts.push("-1 from Dire Stance")
+        }
+        if (toggleMelt) {
+          attackMod -= proficiencyBonus
+          attackBreakdownParts.push(`-${proficiencyBonus} from Melt Stance`)
+        }
+
+        const saveDC = 8 + attackMod
+
+        // Disadvantage evaluation: Helm Standard Fire imposes disadvantage unless Attack Run or Dogfight is selected
+        const isHelmDisadvantage = helmAttackType === "standard"
+        const hasDisadvConditions = rangeBracket === "long" || failsCon || (effectiveSlowedLevel >= 3) || isHelmDisadvantage
+        const isDisadvantageRoll = hasDisadvConditions
+
+        const currentHeatCost = firingMode === "rapid" ? rapidRating : firingMode === "burst" ? burstRating : 1
+        const hasSufficientHeat = isOrdnance ? (launcherState && launcherState.loadedCount > 0) : remainingHeadroom >= currentHeatCost
+
+        const canDoStandard = (!isAuto && remainingHeadroom >= 1) || isOrdnance
+        const canDoRapid = !isOrdnance && hasRapid && remainingHeadroom >= rapidRating
+        const canDoBurst = !isOrdnance && hasBurst && remainingHeadroom >= burstRating
+
+        const baseDamageRaw = isOrdnance ? (launcherState?.damage || "2d8") : (activeWizardWeapon.damage || catalogDef?.damage || "1d8")
+        const dmgDetails = computeDamageDisplay(baseDamageRaw, props)
+        let diceString = dmgDetails.dicePart || baseDamageRaw
+        if (firingMode === "rapid") diceString = `${diceString} + ${diceString}`
+
+        let dynamicFlat = dmgDetails.flatTotal
+        const damageBreakdownParts: string[] = [...(dmgDetails.sourceBreakdown || [])]
+
+        if (toggleDire) {
+          dynamicFlat += 1
+          damageBreakdownParts.push("+1 from Dire Stance")
+        }
+        if (togglePiercing) {
+          dynamicFlat -= 1
+          damageBreakdownParts.push("-1 from Piercing Stance")
+        }
+        if (toggleMelt) {
+          dynamicFlat += proficiencyBonus
+          damageBreakdownParts.push(`+${proficiencyBonus} from Melt Stance`)
+        }
+
+        let finalDmgFormula = diceString
+        if (dynamicFlat > 0) finalDmgFormula = `${diceString} + ${dynamicFlat}`
+        else if (dynamicFlat < 0) finalDmgFormula = `${diceString} - ${Math.abs(dynamicFlat)}`
+
+        const handleRollDigitalDamage = () => {
+          const { individualRolls, totalDice } = rollDiceFormula(diceString)
+          const finalTotal = Math.max(1, totalDice + dynamicFlat)
+          setDigitalDamageResult({
+            rolls: individualRolls,
+            total: finalTotal,
+          })
+          setManualDamageInput(finalTotal.toString())
+        }
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 font-mono">
+            <div className="w-full max-w-xl rounded-lg border border-cyan-neon bg-slate-950 p-5 shadow-[0_0_30px_rgba(0,255,255,0.2)] flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-bridge-border/60 pb-3">
+                <div className="flex items-center gap-2">
+                  <Crosshair className="w-5 h-5 text-cyan-neon animate-pulse" />
+                  <div>
+                    <h3 className="text-sm font-bold tracking-wider text-cyan-neon uppercase">
+                      Forward Fire Assistant // {activeWizardWeapon.name}
+                    </h3>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-muted-foreground uppercase">
+                        Mode: {helmAttackType === "attack_run" ? "Attack Run" : helmAttackType === "dogfight" ? "Dogfight" : "Standard Helm Fire"} • Step {wizardStep} of 4
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={closeWizard}
+                  className="rounded p-1 text-muted-foreground hover:text-white transition-colors cursor-pointer"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Tactical Mode Context Alert Banner */}
+              {isHelmDisadvantage && (
+                <div className="p-2 rounded bg-amber-950/40 border border-amber-500/50 text-[10px] text-amber-300">
+                  ⚠️ Firing from the Helm without an Attack Run or Dogfight imposes disadvantage on the attack roll.
+                </div>
+              )}
+              {helmAttackType === "attack_run" && (
+                <div className="p-2 rounded bg-cyan-950/40 border border-cyan-neon/50 text-[10px] text-cyan-300">
+                  ✓ Attack Run: 150+ ft forward movement completed. Disadvantage removed.
+                </div>
+              )}
+              {helmAttackType === "dogfight" && (
+                <div className="p-2 rounded bg-purple-950/40 border border-purple-500/50 text-[10px] text-purple-300">
+                  ★ Dogfight: Disadvantage removed. On a successful Maneuvering check, notify GM that target has disadvantage on their next attack.
+                </div>
+              )}
+
+              {/* STEP 1: FIRING MODE */}
+              {wizardStep === 1 && (
+                <div className="flex flex-col gap-4 py-2">
+                  {!isOrdnance ? (
+                    <div className="flex justify-between items-center bg-black/60 px-3 py-1.5 rounded border border-bridge-border text-xs">
+                      <span className="text-muted-foreground uppercase text-[10px]">Thermal Reserve:</span>
+                      <span className="font-bold text-cyan-neon">
+                        {currentHeat} / {maxHeat} Heat ({remainingHeadroom} Headroom Remaining)
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-center bg-black/60 px-3 py-1.5 rounded border border-bridge-border text-xs">
+                      <span className="text-muted-foreground uppercase text-[10px]">Ordnance Tube:</span>
+                      <span className="font-bold text-emerald-400">
+                        {launcherState?.ordnanceName} ({launcherState?.loadedCount} / {launcherState?.maxCapacity} Loaded)
+                      </span>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-slate-300">
+                    Select the firing profile for this helm maneuver:
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <button
+                      disabled={!canDoStandard}
+                      onClick={() => setFiringMode("standard")}
+                      className={`p-3 rounded border text-left flex flex-col justify-between gap-2 transition-all ${
+                        !canDoStandard
+                          ? "bg-red-950/40 border-red-500/50 text-red-400 cursor-not-allowed"
+                          : firingMode === "standard"
+                          ? "border-cyan-neon bg-cyan-neon/20 text-cyan-neon shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
+                          : "border-bridge-border bg-black/40 text-slate-300 hover:border-cyan-neon/40 cursor-pointer"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase block">{isOrdnance ? "Launch Payload" : "Standard Shot"}</span>
+                          {!canDoStandard && <Ban className="w-3.5 h-3.5 text-red-400" />}
+                        </div>
+                        <span className="text-[9px] block mt-0.5">
+                          {isAuto ? "[AUTO WEAPON ONLY]" : remainingHeadroom < 1 && !isOrdnance ? "[HEAT FULL]" : isOrdnance ? "Deploy 1 Warhead" : "Standard d20 Attack"}
+                        </span>
+                      </div>
+                      <span className={`text-[10px] font-mono ${!canDoStandard ? "text-red-400 line-through font-bold" : "text-amber-300"}`}>
+                        {isOrdnance ? "-1 Warhead" : (!canDoStandard ? "UNAVAILABLE" : "+1 Heat Build")}
+                      </span>
+                    </button>
+
+                    <button
+                      disabled={!canDoRapid}
+                      onClick={() => setFiringMode("rapid")}
+                      className={`p-3 rounded border text-left flex flex-col justify-between gap-2 transition-all ${
+                        !canDoRapid
+                          ? "bg-red-950/40 border-red-500/50 text-red-400 cursor-not-allowed"
+                          : firingMode === "rapid"
+                          ? "border-cyan-neon bg-cyan-neon/20 text-cyan-neon shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
+                          : "border-bridge-border bg-black/40 text-slate-300 hover:border-cyan-neon/40 cursor-pointer"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase block">Rapid Fire</span>
+                          {!canDoRapid && <Ban className="w-3.5 h-3.5 text-red-400" />}
+                        </div>
+                        <span className="text-[9px] block mt-0.5">
+                          {isOrdnance ? "[NOT APPLICABLE]" : !hasRapid ? "[NO RAPID]" : "Target Dex Save"}
+                        </span>
+                      </div>
+                      <span className={`text-[10px] font-mono ${!canDoRapid ? "text-red-400 line-through font-bold" : "text-amber-300"}`}>
+                        {!canDoRapid ? "UNAVAILABLE" : `+${rapidRating} Heat Build`}
+                      </span>
+                    </button>
+
+                    <button
+                      disabled={!canDoBurst}
+                      onClick={() => setFiringMode("burst")}
+                      className={`p-3 rounded border text-left flex flex-col justify-between gap-2 transition-all ${
+                        !canDoBurst
+                          ? "bg-red-950/40 border-red-500/50 text-red-400 cursor-not-allowed"
+                          : firingMode === "burst"
+                          ? "border-cyan-neon bg-cyan-neon/20 text-cyan-neon shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
+                          : "border-bridge-border bg-black/40 text-slate-300 hover:border-cyan-neon/40 cursor-pointer"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase block">Burst Area</span>
+                          {!canDoBurst && <Ban className="w-3.5 h-3.5 text-red-400" />}
+                        </div>
+                        <span className="text-[9px] block mt-0.5">
+                          {isOrdnance ? "[NOT APPLICABLE]" : !hasBurst ? "[NO BURST]" : "150ft Cube Dex Save"}
+                        </span>
+                      </div>
+                      <span className={`text-[10px] font-mono ${!canDoBurst ? "text-red-400 line-through font-bold" : "text-amber-300"}`}>
+                        {!canDoBurst ? "UNAVAILABLE" : `+${burstRating} Heat Build`}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 2: RANGE BRACKET */}
+              {wizardStep === 2 && (
+                <div className="flex flex-col gap-4 py-2">
+                  <div className="flex justify-between items-center bg-black/50 p-2.5 rounded border border-bridge-border">
+                    <span className="text-xs text-muted-foreground">Calibrated Weapon Range:</span>
+                    <span className="text-xs font-bold text-cyan-neon">{normalRange} ft (Normal) / {maxRange} ft (Maximum)</span>
+                  </div>
+
+                  <p className="text-xs text-slate-300">Target Range Bracket:</p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <button
+                      onClick={() => setRangeBracket("normal")}
+                      className={`p-3 rounded border text-left transition-all cursor-pointer ${
+                        rangeBracket === "normal"
+                          ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+                          : "border-bridge-border bg-black/40 text-slate-300 hover:border-emerald-400/40"
+                      }`}
+                    >
+                      <span className="text-xs font-bold uppercase block">Normal Range</span>
+                      <span className="text-[10px] block mt-1">≤ {normalRange} Feet</span>
+                    </button>
+
+                    <button
+                      onClick={() => setRangeBracket("long")}
+                      className={`p-3 rounded border text-left transition-all cursor-pointer ${
+                        rangeBracket === "long"
+                          ? "border-amber-400 bg-amber-500/20 text-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.2)]"
+                          : "border-bridge-border bg-black/40 text-slate-300 hover:border-amber-400/40"
+                      }`}
+                    >
+                      <span className="text-xs font-bold uppercase block">Long Range</span>
+                      <span className="text-[10px] block mt-1">{normalRange + 1} – {maxRange} Feet</span>
+                      <span className="text-[9px] text-amber-300 block mt-1">Disadvantage</span>
+                    </button>
+
+                    <button
+                      onClick={() => setRangeBracket("out")}
+                      className={`p-3 rounded border text-left transition-all cursor-pointer ${
+                        rangeBracket === "out"
+                          ? "border-red-500 bg-red-950/60 text-red-200"
+                          : "border-red-500/40 bg-red-950/20 text-red-400 hover:bg-red-950/40"
+                      }`}
+                    >
+                      <span className="text-xs font-bold uppercase block">Out of Range</span>
+                      <span className="text-[10px] block mt-1">&gt; {maxRange} Feet</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 3: STANCES */}
+              {wizardStep === 3 && (
+                <div className="flex flex-col gap-3.5 py-2">
+                  <p className="text-xs text-slate-300">Configure weapon property stances:</p>
+
+                  <div className="space-y-2 border-t border-bridge-border/40 pt-2">
+                    {hasPiercing && (
+                      <label className="flex items-center justify-between p-2 rounded bg-black/40 border border-bridge-border cursor-pointer text-xs">
+                        <div>
+                          <span className="font-bold text-cyan-neon uppercase">Engage Piercing Stance</span>
+                          <span className="text-[10px] text-muted-foreground block">+1 to Attack Roll / -1 to Damage Roll</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={togglePiercing}
+                          onChange={(e) => setTogglePiercing(e.target.checked)}
+                          className="w-4 h-4 accent-cyan-neon cursor-pointer"
+                        />
+                      </label>
+                    )}
+
+                    {hasDire && (
+                      <label className="flex items-center justify-between p-2 rounded bg-black/40 border border-bridge-border cursor-pointer text-xs">
+                        <div>
+                          <span className="font-bold text-amber-300 uppercase">Engage Dire Stance</span>
+                          <span className="text-[10px] text-muted-foreground block">-1 to Attack Roll / +1 to Damage Roll</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={toggleDire}
+                          onChange={(e) => setToggleDire(e.target.checked)}
+                          className="w-4 h-4 accent-cyan-neon cursor-pointer"
+                        />
+                      </label>
+                    )}
+
+                    {hasMelt && (
+                      <label className="flex items-center justify-between p-2 rounded bg-black/40 border border-bridge-border cursor-pointer text-xs">
+                        <div>
+                          <span className="font-bold text-rose-400 uppercase">Engage Melt Stance</span>
+                          <span className="text-[10px] text-muted-foreground block">-{proficiencyBonus} to Attack / +{proficiencyBonus} to Damage Result</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={toggleMelt}
+                          onChange={(e) => setToggleMelt(e.target.checked)}
+                          className="w-4 h-4 accent-cyan-neon cursor-pointer"
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 4: RESOLUTION */}
+              {wizardStep === 4 && (
+                <div className="flex flex-col gap-4 py-2">
+                  {firingMode === "standard" ? (
+                    <div className="flex flex-col gap-3">
+                      <div className="bg-black/60 p-3 rounded border border-cyan-neon/40 flex flex-col gap-2">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="text-[10px] text-muted-foreground uppercase block">Attack Roll Modifier</span>
+                            <span className="text-xl font-bold text-cyan-neon font-mono">
+                              1d20{attackMod >= 0 ? `+${attackMod}` : attackMod} to Hit
+                            </span>
+                            {isDisadvantageRoll && (
+                              <span className="text-[9px] font-bold text-amber-400 block mt-0.5">
+                                [DISADVANTAGE ACTIVE: Roll 2d20, keep lower]
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-muted-foreground uppercase block">Critical Threshold</span>
+                            <span className="text-sm font-bold text-amber-300 font-mono">
+                              Natural {critThreshold}–20
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2.5 rounded bg-black/40 border border-bridge-border">
+                        <div className="flex flex-col justify-between gap-1 border-b sm:border-b-0 sm:border-r border-bridge-border/60 pb-2 sm:pb-0 sm:pr-2">
+                          <span className="text-[10px] text-muted-foreground uppercase">Digital Dice Roll</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const r1 = Math.floor(Math.random() * 20) + 1
+                                const r2 = Math.floor(Math.random() * 20) + 1
+                                if (isDisadvantageRoll) {
+                                  setDigitalRollPair([r1, r2])
+                                  setDigitalRoll(Math.min(r1, r2))
+                                } else {
+                                  setDigitalRollPair(null)
+                                  setDigitalRoll(r1)
+                                }
+                              }}
+                              className="px-2.5 py-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 text-cyan-neon text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-cyan-neon/20 cursor-pointer"
+                            >
+                              <Dices className="w-3.5 h-3.5" />
+                              Roll d20
+                            </button>
+                            {digitalRoll !== null && (
+                              <span className="text-xs font-mono font-bold text-cyan-neon">
+                                [{digitalRoll}] + {attackMod} = <strong>{digitalRoll + attackMod}</strong>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col justify-between gap-1">
+                          <span className="text-[10px] text-muted-foreground uppercase">Tabletop Roll Total</span>
+                          <input
+                            type="number"
+                            placeholder="Final Roll Total"
+                            value={manualAttackInput}
+                            onChange={(e) => setManualAttackInput(e.target.value)}
+                            className="w-28 rounded bg-black border border-slate-700 px-2 py-1 text-xs text-cyan-300 font-bold focus:outline-none focus:border-cyan-neon"
+                          />
+                        </div>
+                      </div>
+
+                      {attackOutcome === "pending" && (
+                        <div className="grid grid-cols-2 gap-3 pt-2">
+                          <button
+                            onClick={() => completeAttack(currentHeatCost)}
+                            className="p-3 rounded border border-red-500/50 bg-red-500/10 text-red-400 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-red-500/20 cursor-pointer"
+                          >
+                            <XCircle className="w-4 h-4" />
+                            Miss ({isOrdnance ? "-1 Warhead" : `+${currentHeatCost} Heat`})
+                          </button>
+
+                          <button
+                            onClick={() => setAttackOutcome("hit")}
+                            className="p-3 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-emerald-500/30 cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            Target Hit (Roll Damage)
+                          </button>
+                        </div>
+                      )}
+
+                      {attackOutcome === "hit" && (
+                        <div className="bg-emerald-950/30 border border-emerald-500/60 p-3.5 rounded flex flex-col gap-2.5">
+                          <span className="text-xs font-bold text-emerald-400 uppercase">
+                            Hit Confirmed! Report Damage to GM:
+                          </span>
+                          
+                          <div className="flex flex-col gap-1">
+                            <span className="text-lg font-bold font-mono text-cyan-neon">
+                              {finalDmgFormula} {(isOrdnance ? launcherState?.damageType : activeWizardWeapon.damageType)?.toUpperCase() || "ENERGY"} DAMAGE
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/60 p-2.5 rounded border border-slate-700">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={handleRollDigitalDamage}
+                                className="px-3 py-1.5 rounded border border-cyan-neon/40 bg-cyan-neon/10 hover:bg-cyan-neon/25 text-cyan-neon text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+                              >
+                                <Dices className="w-4 h-4" />
+                                Roll Damage
+                              </button>
+                              {digitalDamageResult && (
+                                <span className="text-xs font-mono font-bold text-cyan-neon">
+                                  [{digitalDamageResult.rolls.join(" + ")}]{dynamicFlat !== 0 ? ` ${dynamicFlat >= 0 ? `+ ${dynamicFlat}` : `- ${Math.abs(dynamicFlat)}`}` : ""} = <strong className="text-emerald-400 text-sm">{digitalDamageResult.total}</strong>
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                placeholder="Damage"
+                                value={manualDamageInput}
+                                onChange={(e) => setManualDamageInput(e.target.value)}
+                                className="w-24 rounded bg-black border border-slate-700 px-2 py-1 text-xs text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
+                              />
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => completeAttack(currentHeatCost)}
+                            className="mt-2 w-full py-2 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 text-xs font-bold uppercase tracking-wider hover:bg-emerald-500/30 cursor-pointer"
+                          >
+                            Complete Attack ({isOrdnance ? "-1 Warhead" : `+${currentHeatCost} Heat`})
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <div className="bg-black/60 p-3 rounded border border-cyan-neon/40 flex flex-col gap-2">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <span className="text-[10px] text-muted-foreground uppercase block">
+                              Target Dexterity Save DC
+                            </span>
+                            <span className="text-xl font-bold text-cyan-neon font-mono">
+                              DC {saveDC}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {attackOutcome === "pending" && (
+                        <div className="grid grid-cols-2 gap-3 pt-2">
+                          <button
+                            onClick={() => completeAttack(currentHeatCost)}
+                            className="p-3 rounded border border-amber-500/50 bg-amber-500/10 text-amber-400 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-amber-500/20 cursor-pointer"
+                          >
+                            Target Saved (0 Damage)
+                          </button>
+
+                          <button
+                            onClick={() => setAttackOutcome("failed")}
+                            className="p-3 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-emerald-500/30 cursor-pointer"
+                          >
+                            Target Failed (Roll Damage)
+                          </button>
+                        </div>
+                      )}
+
+                      {attackOutcome === "failed" && (
+                        <div className="bg-emerald-950/30 border border-emerald-500/60 p-3.5 rounded flex flex-col gap-2.5">
+                          <span className="text-xs font-bold text-emerald-400 uppercase">
+                            Failed Save! Report Damage to GM:
+                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-lg font-bold font-mono text-cyan-neon">
+                              {finalDmgFormula} {(isOrdnance ? launcherState?.damageType : activeWizardWeapon.damageType)?.toUpperCase() || "ENERGY"} DAMAGE
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/60 p-2.5 rounded border border-slate-700">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={handleRollDigitalDamage}
+                                className="px-3 py-1.5 rounded border border-cyan-neon/40 bg-cyan-neon/10 hover:bg-cyan-neon/25 text-cyan-neon text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+                              >
+                                <Dices className="w-4 h-4" />
+                                Roll Damage
+                              </button>
+                              {digitalDamageResult && (
+                                <span className="text-xs font-mono font-bold text-cyan-neon">
+                                  [{digitalDamageResult.rolls.join(" + ")}]{dynamicFlat !== 0 ? ` ${dynamicFlat >= 0 ? `+ ${dynamicFlat}` : `- ${Math.abs(dynamicFlat)}`}` : ""} = <strong className="text-emerald-400 text-sm">{digitalDamageResult.total}</strong>
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                placeholder="Damage"
+                                value={manualDamageInput}
+                                onChange={(e) => setManualDamageInput(e.target.value)}
+                                className="w-24 rounded bg-black border border-slate-700 px-2 py-1 text-xs text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
+                              />
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => completeAttack(currentHeatCost)}
+                            className="mt-2 w-full py-2 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 text-xs font-bold uppercase tracking-wider hover:bg-emerald-500/30 cursor-pointer"
+                          >
+                            Complete Attack (+{currentHeatCost} Heat)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Wizard Footer Navigation */}
+              <div className="flex justify-between items-center pt-3 border-t border-bridge-border/40">
+                {wizardStep > 1 && attackOutcome === "pending" ? (
+                  <button
+                    onClick={() => setWizardStep((prev) => Math.max(1, prev - 1) as any)}
+                    className="px-3 py-1.5 rounded border border-bridge-border text-xs text-muted-foreground hover:text-white uppercase cursor-pointer"
+                  >
+                    &larr; Back
+                  </button>
+                ) : (
+                  <div />
+                )}
+
+                {wizardStep < 4 && (
+                  <button
+                    disabled={(wizardStep === 1 && !hasSufficientHeat) || (wizardStep === 2 && rangeBracket === "out")}
+                    onClick={() => setWizardStep((prev) => Math.min(4, prev + 1) as any)}
+                    className={`px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-all ${
+                      (wizardStep === 1 && !hasSufficientHeat) || (wizardStep === 2 && rangeBracket === "out")
+                        ? "bg-red-950/40 border border-red-500/50 text-red-400 cursor-not-allowed opacity-80"
+                        : "bg-cyan-neon/20 border border-cyan-neon/60 text-cyan-neon hover:bg-cyan-neon/30 cursor-pointer"
+                    }`}
+                  >
+                    Next Step →
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* MODAL: DRILL-DOWN ENGINE START-UP */}
       {showStartupModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
           <div className="bg-bridge-panel border border-cyan-neon/70 rounded-md p-5 max-w-xl w-full flex flex-col gap-4 shadow-[0_0_25px_rgba(0,255,255,0.15)] max-h-[90vh] overflow-y-auto">
@@ -1514,7 +2924,6 @@ export function EnginesStation({
               </span>
             </div>
 
-            {/* Stepper Display */}
             <div className="bg-black/60 p-3 rounded border border-bridge-border/60 flex flex-col gap-2">
               <div className="flex justify-between text-xs">
                 <span className="font-bold text-slate-200">
@@ -1548,7 +2957,6 @@ export function EnginesStation({
               </div>
             </div>
 
-            {/* Duress Piloting Check */}
             <div className="bg-black/50 p-3 rounded border border-bridge-border/60 flex flex-col gap-2.5">
               <div className="flex justify-between items-center text-xs">
                 <span className="font-bold text-cyan-neon uppercase">Duress Piloting Check</span>
@@ -1596,7 +3004,6 @@ export function EnginesStation({
               )}
             </div>
 
-            {/* Forced Takeoff Interlock Trigger */}
             <div className="border-t border-bridge-border/60 pt-3 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
                 {initiationProcedures < targetProcedures ? (
@@ -1667,9 +3074,7 @@ export function EnginesStation({
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 2: DRILL-DOWN PILOT ACTIONS & TACTICS DATABASE                      */}
-      {/* ========================================================================= */}
+      {/* MODAL 2: TACTICS DATABASE */}
       {showActionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
           <div className="bg-bridge-panel border border-cyan-neon/70 rounded-md p-5 max-w-3xl w-full flex flex-col gap-4 shadow-[0_0_25px_rgba(0,255,255,0.15)] max-h-[90vh]">
@@ -1689,7 +3094,6 @@ export function EnginesStation({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 flex-1 overflow-hidden min-h-[300px]">
-              {/* Action list */}
               <div className="flex flex-col gap-1 overflow-y-auto pr-1">
                 {PILOT_ACTIONS.map((action) => {
                   const isSelected = selectedPilotAction.name === action.name
@@ -1712,7 +3116,6 @@ export function EnginesStation({
                 })}
               </div>
 
-              {/* Action Description */}
               <div className="md:col-span-2 bg-black/50 p-4 rounded border border-bridge-border/60 flex flex-col justify-between overflow-y-auto">
                 <div>
                   <div className="flex justify-between items-center border-b border-bridge-border/40 pb-1.5 mb-2">

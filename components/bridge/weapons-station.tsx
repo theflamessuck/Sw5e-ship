@@ -17,7 +17,8 @@ import {
   UserMinus,
   Clock,
   ShieldAlert,
-  ShieldCheck
+  ShieldCheck,
+  Lock
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { CombatResources } from "./combat-resources"
@@ -58,6 +59,7 @@ interface WeaponsStationProps {
   shipConfig?: ShipConfig
   installedMods?: Modification[]
   onRemoveMod?: (instanceId: string) => void
+  onUpdateMod?: (instanceId: string, updates: Partial<Modification>) => void
   stationPools?: Record<string, number>
   onUpdateStationPools?: React.Dispatch<React.SetStateAction<Record<string, number>>>
   sharedPoolDice?: number
@@ -75,7 +77,6 @@ interface WeaponsStationProps {
   sFoilsMode?: "locked" | "unlocked"
   systemDamageLevel?: number
   shipStatuses?: ActiveStatus[]
-  // Manifest & Turn Integration
   manifest?: ManifestMember[]
   onAssignCrew?: (memberId: string, targetLocation: ShipCompartmentId) => void
   onToggleTurn?: (memberId: string) => void
@@ -99,7 +100,6 @@ function findArmedAmmoCatalog(launcherState: LauncherLoadState | null) {
   )
 }
 
-// Helper to parse and evaluate dice strings like "2d8", "1d10 + 1d10"
 function rollDiceFormula(formula: string): { individualRolls: number[]; totalDice: number } {
   const matches = [...formula.matchAll(/(\d+)d(\d+)/g)]
   const rolls: number[] = []
@@ -126,6 +126,7 @@ export function WeaponsStation({
   shipConfig,
   installedMods = [],
   onRemoveMod,
+  onUpdateMod,
   stationPools = {
     engines: 0,
     communications: 0,
@@ -153,10 +154,8 @@ export function WeaponsStation({
   onAssignCrew,
   onToggleTurn,
 }: WeaponsStationProps) {
-  // Master Arming / Safe State (Defaults to Safe mode)
   const [isArmed, setIsArmed] = useState<boolean>(false)
 
-  // --- CREW ASSIGNMENT EXTRACTION ---
   const assignedConsoleCrew = useMemo(() => {
     return manifest
       .filter((m) => m.location === "weapons" && !m.isPassenger)
@@ -205,7 +204,6 @@ export function WeaponsStation({
 
   const proficiencyBonus = shipConfig?.proficiencyBonus ?? 2
 
-  // Condition checks
   const isBlinded = shipStatuses.some((s) => s.title.toLowerCase().includes("blinded"))
   const isIonized = shipStatuses.some((s) => s.title.toLowerCase().includes("ionized"))
   const isInvisible = shipStatuses.some((s) => s.title.toLowerCase().includes("invisible"))
@@ -241,7 +239,6 @@ export function WeaponsStation({
     (m) => m.category === "Weapon System" && m.name !== "Fixed Hardpoint" && m.name !== "Turret Hardpoint"
   )
 
-  const [weaponHeat, setWeaponHeat] = useState<Record<string, number>>({})
   const [launcherStates, setLauncherStates] = useState<Record<string, LauncherLoadState>>({})
 
   const [localOrdnanceList, setLocalOrdnanceList] = useState<OrdnanceItem[]>(() =>
@@ -266,7 +263,7 @@ export function WeaponsStation({
 
   const isTurretMounted = (w: Modification): boolean => {
     if (w.mountedOnInstanceId) {
-      const parent = installedMods.find((m) => m.instanceId === w.mountedOnInstanceId)
+      const parent = installedMods.find((m) => m.instanceId === w.mountedOnInstanceId || m.id === w.mountedOnInstanceId)
       if (parent && parent.name.toLowerCase().includes("turret")) return true
     }
     const loc = (w.location || "").toLowerCase()
@@ -294,8 +291,9 @@ export function WeaponsStation({
     }
   }
 
+  // Synchronized Cooling directly into shared installedMods state
   const handleCoolMountedWeapon = (instanceId: string) => {
-    setWeaponHeat((prev) => ({ ...prev, [instanceId]: 0 }))
+    onUpdateMod?.(instanceId, { currentHeat: 0 } as any)
   }
 
   const executeArmLauncher = (targetLauncher: Modification, ordnance: OrdnanceItem) => {
@@ -445,7 +443,6 @@ export function WeaponsStation({
   const [toggleMelt, setToggleMelt] = useState<boolean>(false)
   const [toggleDire, setToggleDire] = useState<boolean>(false)
   
-  // Direct Roll / Tabletop Physical Inputs
   const [digitalRoll, setDigitalRoll] = useState<number | null>(null)
   const [digitalRollPair, setDigitalRollPair] = useState<[number, number] | null>(null)
   const [digitalDamageResult, setDigitalDamageResult] = useState<{ rolls: number[]; total: number } | null>(null)
@@ -475,6 +472,11 @@ export function WeaponsStation({
       return
     }
 
+    if ((w as any).firedThisRound) {
+      alert("Weapon Fired: Each ship weapon can only be fired once per round. It will reset when the Reactor is Cycled.")
+      return
+    }
+
     const isOrdnance = !!w.isOrdnanceLauncher
     const key = w.instanceId || w.id
     if (isOrdnance) {
@@ -487,7 +489,7 @@ export function WeaponsStation({
 
     setActiveWizardWeapon(w)
     setWizardStep(1)
-    const currentHeat = weaponHeat[key] ?? 0
+    const currentHeat = (w as any).currentHeat ?? 0
     const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === w.name.toLowerCase())
     const maxHeat = typeof w.overheat === "number" && w.overheat > 0 ? w.overheat : catalogDef?.overheat ?? 4
     const remainingHeadroom = Math.max(0, maxHeat - currentHeat)
@@ -528,6 +530,7 @@ export function WeaponsStation({
     setAttackOutcome("pending")
   }
 
+  // Completes attack: marks weapon as firedThisRound and updates shared heat/ammo state
   const completeAttack = (heatCost: number) => {
     if (!activeWizardWeapon) return
     const key = activeWizardWeapon.instanceId || activeWizardWeapon.id
@@ -550,15 +553,15 @@ export function WeaponsStation({
           },
         }
       })
+      onUpdateMod?.(key, { firedThisRound: true } as any)
     } else {
+      const currentHeat = (activeWizardWeapon as any).currentHeat ?? 0
       const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === activeWizardWeapon.name.toLowerCase())
       const maxHeat = typeof activeWizardWeapon.overheat === "number" && activeWizardWeapon.overheat > 0
         ? activeWizardWeapon.overheat
         : catalogDef?.overheat ?? 4
-      setWeaponHeat((prev) => ({
-        ...prev,
-        [key]: Math.min(maxHeat, (prev[key] ?? 0) + heatCost),
-      }))
+      const nextHeat = Math.min(maxHeat, currentHeat + heatCost)
+      onUpdateMod?.(key, { currentHeat: nextHeat, firedThisRound: true } as any)
     }
     closeWizard()
   }
@@ -674,12 +677,9 @@ export function WeaponsStation({
         </div>
       </div>
 
-      {/* ========================================================================= */}
       {/* STATION CREW ASSIGNMENT & COMBAT TURN HUD */}
-      {/* ========================================================================= */}
       <div className="rounded-md border border-cyan-neon/40 bg-black/40 p-3 shadow-[0_0_15px_rgba(0,255,255,0.05)]">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Assigned Weapons Console Crew */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-neon uppercase tracking-wider">
               <Users className="h-4 w-4 text-cyan-neon" />
@@ -714,7 +714,6 @@ export function WeaponsStation({
 
                     <span className="font-bold text-xs">{member.name}</span>
 
-                    {/* Turn Toggle */}
                     <button
                       type="button"
                       onClick={() => onToggleTurn && onToggleTurn(member.id)}
@@ -732,11 +731,10 @@ export function WeaponsStation({
                       )}
                     </button>
 
-                    {/* Vacate / Return to Quarters */}
                     <button
                       type="button"
                       onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
-                      className="text-slate-500 hover:text-rose-400 transition ml-1"
+                      className="text-slate-500 hover:text-rose-400 transition ml-1 cursor-pointer"
                       title="Vacate Station (Return to Quarters)"
                     >
                       <UserMinus className="h-3.5 w-3.5" />
@@ -747,7 +745,6 @@ export function WeaponsStation({
             )}
           </div>
 
-          {/* Quick Pull Selector: Bring Crew to Weapons Console */}
           {availablePersonnel.length > 0 && onAssignCrew && (
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">
@@ -853,7 +850,6 @@ export function WeaponsStation({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Master Arm / Safe Control Button */}
             <button
               type="button"
               onClick={() => setIsArmed((prev) => !prev)}
@@ -900,9 +896,10 @@ export function WeaponsStation({
             const instanceKey = w.instanceId || w.id
             const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === w.name.toLowerCase())
             const isOrdnance = !!w.isOrdnanceLauncher
-            const heat = weaponHeat[instanceKey] ?? 0
+            const heat = (w as any).currentHeat ?? 0
             const maxHeat = typeof w.overheat === "number" && w.overheat > 0 ? w.overheat : catalogDef?.overheat ?? 4
             const isOverheated = heat >= maxHeat
+            const isFiredThisRound = !!(w as any).firedThisRound
 
             const launcherState = isOrdnance ? getLauncherState(instanceKey, w) : null
             const isLauncherArmed = launcherState ? launcherState.loadedCount > 0 : false
@@ -925,13 +922,13 @@ export function WeaponsStation({
             const effectiveAtk = computeAttackModDisplay(rawProps, !isOrdnance)
             const effectiveDmg = computeDamageDisplay(rawDmgString, rawProps)
 
-            const standardArc = w.location || "Bow"
-
             return (
               <div
                 key={instanceKey}
                 className={`rounded-lg border bg-black/40 p-4 flex flex-col justify-between gap-3 relative transition-all ${
-                  isTurret
+                  isFiredThisRound
+                    ? "border-slate-800 opacity-60"
+                    : isTurret
                     ? isManned
                       ? "border-cyan-neon/80 shadow-[0_0_15px_rgba(0,255,255,0.12)]"
                       : "border-amber-500/60 shadow-[0_0_15px_rgba(245,158,11,0.08)]"
@@ -961,7 +958,6 @@ export function WeaponsStation({
 
                       {/* Turret Arc & Crew Assignment Row */}
                       <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-bridge-border/40">
-                        {/* Arc & Disadvantage Badge Line */}
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <Compass className={`w-3.5 h-3.5 shrink-0 ${isManned ? "text-cyan-neon" : "text-amber-400"}`} />
@@ -981,7 +977,6 @@ export function WeaponsStation({
                           )}
                         </div>
 
-                        {/* Dedicated Full-Width Gunner Bar */}
                         {isTurret && (
                           <div className="flex flex-col gap-1.5 bg-slate-950/80 p-2 rounded border border-bridge-border/60">
                             <div className="flex items-center justify-between text-[10px]">
@@ -1056,7 +1051,9 @@ export function WeaponsStation({
 
                     <span
                       className={`text-[9px] font-bold px-2 py-0.5 rounded border shrink-0 ${
-                        isOrdnance
+                        isFiredThisRound
+                          ? "bg-slate-900 border-slate-700 text-slate-400"
+                          : isOrdnance
                           ? isLauncherArmed
                             ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
                             : "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse"
@@ -1065,7 +1062,15 @@ export function WeaponsStation({
                           : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
                       }`}
                     >
-                      {isOrdnance ? (isLauncherArmed ? "ARMED" : "EMPTY") : (isOverheated ? "OVERHEATED" : "READY")}
+                      {isFiredThisRound
+                        ? "FIRED (ROUND LOCK)"
+                        : isOrdnance
+                        ? isLauncherArmed
+                          ? "ARMED"
+                          : "EMPTY"
+                        : isOverheated
+                        ? "OVERHEATED"
+                        : "READY"}
                     </span>
                   </div>
 
@@ -1131,43 +1136,43 @@ export function WeaponsStation({
                           />
                         ))}
                       </div>
-
-                      {hasBomberRoleMastery && (
-                        <div className="mt-1 p-1 rounded bg-rose-950/40 border border-rose-500/40 text-[9px] text-rose-300">
-                          ★ Bomber Mastery: Larger targets save with disadvantage!
-                        </div>
-                      )}
-                      {isMissileBoatSpec && (
-                        <div className="mt-1 p-1 rounded bg-amber-950/40 border border-amber-500/40 text-[9px] text-amber-300">
-                          ★ Missile Boat Spec: Larger targets save with disadvantage!
-                        </div>
-                      )}
-                      {isMissileBoatMastery && (
-                        <div className="mt-1 p-1 rounded bg-cyan-950/40 border border-cyan-500/40 text-[9px] text-cyan-300">
-                          ★ Missile Boat Mastery: Multi-munition loading enabled.
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
 
                 <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/40">
                   <div className="grid grid-cols-3 gap-2">
-                    {/* Firing Trigger with Safe Interlock */}
                     <button
                       onClick={() => openWizard(w)}
-                      disabled={!isArmed || (!isOrdnance ? isOverheated : !isLauncherArmed)}
+                      disabled={!isArmed || isFiredThisRound || (!isOrdnance ? isOverheated : !isLauncherArmed)}
                       className={`col-span-2 rounded border py-2 text-xs font-bold tracking-wider font-mono flex items-center justify-center gap-1.5 transition-all ${
                         !isArmed
                           ? "bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed opacity-60"
+                          : isFiredThisRound
+                          ? "bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed"
                           : (!isOrdnance ? isOverheated : !isLauncherArmed)
                           ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed opacity-40"
                           : "border-cyan-neon/60 bg-cyan-neon/20 text-cyan-neon hover:bg-cyan-neon/30 shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
                       }`}
-                      title={!isArmed ? "Weapons are SAFE. Click 'ARM WEAPONS' above to enable fire controls." : "Engage target fire controls"}
+                      title={
+                        !isArmed
+                          ? "Weapons are SAFE. Click 'ARM WEAPONS' above to enable fire controls."
+                          : isFiredThisRound
+                          ? "Weapon already fired this round. Locks until Reactor is Cycled."
+                          : "Engage target fire controls"
+                      }
                     >
-                      <Crosshair className="w-3.5 h-3.5 text-cyan-neon" />
-                      {!isArmed ? "SAFE (ARM REQ)" : "ENGAGE TARGET"}
+                      {isFiredThisRound ? (
+                        <>
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>FIRED THIS ROUND</span>
+                        </>
+                      ) : (
+                        <>
+                          <Crosshair className="w-3.5 h-3.5 text-cyan-neon" />
+                          <span>{!isArmed ? "SAFE (ARM REQ)" : "ENGAGE TARGET"}</span>
+                        </>
+                      )}
                     </button>
 
                     {!isOrdnance ? (
@@ -1442,7 +1447,7 @@ export function WeaponsStation({
         const assignedGunner = getAssignedGunner(activeWizardWeapon)
         const isManned = isTurret ? !!assignedGunner : true
 
-        const currentHeat = weaponHeat[instanceKey] ?? 0
+        const currentHeat = (activeWizardWeapon as any).currentHeat ?? 0
         const maxHeat = typeof activeWizardWeapon.overheat === "number" && activeWizardWeapon.overheat > 0
           ? activeWizardWeapon.overheat
           : catalogDef?.overheat ?? 4
@@ -1475,9 +1480,6 @@ export function WeaponsStation({
         const hasMelt = props.some((p: string) => p.includes("melt"))
         const hasHeavy = props.some((p: string) => p.includes("heavy"))
         const hasSaturate = props.some((p: string) => p.includes("saturate"))
-        const hasIonizing = props.some((p: string) => p.includes("ionizing"))
-        const hasExplosive = props.some((p: string) => p.includes("explosive"))
-        const hasHoming = props.some((p: string) => p.includes("homing"))
         const keenProp = props.find((p: string) => p.includes("keen"))
         const keenRating = keenProp ? parseInt(keenProp.replace(/[^0-9]/g, ""), 10) || 1 : 0
         const critThreshold = 20 - keenRating
@@ -1513,7 +1515,6 @@ export function WeaponsStation({
 
         const saveDC = 8 + attackMod
 
-        // Advantage / Disadvantage evaluation
         const hasAdvantage = isInvisible
         const hasDisadvConditions = rangeBracket === "long" || failsCon || hasSystemDamageAtkDisadv || isBlinded || isIonized || (!isManned && isTurret)
         
@@ -1554,7 +1555,6 @@ export function WeaponsStation({
         if (dynamicFlat > 0) finalDmgFormula = `${diceString} + ${dynamicFlat}`
         else if (dynamicFlat < 0) finalDmgFormula = `${diceString} - ${Math.abs(dynamicFlat)}`
 
-        // Digital Damage Roll Trigger
         const handleRollDigitalDamage = () => {
           const { individualRolls, totalDice } = rollDiceFormula(diceString)
           const finalTotal = Math.max(1, totalDice + dynamicFlat)
@@ -1831,7 +1831,7 @@ export function WeaponsStation({
                       onClick={() => setRangeBracket("normal")}
                       className={`p-3 rounded border text-left transition-all cursor-pointer ${
                         rangeBracket === "normal"
-                          ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+                          ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 shadow-[0_0_10px_rgba(168,85,247,0.2)]"
                           : "border-bridge-border bg-black/40 text-slate-300 hover:border-emerald-400/40"
                       }`}
                     >
@@ -1992,7 +1992,7 @@ export function WeaponsStation({
                 </div>
               )}
 
-              {/* STEP 4: ATTACK RESOLUTION & MANUAL/DIGITAL ROLL ENTRY */}
+              {/* STEP 4: ATTACK RESOLUTION & ROLL ENTRY */}
               {wizardStep === 4 && (
                 <div className="flex flex-col gap-4 py-2">
                   {firingMode === "standard" ? (
@@ -2033,9 +2033,7 @@ export function WeaponsStation({
                         </div>
                       </div>
 
-                      {/* Tri-Modal Input: Tabletop Direct Entry & Digital Roll Helper */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2.5 rounded bg-black/40 border border-bridge-border">
-                        {/* Option 1: Roll for me */}
                         <div className="flex flex-col justify-between gap-1 border-b sm:border-b-0 sm:border-r border-bridge-border/60 pb-2 sm:pb-0 sm:pr-2">
                           <span className="text-[10px] text-muted-foreground uppercase">Digital Dice Roll</span>
                           <div className="flex items-center gap-2">
@@ -2068,7 +2066,6 @@ export function WeaponsStation({
                           </div>
                         </div>
 
-                        {/* Option 2: Tabletop Physical Entry */}
                         <div className="flex flex-col justify-between gap-1">
                           <span className="text-[10px] text-muted-foreground uppercase">Tabletop Physical Roll Total</span>
                           <div className="flex items-center gap-2">
@@ -2121,7 +2118,6 @@ export function WeaponsStation({
                             )}
                           </div>
 
-                          {/* Digital Damage Roll & Physical Entry Row */}
                           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/60 p-2.5 rounded border border-slate-700">
                             <div className="flex items-center gap-2">
                               <button
@@ -2209,7 +2205,6 @@ export function WeaponsStation({
                             </span>
                           </div>
 
-                          {/* Digital Damage Roll & Physical Entry Row */}
                           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/60 p-2.5 rounded border border-slate-700">
                             <div className="flex items-center gap-2">
                               <button
@@ -2228,9 +2223,6 @@ export function WeaponsStation({
                             </div>
 
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-muted-foreground uppercase shrink-0">
-                                Total:
-                              </span>
                               <input
                                 type="number"
                                 placeholder="Damage"
@@ -2277,11 +2269,7 @@ export function WeaponsStation({
                         : "bg-cyan-neon/20 border border-cyan-neon/60 text-cyan-neon hover:bg-cyan-neon/30 cursor-pointer"
                     }`}
                   >
-                    {wizardStep === 1 && !hasSufficientHeat
-                      ? "Insufficient Ammo/Heat"
-                      : wizardStep === 2 && rangeBracket === "out"
-                      ? "Out of Range"
-                      : "Next Step →"}
+                    Next Step →
                   </button>
                 )}
               </div>

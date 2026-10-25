@@ -370,7 +370,7 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
     },
   },
   installedMods: [
-    { ...MASTER_MODIFICATIONS[0], instanceId: "seed-fixed-hardpoint-1", location: "Bow" },
+    { ...MASTER_MODIFICATIONS[0], instanceId: "seed-fixed-hardpoint-1", location: "Bow", currentHeat: 0, firedThisRound: false },
   ],
   installedSuites: [],
   transactions: [
@@ -535,7 +535,7 @@ export default function BridgeDashboard() {
       manualPlayerInitOverride: null,
       playerShipOrderTie: 0,
       playerShipHasActed: false,
-      hasCycledReactorThisRound: true,
+      hasCycledReactorThisRound: false,
       enemyShips: [],
     },
   } = roomState
@@ -607,7 +607,7 @@ export default function BridgeDashboard() {
         manualPlayerInitOverride: null,
         playerShipOrderTie: 0,
         playerShipHasActed: false,
-        hasCycledReactorThisRound: true,
+        hasCycledReactorThisRound: false,
         enemyShips: [],
       }
       const nextCombat =
@@ -1409,6 +1409,21 @@ export default function BridgeDashboard() {
     })
   }
 
+  // Handler to update modification properties with dual ID support (instanceId or id)
+  const handleUpdateMod = useCallback(
+    (idOrInstanceId: string, updates: Partial<Modification>) => {
+      updateRoomData((prev) => ({
+        ...prev,
+        installedMods: prev.installedMods.map((m) =>
+          m.instanceId === idOrInstanceId || m.id === idOrInstanceId
+            ? { ...m, ...updates }
+            : m
+        ),
+      }))
+    },
+    [updateRoomData]
+  )
+
   const handleUpdateSuites = (newSuites: InstalledSuite[]) => {
     updateRoomData((prev) => {
       let newTransactions = prev.transactions
@@ -1522,7 +1537,7 @@ export default function BridgeDashboard() {
     }))
   }
 
-  // --- CYCLE REACTOR (ROUND RESET + MOVEMENT/TURN RESETS + UNLOCKS COMBAT ROUND LOCK) ---
+  // --- CYCLE REACTOR (ROUND RESET + MOVEMENT/TURN RESETS + UNLOCKS COMBAT ROUND LOCK + CLEARS FIRED WEAPONS) ---
   const handleCycleReactor = (generatedAmount?: number) => {
     updateRoomData((prev) => {
       const amountToAdd =
@@ -1550,6 +1565,8 @@ export default function BridgeDashboard() {
           ...prev.shieldState,
           temp: nextTempShields,
         },
+        // Unlocks all installed weapons to fire again in the new round
+        installedMods: prev.installedMods.map((m) => ({ ...m, firedThisRound: false })),
         // Unlocks next combat round if in combat
         combatState: {
           ...prev.combatState,
@@ -1626,6 +1643,7 @@ export default function BridgeDashboard() {
       standingByUsed: false,
       leafOnTheWindUsed: false,
       bestShipInVerseUsed: false,
+      installedMods: prev.installedMods.map((m) => ({ ...m, firedThisRound: false, currentHeat: 0 })),
       transactions: [
         {
           id: `tx-${Date.now()}`,
@@ -1680,7 +1698,7 @@ export default function BridgeDashboard() {
         />
       </div>
 
-      {/* 0. UNLINKED GATE (DEFAULT LANDING SCREEN BEFORE ANY ROOM CODE IS ENTERED) */}
+      {/* 0. UNLINKED GATE */}
       {!roomCode ? (
         <div className="flex min-h-[480px] flex-col items-center justify-center gap-4 rounded-md border border-neutral-800 bg-neutral-950/90 p-8 text-center font-mono shadow-2xl">
           <div className="relative flex items-center justify-center">
@@ -1699,7 +1717,6 @@ export default function BridgeDashboard() {
           </div>
         </div>
       ) : syncStatus.isCreationBlocked ? (
-        /* 1. RESTRICTED SHIPYARD OVERLAY (MASTER KEY REQUIRED TO BUILD NEW SHIP) */
         <div className="flex min-h-[450px] flex-col items-center justify-center gap-4 rounded-md border-2 border-amber-500/80 bg-black/90 p-6 text-center font-mono shadow-[0_0_40px_rgba(245,158,11,0.2)]">
           <span className="text-4xl">🛠️</span>
           <h2 className="text-xl sm:text-2xl font-bold tracking-widest text-amber-400 uppercase">
@@ -1731,7 +1748,6 @@ export default function BridgeDashboard() {
           </form>
         </div>
       ) : syncStatus.isPinRequired && !syncStatus.isUnlocked ? (
-        /* 2. ACCESS RESTRICTED SCREEN OVERLAY IF PIN LOCKED */
         <div className="flex min-h-[450px] flex-col items-center justify-center gap-4 rounded-md border-2 border-rose-500/80 bg-black/90 p-6 text-center font-mono shadow-[0_0_40px_rgba(244,63,94,0.3)]">
           <span className="text-4xl">🔒</span>
           <h2 className="text-xl sm:text-2xl font-bold tracking-widest text-rose-400 uppercase">
@@ -1771,7 +1787,6 @@ export default function BridgeDashboard() {
               manifest={manifest}
             />
             <main className="min-w-0 flex-1 relative">
-              {/* LEVEL 6 EMERGENCY BLACKOUT OVERLAY */}
               {isLevel6Blackout && active !== "GM Station" ? (
                 <div className="flex min-h-[500px] flex-col items-center justify-center gap-4 rounded-md border-2 border-red-600 bg-black/95 p-6 text-center font-mono shadow-[0_0_50px_rgba(239,68,68,0.4)] animate-pulse">
                   <AlertOctagon className="h-16 w-16 text-red-500 animate-bounce" />
@@ -1804,7 +1819,6 @@ export default function BridgeDashboard() {
                   </div>
                 </div>
               ) : isDarkStation ? (
-                /* COLD & DARK / OFFLINE OVERLAY FOR TACTICAL STATIONS */
                 <div className="flex min-h-[460px] flex-col items-center justify-center gap-4 rounded-md border border-neutral-800 bg-black/90 p-8 text-center font-mono shadow-2xl">
                   <div className="relative flex items-center justify-center">
                     <span className="h-14 w-14 animate-pulse rotate-45 border-2 border-neutral-700" />
@@ -1865,6 +1879,7 @@ export default function BridgeDashboard() {
                   shipConfig={effectiveShipConfig}
                   installedMods={installedMods}
                   onRemoveMod={handleRemoveMod}
+                  onUpdateMod={handleUpdateMod}
                   stationPools={stationPools}
                   onUpdateStationPools={(newPools) =>
                     updateRoomData((prev) => ({
@@ -2313,6 +2328,15 @@ export default function BridgeDashboard() {
                   shipConfig={effectiveShipConfig}
                   installedMods={installedMods}
                   onRemoveMod={handleRemoveMod}
+                  onUpdateMod={handleUpdateMod}
+                  ordnanceList={ordnanceList}
+                  onUpdateOrdnanceList={(newList) =>
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      ordnanceList:
+                        typeof newList === "function" ? newList(prev.ordnanceList) : newList,
+                    }))
+                  }
                   stationPools={stationPools}
                   onUpdateStationPools={(newPools) =>
                     updateRoomData((prev) => ({
