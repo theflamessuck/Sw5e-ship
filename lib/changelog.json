@@ -1,0 +1,57 @@
+[
+  {
+    "hash": "88b40da",
+    "date": "2026-10-23",
+    "message": "docs(codex): add creator philosophy and imagination augmentation design note"
+  },
+  {
+    "hash": "f941d9c",
+    "date": "2026-10-23",
+    "message": "docs(codex): add firmware release notes and reactor protocol documentation"
+  },
+  {
+    "hash": "ed3f420",
+    "date": "2026-10-23",
+    "message": "add synchronized reactor startup and scram shutdown"
+  },
+  {
+    "hash": "3898181",
+    "date": "2026-10-22",
+    "message": "Add hydration guard, master shipyard creation key, and blank landing gate"
+  },
+  {
+    "hash": "1ccf028",
+    "date": "2026-10-22",
+    "message": "Enable PIN security authentication in room selector and sync hook"
+  },
+  {
+    "hash": "d15b76a",
+    "date": "2026-10-21",
+    "message": "Update hyperdrive values"
+  },
+  {
+    "hash": "24b6131",
+    "date": "2026-10-21",
+    "message": "Update browser tab title to Spaceship Control"
+  },
+  {
+    "hash": "54d4df0",
+    "date": "2026-10-21",
+    "message": "Fix race condition and state snapping in room sync hook"
+  },
+  {
+    "hash": "c55ad4d",
+    "date": "2026-10-21",
+    "message": "Switch build to npm and remove out-of-sync pnpm lockfile"
+  },
+  {
+    "hash": "765b231",
+    "date": "2026-10-21",
+    "message": "Add Supabase real-time multiplayer room syncing"
+  },
+  {
+    "hash": "ccbef3a",
+    "date": "2026-10-21",
+    "message": "Initial commit of bridge dashboard"
+  }
+]

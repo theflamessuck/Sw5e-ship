@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useCallback } from "react"
 import { HeaderBar } from "./header-bar"
 import { StationSidebar, type Station } from "./station-sidebar"
 import { WeaponsStation, type OrdnanceItem } from "./weapons-station"
@@ -14,7 +14,7 @@ import { EnginesStation } from "./engines-station"
 import { NavcomputerStation, type JourneyData } from "./navcomputer-station"
 import { FinanceStation, type Transaction } from "./finance-station"
 import { EngineeringStation, type RechargeResultPayload } from "./engineering-station"
-import { GmStation, type SensorContact } from "./gm-station"
+import { GmStation, type SensorContact, type CombatTurnState, type EnemyShip } from "./gm-station"
 import { ShipSetup, type ShipConfig } from "./ship-setup"
 import { SHIP_SIZE_RULES, SHIP_TYPE_RULES, ShipSize } from "@/lib/ship-rules"
 import { STARSHIP_AMMUNITION } from "@/lib/starship-weapons"
@@ -142,6 +142,17 @@ function getRawModifier(score: number): number {
 // SHARED MULTIPLAYER ROOM STATE SCHEMA
 // ==========================================
 
+export interface SyncedCombatState {
+  isInCombat: boolean
+  round: number
+  activeShipName?: string
+  nextShipName?: string
+  manualPlayerInitOverride: number | null
+  playerShipOrderTie: number
+  playerShipHasActed: boolean
+  enemyShips: EnemyShip[]
+}
+
 export interface SyncedBridgeState {
   isPoweredOn: boolean
   maxFuel: number
@@ -185,6 +196,7 @@ export interface SyncedBridgeState {
   stationPools: Record<string, number>
   sharedPoolDice: number
   sensorContacts: SensorContact[]
+  combatState: SyncedCombatState
 }
 
 const INITIAL_SYNCED_STATE: SyncedBridgeState = {
@@ -383,15 +395,31 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
   sharedPoolDice: 2,
   sensorContacts: [
     {
-      id: "1",
+      id: "contact-seed-1",
       name: "Derelict Cargo Pod",
       classification: "Debris",
       distance: "14,200 km",
       scanDc: 10,
       isRevealed: false,
       gmNotes: "Contains 2 units of scrap metal and a cracked navigation log.",
+      hullCurrent: 20,
+      hullMax: 20,
+      shieldsCurrent: 0,
+      shieldsMax: 0,
+      armorClass: 10,
+      initiative: 0,
+      damageReduction: 0,
+      damageThreshold: 0,
     },
   ],
+  combatState: {
+    isInCombat: false,
+    round: 1,
+    manualPlayerInitOverride: null,
+    playerShipOrderTie: 0,
+    playerShipHasActed: false,
+    enemyShips: [],
+  },
 }
 
 export default function BridgeDashboard() {
@@ -498,8 +526,40 @@ export default function BridgeDashboard() {
     availablePowerDice,
     stationPools,
     sharedPoolDice,
-    sensorContacts,
+    sensorContacts: rawSensorContacts = [],
+    combatState = {
+      isInCombat: false,
+      round: 1,
+      manualPlayerInitOverride: null,
+      playerShipOrderTie: 0,
+      playerShipHasActed: false,
+      enemyShips: [],
+    },
   } = roomState
+
+  // Self-healing sanitizer: cleans up any duplicate IDs that were previously stored in cloud state
+  const sanitizedSensorContacts = useMemo(() => {
+    const seen = new Set<string>()
+    return rawSensorContacts.map((c, index) => {
+      let uniqueId = c.id
+      if (!uniqueId || seen.has(uniqueId)) {
+        uniqueId = `contact-repaired-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 7)}`
+      }
+      seen.add(uniqueId)
+      return {
+        ...c,
+        id: uniqueId,
+        hullCurrent: c.hullCurrent ?? 20,
+        hullMax: c.hullMax ?? 20,
+        shieldsCurrent: c.shieldsCurrent ?? 0,
+        shieldsMax: c.shieldsMax ?? 0,
+        armorClass: c.armorClass ?? 13,
+        initiative: Number(c.initiative) || 10,
+        damageReduction: c.damageReduction ?? 0,
+        damageThreshold: c.damageThreshold ?? 0,
+      }
+    })
+  }, [rawSensorContacts])
 
   const externalPendingCharts = currentDay > lastAstrogationDay ? 150 : 0
 
@@ -531,11 +591,50 @@ export default function BridgeDashboard() {
     })
   }
 
+  // --- PERSISTENT COMBAT STATE HANDLER (MEMOIZED TO PREVENT RENDER LOOPS) ---
+  const handleUpdateCombatState = useCallback((
+    updater:
+      | Partial<SyncedCombatState>
+      | ((prev: SyncedCombatState) => SyncedCombatState)
+  ) => {
+    updateRoomData((prev) => {
+      const current = prev.combatState || {
+        isInCombat: false,
+        round: 1,
+        manualPlayerInitOverride: null,
+        playerShipOrderTie: 0,
+        playerShipHasActed: false,
+        enemyShips: [],
+      }
+      const nextCombat =
+        typeof updater === "function" ? updater(current) : { ...current, ...updater }
+
+      // Shallow check to bail out if no actual state changed
+      if (
+        current.isInCombat === nextCombat.isInCombat &&
+        current.round === nextCombat.round &&
+        current.activeShipName === nextCombat.activeShipName &&
+        current.nextShipName === nextCombat.nextShipName &&
+        current.manualPlayerInitOverride === nextCombat.manualPlayerInitOverride &&
+        current.playerShipOrderTie === nextCombat.playerShipOrderTie &&
+        current.playerShipHasActed === nextCombat.playerShipHasActed &&
+        current.enemyShips === nextCombat.enemyShips
+      ) {
+        return prev
+      }
+
+      return {
+        ...prev,
+        combatState: nextCombat,
+      }
+    })
+  }, [updateRoomData])
+
   // --- CREW MANIFEST & TACTICAL ACTIONS ---
   const handleAddMember = (
     newMember: Omit<ManifestMember, "id" | "assignedOrder" | "hasTakenTurnThisRound">
   ) => {
-    const id = `manifest-${Date.now()}`
+    const id = `manifest-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
     const location = newMember.isPassenger
       ? "passenger_lounge"
       : (newMember.location || "crew_quarters")
@@ -1198,6 +1297,14 @@ export default function BridgeDashboard() {
       ],
       installedMods: [],
       installedSuites: [],
+      combatState: {
+        isInCombat: false,
+        round: 1,
+        manualPlayerInitOverride: null,
+        playerShipOrderTie: 0,
+        playerShipHasActed: false,
+        enemyShips: [],
+      },
     }))
   }
 
@@ -1354,11 +1461,25 @@ export default function BridgeDashboard() {
     }))
   }
 
+  // Collision-proof contact ID generation
   const handleAddContact = (newContact: Omit<SensorContact, "id">) => {
-    const contactWithId = { ...newContact, id: Date.now().toString() }
+    const uniqueId = `contact-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+    const contactWithId = { ...newContact, id: uniqueId }
     updateRoomData((prev) => ({
       ...prev,
       sensorContacts: [...prev.sensorContacts, contactWithId],
+    }))
+  }
+
+  // Atomic batch spawner for squadrons
+  const handleAddContacts = (newContacts: Omit<SensorContact, "id">[]) => {
+    const contactsWithIds = newContacts.map((c, idx) => ({
+      ...c,
+      id: `contact-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 9)}`,
+    }))
+    updateRoomData((prev) => ({
+      ...prev,
+      sensorContacts: [...prev.sensorContacts, ...contactsWithIds],
     }))
   }
 
@@ -1366,6 +1487,14 @@ export default function BridgeDashboard() {
     updateRoomData((prev) => ({
       ...prev,
       sensorContacts: prev.sensorContacts.filter((c) => c.id !== id),
+    }))
+  }
+
+  // Clear all sensor contacts from sector
+  const handleClearContacts = () => {
+    updateRoomData((prev) => ({
+      ...prev,
+      sensorContacts: [],
     }))
   }
 
@@ -1528,8 +1657,8 @@ export default function BridgeDashboard() {
         <div className="flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_#06b6d4] animate-pulse" />
           <span className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-300">
-          FENHAVEN STAR DRIVES // BRIDGE OS v2.4
-        </span>
+            FENHAVEN STAR DRIVES // BRIDGE OS v2.4
+          </span>
         </div>
         <RoomSelector
           currentRoom={roomCode}
@@ -1552,7 +1681,7 @@ export default function BridgeDashboard() {
             AWAITING SIGNAL LINK // TRANSMISSION OFFLINE
           </h2>
           <p className="max-w-md text-xs tracking-wider text-neutral-400 leading-relaxed">
-            No starship link is established. Enter your assigned vessel callsign into the transmission grid above and click <strong className="text-neutral-200">LINK</strong> to access tactical consoles[cite: 7].
+            No starship link is established. Enter your assigned vessel callsign into the transmission grid above and click <strong className="text-neutral-200">LINK</strong> to access tactical consoles.
           </p>
           <div className="flex items-center gap-2 text-[10px] text-neutral-600 uppercase tracking-widest mt-4">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500/50" />
@@ -1567,7 +1696,7 @@ export default function BridgeDashboard() {
             RESTRICTED SHIPYARD // AUTHORIZATION REQUIRED
           </h2>
           <p className="max-w-md text-xs tracking-wider text-neutral-300 leading-relaxed">
-            Vessel registration <strong className="text-amber-400">{roomCode}</strong> does not exist in the database[cite: 7]. A Master Shipyard Authorization Key is required to commission a new vessel[cite: 7].
+            Vessel registration <strong className="text-amber-400">{roomCode}</strong> does not exist in the database. A Master Shipyard Authorization Key is required to commission a new vessel.
           </p>
           <form
             onSubmit={(e) => {
@@ -1599,7 +1728,7 @@ export default function BridgeDashboard() {
             SECURITY LOCK ENGAGED // ACCESS RESTRICTED
           </h2>
           <p className="max-w-md text-xs tracking-wider text-rose-200 leading-relaxed">
-            This vessel is protected by a security PIN[cite: 7]. Enter the PIN in the transmission bar at the top and click <strong>LINK</strong> to authenticate[cite: 7].
+            This vessel is protected by a security PIN. Enter the PIN in the transmission bar at the top and click <strong>LINK</strong> to authenticate.
           </p>
         </div>
       ) : (
@@ -1619,6 +1748,10 @@ export default function BridgeDashboard() {
             systemDamageLevel={systemDamageLevel}
             shipStatuses={shipStatuses}
             isUsedCondition={effectiveIsUsed}
+            isInCombat={combatState.isInCombat}
+            combatRound={combatState.round}
+            activeTurnShip={combatState.activeShipName}
+            nextTurnShip={combatState.nextShipName}
           />
           <div className="flex flex-1 flex-col gap-4 lg:flex-row">
             <StationSidebar
@@ -1775,7 +1908,7 @@ export default function BridgeDashboard() {
                   maxPowerDice={shipConfig.maxPowerDice}
                   powerDieType={shipConfig.powerDieType}
                   onConsumePowerDice={(amt) => handleConsumeStationPower("sensors", amt)}
-                  contacts={sensorContacts}
+                  contacts={sanitizedSensorContacts}
                   onUpdateContact={handleUpdateContact}
                   sensorSkillMod={effectiveSkills.scan ?? 0}
                   probeSkillMod={effectiveSkills.probe ?? 0}
@@ -2290,16 +2423,36 @@ export default function BridgeDashboard() {
                 />
               ) : active === "GM Station" ? (
                 <GmStation
-                  contacts={sensorContacts}
+                  contacts={sanitizedSensorContacts}
                   onAddContact={handleAddContact}
+                  onAddContacts={handleAddContacts}
                   onRemoveContact={handleRemoveContact}
+                  onClearContacts={handleClearContacts}
                   onToggleReveal={handleToggleReveal}
                   shipStatuses={shipStatuses}
+                  onAddStatus={handleAddStatus}
+                  onRemoveStatus={handleRemoveStatus}
                   manifest={manifest}
                   onToggleTurn={handleToggleTurnTaken}
                   onUpdateInitiative={handleUpdateInitiative}
                   onCycleReactor={handleCycleReactor}
-                  installedMods={installedMods}
+                  currentHull={totalHull.current}
+                  maxHull={totalHull.max}
+                  onHullChange={(curr, max) => setTotalHull({ current: curr, max })}
+                  currentShields={totalShields.current}
+                  maxShields={totalShields.max}
+                  onShieldChange={(curr, max, temp) => setTotalShields({ current: curr, max, temp })}
+                  systemDamageLevel={systemDamageLevel}
+                  onUpdateSystemDamageLevel={(lvl) =>
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel) : lvl,
+                    }))
+                  }
+                  availablePowerDice={availablePowerDice}
+                  maxPowerDice={shipConfig.maxPowerDice}
+                  combatState={combatState}
+                  onUpdateCombatState={handleUpdateCombatState}
                 />
               ) : active === "Codex" ? (
                 <CodexStation />
