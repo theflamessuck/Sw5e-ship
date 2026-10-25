@@ -419,7 +419,7 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
     manualPlayerInitOverride: null,
     playerShipOrderTie: 0,
     playerShipHasActed: false,
-    hasCycledReactorThisRound: true,
+    hasCycledReactorThisRound: false,
     enemyShips: [],
   },
 }
@@ -1308,7 +1308,7 @@ export default function BridgeDashboard() {
         manualPlayerInitOverride: null,
         playerShipOrderTie: 0,
         playerShipHasActed: false,
-        hasCycledReactorThisRound: true,
+        hasCycledReactorThisRound: false,
         enemyShips: [],
       },
     }))

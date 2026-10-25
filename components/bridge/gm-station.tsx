@@ -255,7 +255,9 @@ export function GmStation({
   const manualPlayerInitOverride = combatState?.manualPlayerInitOverride ?? null
   const playerShipOrderTie = combatState?.playerShipOrderTie || 0
   const playerShipHasActed = combatState?.playerShipHasActed || false
-  const hasCycledReactorThisRound = combatState?.hasCycledReactorThisRound ?? true
+
+  // Fallback MUST be false so round 1 cannot advance without a reactor cycle
+  const hasCycledReactorThisRound = combatState?.hasCycledReactorThisRound ?? false
 
   const [isCrewExpanded, setIsCrewExpanded] = useState<boolean>(true)
   const [selectedSaveStat, setSelectedSaveStat] = useState<StatKey>("dex")
@@ -447,9 +449,12 @@ export function GmStation({
 
   const isInCombat = enemyShips.length > 0
 
+  // Check whether every active, non-disabled ship has taken its turn
   const isRoundFinished = useMemo(() => {
     if (!isInCombat || shipQueue.length === 0) return false
-    return shipQueue.every((s) => s.hasTakenTurn || s.isDisabled || s.isExploded)
+    const activeCandidates = shipQueue.filter((s) => !s.isDisabled && !s.isExploded)
+    if (activeCandidates.length === 0) return false
+    return activeCandidates.every((s) => s.hasTakenTurn)
   }, [isInCombat, shipQueue])
 
   const { activeTurnShip, nextTurnShip } = useMemo(() => {
@@ -679,12 +684,19 @@ export function GmStation({
     })
   }, [bestiaryList, managerTierFilter, managerSearchQuery])
 
+  // Turn advance: Enforces round lock before any wrap-around occurs
   const handleNextTurnCycle = () => {
-    if (isRoundFinished && !hasCycledReactorThisRound) {
-      alert("Round End Lock Engaged: Engineering or the GM must Cycle the Reactor before Round " + (combatRound + 1) + " can begin!")
+    // 1. If every active ship has acted this round, we must verify reactor cycle before Round advances
+    if (isRoundFinished) {
+      if (!hasCycledReactorThisRound) {
+        alert(`Round ${combatRound} Complete: Engineering or the GM must Cycle the Reactor before Round ${combatRound + 1} can begin!`)
+        return
+      }
+      handleAdvanceRound()
       return
     }
 
+    // 2. Otherwise find the next ship in queue that hasn't acted yet
     const nextShip = shipQueue.find((s) => !s.hasTakenTurn && !s.isDisabled && !s.isExploded)
     if (nextShip) {
       if (nextShip.isPlayerShip) {
@@ -696,8 +708,9 @@ export function GmStation({
         onUpdateCombatState?.({ enemyShips: updated })
       }
     } else {
+      // 3. Fallback check if queue exhausted
       if (!hasCycledReactorThisRound) {
-        alert("Round End Lock Engaged: Engineering or the GM must Cycle the Reactor before Round " + (combatRound + 1) + " can begin!")
+        alert(`Round ${combatRound} Complete: Engineering or the GM must Cycle the Reactor before Round ${combatRound + 1} can begin!`)
         return
       }
       handleAdvanceRound()
@@ -746,7 +759,7 @@ export function GmStation({
     onUpdateCombatState?.({
       round: nextRound,
       playerShipHasActed: false,
-      hasCycledReactorThisRound: false,
+      hasCycledReactorThisRound: false, // New round requires a fresh reactor cycle at its completion
       enemyShips: resetEnemies,
     })
   }
@@ -762,7 +775,7 @@ export function GmStation({
         isInCombat: false,
         round: 1,
         playerShipHasActed: false,
-        hasCycledReactorThisRound: true,
+        hasCycledReactorThisRound: false,
         enemyShips: [],
         activeShipName: undefined,
         nextShipName: undefined,
@@ -801,6 +814,7 @@ export function GmStation({
     const updated = [enemy, ...enemyShips]
     onUpdateCombatState?.({
       isInCombat: true,
+      hasCycledReactorThisRound: false,
       enemyShips: updated,
     })
     setNewEnemyName("")
@@ -909,6 +923,7 @@ export function GmStation({
       onUpdateCombatState?.({
         enemyShips: updated,
         isInCombat: true,
+        hasCycledReactorThisRound: false,
       })
     }
   }
@@ -949,6 +964,7 @@ export function GmStation({
     onUpdateCombatState?.({
       enemyShips: updated,
       isInCombat: true,
+      hasCycledReactorThisRound: false,
     })
   }
 
@@ -1149,7 +1165,7 @@ export function GmStation({
         </div>
       </div>
 
-      {/* Floating Tactical Dice Result Banner (Global Log) */}
+      {/* Floating Tactical Dice Result Banner */}
       {lastDiceResult && (
         <div className="rounded border border-amber-500/80 bg-black/90 p-2.5 flex items-center justify-between shadow-[0_0_20px_rgba(245,158,11,0.25)] text-xs animate-in fade-in">
           <div className="flex items-center gap-3">
@@ -1681,10 +1697,9 @@ export function GmStation({
                   </div>
                 </div>
 
-                {/* Inline Action Bar: Attacks & Saves right on the combat row */}
+                {/* Inline Action Bar */}
                 {ship.statblock && !ship.isDisabled && (
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
-                    {/* Attack shortcuts */}
                     {ship.statblock.actions && ship.statblock.actions.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-[9px] text-muted-foreground uppercase font-bold flex items-center gap-1">
@@ -1718,7 +1733,6 @@ export function GmStation({
                       </div>
                     )}
 
-                    {/* Inline Saving Throw Selector & Roll Button */}
                     <div className="flex items-center gap-1.5 bg-black/70 border border-amber-500/40 px-2 py-0.5 rounded text-[10px]">
                       <span className="text-[9px] text-amber-400 font-bold uppercase flex items-center gap-1">
                         <ShieldCheck className="h-3 w-3 text-amber-400" /> Save:
