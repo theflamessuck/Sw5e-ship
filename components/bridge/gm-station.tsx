@@ -41,7 +41,10 @@ import {
   RadioTower,
   Dices,
   Bomb,
-  Wrench
+  Wrench,
+  Lock,
+  Unlock,
+  ShieldCheck
 } from "lucide-react"
 import type { ActiveStatus } from "./defense-station"
 import type { ManifestMember } from "./bridge-dashboard"
@@ -89,6 +92,7 @@ export interface EnemyShip {
   statblock?: NpcShipStatblock
   orderIndex?: number
   isExploded?: boolean
+  legendaryResistancesUsed?: number
 }
 
 export interface CombatTurnState {
@@ -99,6 +103,7 @@ export interface CombatTurnState {
   manualPlayerInitOverride: number | null
   playerShipOrderTie: number
   playerShipHasActed: boolean
+  hasCycledReactorThisRound?: boolean
   enemyShips: EnemyShip[]
 }
 
@@ -140,7 +145,14 @@ const CALLSIGNS = [
   "Eta", "Theta", "Iota", "Kappa", "Lambda", "Mu"
 ]
 
-// Dice roll parser for damage expressions (e.g. "2d8 + 3", "1d6+2", "4d10")
+const STAT_KEYS = ["str", "dex", "con", "int", "wis", "cha"] as const
+type StatKey = typeof STAT_KEYS[number]
+
+function getStatMod(score?: number): number {
+  if (score === undefined) return 0
+  return Math.floor((score - 10) / 2)
+}
+
 function rollDiceExpression(expr: string): { total: number; rolls: number[]; modifier: number } {
   const clean = expr.replace(/\s+/g, "").toLowerCase()
   const match = clean.match(/^(\d+)d(\d+)([+-]\d+)?/)
@@ -161,6 +173,28 @@ function rollDiceExpression(expr: string): { total: number; rolls: number[]; mod
     sum += r
   }
   return { total: Math.max(0, sum + mod), rolls, modifier: mod }
+}
+
+function computeSaveModifier(statblock: NpcShipStatblock, stat: StatKey): { mod: number; isProficient: boolean } {
+  const statLongName = {
+    str: "strength",
+    dex: "dexterity",
+    con: "constitution",
+    int: "intelligence",
+    wis: "wisdom",
+    cha: "charisma",
+  }[stat]
+
+  if (statblock.savingThrows) {
+    const regex = new RegExp(`(?:${stat}|${statLongName})\\s*([+-]\\d+)`, "i")
+    const match = statblock.savingThrows.match(regex)
+    if (match) {
+      return { mod: parseInt(match[1], 10), isProficient: true }
+    }
+  }
+
+  const baseScore = statblock.stats?.[stat] ?? 10
+  return { mod: getStatMod(baseScore), isProficient: false }
 }
 
 export function GmStation({
@@ -191,7 +225,6 @@ export function GmStation({
   onUpdateCombatState,
   onCombatStateChange,
 }: GmStationProps) {
-  // Safe initializer: flushes outdated localStorage cache if missing threatClassification
   const [bestiaryList, setBestiaryList] = useState<NpcShipStatblock[]>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("sw5e_custom_bestiary")
@@ -217,25 +250,27 @@ export function GmStation({
     }
   }, [bestiaryList])
 
-  // Extract synced combat state with resilient fallbacks
   const enemyShips = useMemo(() => combatState?.enemyShips || [], [combatState?.enemyShips])
   const combatRound = combatState?.round || 1
   const manualPlayerInitOverride = combatState?.manualPlayerInitOverride ?? null
   const playerShipOrderTie = combatState?.playerShipOrderTie || 0
   const playerShipHasActed = combatState?.playerShipHasActed || false
+  const hasCycledReactorThisRound = combatState?.hasCycledReactorThisRound ?? true
 
   const [isCrewExpanded, setIsCrewExpanded] = useState<boolean>(true)
+  const [selectedSaveStat, setSelectedSaveStat] = useState<StatKey>("dex")
+  const [rowSaveStatMap, setRowSaveStatMap] = useState<Record<string, StatKey>>({})
+
   const [lastDiceResult, setLastDiceResult] = useState<{
     shipName: string
     actionName: string
-    type: "Hit" | "Damage"
+    type: "Hit" | "Damage" | "Save" | "Legendary"
     rollText: string
     detail: string
     isCrit?: boolean
     isFumble?: boolean
   } | null>(null)
 
-  // Modal inspection
   const [activeInspectStatblock, setActiveInspectStatblock] = useState<{
     statblock: NpcShipStatblock
     shipId?: string
@@ -243,17 +278,14 @@ export function GmStation({
     currentShields?: number
   } | null>(null)
 
-  // Preset Bestiary Manager Modal state
   const [isPresetManagerOpen, setIsPresetManagerOpen] = useState<boolean>(false)
   const [managerTab, setManagerTab] = useState<"list" | "create">("list")
   const [managerTierFilter, setManagerTierFilter] = useState<string>("all")
   const [managerSearchQuery, setManagerSearchQuery] = useState<string>("")
 
-  // Spawner Filter state
   const [spawnerTierFilter, setSpawnerTierFilter] = useState<string>("all")
   const [spawnerSearchQuery, setSpawnerSearchQuery] = useState<string>("")
 
-  // Custom Preset Creation form state
   const [customPresetForm, setCustomPresetForm] = useState<Partial<NpcShipStatblock>>({
     name: "",
     faction: "Custom",
@@ -290,7 +322,6 @@ export function GmStation({
     reactions: []
   })
 
-  // Sector Contact Spawner Inputs (Manual Init removed)
   const [name, setName] = useState("")
   const [spawnQuantity, setSpawnQuantity] = useState<number>(1)
   const [classification, setClassification] = useState<"Vessel" | "Threat" | "Anomaly" | "Debris" | "Station">("Threat")
@@ -304,7 +335,6 @@ export function GmStation({
   const [gmNotes, setGmNotes] = useState("")
   const [activePresetObject, setActivePresetObject] = useState<NpcShipStatblock | undefined>(undefined)
 
-  // Quick Hostile Inputs
   const [newEnemyName, setNewEnemyName] = useState("")
   const [newEnemyInit, setNewEnemyInit] = useState("14")
   const [newEnemyHull, setNewEnemyHull] = useState("20")
@@ -312,7 +342,6 @@ export function GmStation({
   const [newEnemyAC, setNewEnemyAC] = useState("13")
   const [newEnemyDR, setNewEnemyDR] = useState("0")
 
-  // Starship Condition Toggle Handler
   const handleToggleCondition = (conditionTitle: string, defaultEffect: string) => {
     const titleLower = conditionTitle.toLowerCase()
     const existing = shipStatuses.find(
@@ -354,7 +383,6 @@ export function GmStation({
     }
   }, [manifest])
 
-  // ROBUST INITIATIVE SORT: Guarantees strict numeric order & supports manual tie adjustments
   const shipQueue = useMemo(() => {
     const playerShipEntry = {
       id: "player-vessel",
@@ -397,6 +425,7 @@ export function GmStation({
       shieldsMax: e.shieldsMax,
       isDisabled: e.hullCurrent <= 0,
       isExploded: e.isExploded || false,
+      legendaryResistancesUsed: e.legendaryResistancesUsed || 0,
     }))
 
     return [playerShipEntry, ...enemies].sort((a, b) => {
@@ -416,20 +445,21 @@ export function GmStation({
     enemyShips
   ])
 
-  // Combat status flags & active/next turn calculations
   const isInCombat = enemyShips.length > 0
 
-  // Turn calculation with auto-skipping for disabled (0 HP) ships
+  const isRoundFinished = useMemo(() => {
+    if (!isInCombat || shipQueue.length === 0) return false
+    return shipQueue.every((s) => s.hasTakenTurn || s.isDisabled || s.isExploded)
+  }, [isInCombat, shipQueue])
+
   const { activeTurnShip, nextTurnShip } = useMemo(() => {
     if (!isInCombat || shipQueue.length === 0) {
       return { activeTurnShip: undefined, nextTurnShip: undefined }
     }
 
-    // Active ship is the first ship that hasn't taken a turn AND is not disabled
     const activeCandidates = shipQueue.filter((s) => !s.hasTakenTurn && !s.isDisabled && !s.isExploded)
     const active = activeCandidates[0] || undefined
 
-    // Next ship is the following non-disabled candidate, or wrap to first active in next round
     let next: typeof shipQueue[0] | undefined
     if (activeCandidates.length > 1) {
       next = activeCandidates[1]
@@ -441,10 +471,9 @@ export function GmStation({
     return { activeTurnShip: active, nextTurnShip: next }
   }, [isInCombat, shipQueue])
 
-  // Stable sync: Updates active and next names only when a real change occurs to prevent render loops
   const lastBroadcastRef = useRef<string>("")
   useEffect(() => {
-    const key = `${isInCombat}-${combatRound}-${activeTurnShip?.name}-${nextTurnShip?.name}`
+    const key = `${isInCombat}-${combatRound}-${activeTurnShip?.name}-${nextTurnShip?.name}-${hasCycledReactorThisRound}`
     if (lastBroadcastRef.current !== key) {
       lastBroadcastRef.current = key
 
@@ -452,13 +481,15 @@ export function GmStation({
         combatState?.isInCombat !== isInCombat ||
         combatState?.round !== combatRound ||
         combatState?.activeShipName !== activeTurnShip?.name ||
-        combatState?.nextShipName !== nextTurnShip?.name
+        combatState?.nextShipName !== nextTurnShip?.name ||
+        combatState?.hasCycledReactorThisRound !== hasCycledReactorThisRound
       ) {
         onUpdateCombatState?.({
           isInCombat,
           round: combatRound,
           activeShipName: activeTurnShip?.name,
           nextShipName: nextTurnShip?.name,
+          hasCycledReactorThisRound,
         })
       }
 
@@ -470,6 +501,7 @@ export function GmStation({
         manualPlayerInitOverride,
         playerShipOrderTie,
         playerShipHasActed,
+        hasCycledReactorThisRound,
         enemyShips,
       })
     }
@@ -478,10 +510,12 @@ export function GmStation({
     combatRound,
     activeTurnShip?.name,
     nextTurnShip?.name,
+    hasCycledReactorThisRound,
     combatState?.isInCombat,
     combatState?.round,
     combatState?.activeShipName,
     combatState?.nextShipName,
+    combatState?.hasCycledReactorThisRound,
     manualPlayerInitOverride,
     playerShipOrderTie,
     playerShipHasActed,
@@ -490,7 +524,6 @@ export function GmStation({
     onCombatStateChange,
   ])
 
-  // HP & SP adjustments for enemy ships
   const handleAdjustEnemyHealth = (shipId: string, type: "hull" | "shields", delta: number) => {
     const updated = enemyShips.map((e) => {
       if (e.id !== shipId) return e
@@ -505,7 +538,6 @@ export function GmStation({
     onUpdateCombatState?.({ enemyShips: updated })
   }
 
-  // Set precise values for enemy health
   const handleSetEnemyHealth = (shipId: string, type: "hull" | "shields", value: number) => {
     const updated = enemyShips.map((e) => {
       if (e.id !== shipId) return e
@@ -518,7 +550,6 @@ export function GmStation({
     onUpdateCombatState?.({ enemyShips: updated })
   }
 
-  // Explode / Scuttle ship manually by GM decision
   const handleExplodeEnemyShip = (shipId: string) => {
     if (confirm("Catastrophic Explosion? The vessel will be utterly destroyed and obliterated, leaving zero salvage.")) {
       const updated = enemyShips.filter((e) => e.id !== shipId)
@@ -529,7 +560,6 @@ export function GmStation({
     }
   }
 
-  // Roll Attack "To Hit" button
   const handleRollToHit = (shipName: string, action: NpcAction) => {
     const bonus = action.attackBonus ?? 0
     const d20 = Math.floor(Math.random() * 20) + 1
@@ -542,13 +572,12 @@ export function GmStation({
       actionName: action.name,
       type: "Hit",
       rollText: isCrit ? `NAT 20 CRITICAL! (${total})` : isFumble ? `NAT 1 FUMBLE! (${total})` : `${total} TO HIT`,
-      detail: `[d20 roll: ${d20}] + [bonus: ${bonus}] = ${total}`,
+      detail: `[d20: ${d20}] + [bonus: ${bonus}] = ${total}`,
       isCrit,
       isFumble,
     })
   }
 
-  // Roll Damage button
   const handleRollDamage = (shipName: string, action: NpcAction) => {
     if (!action.damage) return
     const res = rollDiceExpression(action.damage)
@@ -563,13 +592,51 @@ export function GmStation({
     })
   }
 
-  // Handle direct initiative edits on enemy ships in combat
+  const handleRollSavingThrow = (shipName: string, statblock: NpcShipStatblock, stat: StatKey) => {
+    const { mod, isProficient } = computeSaveModifier(statblock, stat)
+    const d20 = Math.floor(Math.random() * 20) + 1
+    const total = d20 + mod
+    const isCrit = d20 === 20
+    const isFumble = d20 === 1
+
+    const statLabel = stat.toUpperCase()
+    setLastDiceResult({
+      shipName,
+      actionName: `${statLabel} Save`,
+      type: "Save",
+      rollText: isCrit ? `NAT 20! Total: ${total}` : isFumble ? `NAT 1! Total: ${total}` : `Save Total: ${total}`,
+      detail: `[d20: ${d20}] + [${statLabel} ${isProficient ? "Prof" : "Mod"}: ${mod >= 0 ? `+${mod}` : mod}]`,
+      isCrit,
+      isFumble,
+    })
+  }
+
+  const handleUseLegendaryResistance = (shipId: string, shipName: string, totalAllowed: number) => {
+    const target = enemyShips.find((e) => e.id === shipId)
+    const currentUsed = target?.legendaryResistancesUsed ?? 0
+    if (currentUsed >= totalAllowed) {
+      alert(`${shipName} has expended all (${totalAllowed}) Legendary Resistances!`)
+      return
+    }
+
+    const nextUsed = currentUsed + 1
+    const updated = enemyShips.map((e) => e.id === shipId ? { ...e, legendaryResistancesUsed: nextUsed } : e)
+    onUpdateCombatState?.({ enemyShips: updated })
+
+    setLastDiceResult({
+      shipName,
+      actionName: "Legendary Resistance",
+      type: "Legendary",
+      rollText: "AUTOMATIC SAVE SUCCESS",
+      detail: `Expended Legendary Resistance (${nextUsed}/${totalAllowed} Used)`,
+    })
+  }
+
   const handleUpdateEnemyInitiative = (shipId: string, newInit: number) => {
     const updated = enemyShips.map((e) => (e.id === shipId ? { ...e, initiative: newInit } : e))
     onUpdateCombatState?.({ enemyShips: updated })
   }
 
-  // Handle direct manual nudges up/down for ties
   const handleNudgeOrder = (shipId: string, direction: "up" | "down") => {
     const delta = direction === "up" ? 1 : -1
     if (shipId === "player-vessel") {
@@ -612,9 +679,12 @@ export function GmStation({
     })
   }, [bestiaryList, managerTierFilter, managerSearchQuery])
 
-  // Next Turn with auto-skip past disabled (0 HP) vessels
   const handleNextTurnCycle = () => {
-    // Find next ship that has not taken turn and is NOT disabled
+    if (isRoundFinished && !hasCycledReactorThisRound) {
+      alert("Round End Lock Engaged: Engineering or the GM must Cycle the Reactor before Round " + (combatRound + 1) + " can begin!")
+      return
+    }
+
     const nextShip = shipQueue.find((s) => !s.hasTakenTurn && !s.isDisabled && !s.isExploded)
     if (nextShip) {
       if (nextShip.isPlayerShip) {
@@ -626,11 +696,14 @@ export function GmStation({
         onUpdateCombatState?.({ enemyShips: updated })
       }
     } else {
+      if (!hasCycledReactorThisRound) {
+        alert("Round End Lock Engaged: Engineering or the GM must Cycle the Reactor before Round " + (combatRound + 1) + " can begin!")
+        return
+      }
       handleAdvanceRound()
     }
   }
 
-  // Step back to the previous ship's turn
   const handlePreviousTurnCycle = () => {
     const actedShips = shipQueue.filter((s) => s.hasTakenTurn)
 
@@ -657,28 +730,39 @@ export function GmStation({
         round: prevRound,
         playerShipHasActed: !isPlayerLast,
         enemyShips: updatedEnemies,
+        hasCycledReactorThisRound: true,
       })
     }
   }
 
   const handleAdvanceRound = () => {
+    if (!hasCycledReactorThisRound) {
+      alert("Round End Lock: Cycle the Reactor before starting the next round.")
+      return
+    }
+
     const nextRound = combatRound + 1
     const resetEnemies = enemyShips.map((e) => ({ ...e, hasTakenTurn: false }))
     onUpdateCombatState?.({
       round: nextRound,
       playerShipHasActed: false,
+      hasCycledReactorThisRound: false,
       enemyShips: resetEnemies,
     })
-    onCycleReactor?.()
   }
 
-  // End Combat Protocol
+  const handleGmCycleReactor = () => {
+    onCycleReactor?.()
+    onUpdateCombatState?.({ hasCycledReactorThisRound: true })
+  }
+
   const handleEndCombat = () => {
     if (confirm("End Starship Combat? This will clear all hostile vessels from initiative and reset rounds to 1.")) {
       onUpdateCombatState?.({
         isInCombat: false,
         round: 1,
         playerShipHasActed: false,
+        hasCycledReactorThisRound: true,
         enemyShips: [],
         activeShipName: undefined,
         nextShipName: undefined,
@@ -686,7 +770,6 @@ export function GmStation({
     }
   }
 
-  // Clear all sensor contacts in sector
   const handleClearAllContacts = () => {
     if (confirm(`Remove all ${contacts.length} sensor contacts from the sector?`)) {
       if (onClearContacts) {
@@ -743,7 +826,6 @@ export function GmStation({
     }
   }
 
-  // Atomic Batch Spawner with Automated Callsigns
   const handleSubmitContact = (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) return
@@ -791,7 +873,6 @@ export function GmStation({
     setActivePresetObject(undefined)
   }
 
-  // Individual toggle into combat with d20 + DEX roll
   const handleToggleContactInInitiative = (contact: SensorContact) => {
     const existing = enemyShips.find((e) => e.contactId === contact.id)
     if (existing) {
@@ -832,7 +913,6 @@ export function GmStation({
     }
   }
 
-  // Mass Engage All Contacts with automatic d20 + DEX roll for each ship
   const handleEngageAllContacts = () => {
     const unengaged = contacts.filter(
       (c) => !enemyShips.some((e) => e.contactId === c.id)
@@ -941,9 +1021,27 @@ export function GmStation({
     }
   }
 
+  const currentInspectedShip = useMemo(() => {
+    if (!activeInspectStatblock?.shipId) return null
+    return enemyShips.find((e) => e.id === activeInspectStatblock.shipId) || null
+  }, [activeInspectStatblock?.shipId, enemyShips])
+
+  const inspectedLegendaryTrait = useMemo(() => {
+    if (!activeInspectStatblock?.statblock.traits) return null
+    return activeInspectStatblock.statblock.traits.find(
+      (t) => t.name.toLowerCase().includes("legendary resistance")
+    )
+  }, [activeInspectStatblock?.statblock.traits])
+
+  const maxLegendaryResistances = useMemo(() => {
+    if (!inspectedLegendaryTrait) return 0
+    const match = inspectedLegendaryTrait.name.match(/\((\d+)\/day\)/i)
+    return match ? parseInt(match[1], 10) : 3
+  }, [inspectedLegendaryTrait])
+
   return (
     <div className="flex flex-col gap-5 font-mono">
-      {/* Dynamic Header Banner: Red when in combat, amber during standard patrol */}
+      {/* Dynamic Header Banner */}
       <div
         className={`flex items-center justify-between border-b pb-3 flex-wrap gap-2 transition-colors duration-500 rounded p-2.5 ${
           isInCombat
@@ -987,7 +1085,13 @@ export function GmStation({
               <div className="flex flex-col">
                 <span className="text-[8px] text-muted-foreground uppercase">Active Turn:</span>
                 <span className="font-bold text-amber-300 text-xs truncate max-w-[120px] sm:max-w-[160px]">
-                  {activeTurnShip?.name || "All Non-Disabled Acted"}
+                  {isRoundFinished && !hasCycledReactorThisRound ? (
+                    <span className="text-amber-400 font-extrabold flex items-center gap-1">
+                      <Lock className="h-3 w-3" /> Awaiting Reactor Cycle
+                    </span>
+                  ) : (
+                    activeTurnShip?.name || "All Non-Disabled Acted"
+                  )}
                 </span>
               </div>
               <span className="text-slate-600">|</span>
@@ -1010,14 +1114,26 @@ export function GmStation({
             ROUND {combatRound}
           </span>
 
-          <button
-            type="button"
-            onClick={handleAdvanceRound}
-            className="px-3 py-1 rounded border border-amber-500/60 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold uppercase transition flex items-center gap-1 cursor-pointer"
-          >
-            <RotateCcw className="h-3 w-3" />
-            Advance Round
-          </button>
+          {isInCombat && isRoundFinished && !hasCycledReactorThisRound ? (
+            <button
+              type="button"
+              onClick={handleGmCycleReactor}
+              className="px-3 py-1 rounded border border-cyan-400 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 text-xs font-bold uppercase transition flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.4)] animate-pulse"
+              title="Cycle the main reactor to refresh power and unlock next round"
+            >
+              <Zap className="h-3.5 w-3.5 fill-current" />
+              Cycle Reactor Now
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleAdvanceRound}
+              className="px-3 py-1 rounded border border-amber-500/60 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold uppercase transition flex items-center gap-1 cursor-pointer"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Advance Round
+            </button>
+          )}
 
           {isInCombat && (
             <button
@@ -1033,7 +1149,7 @@ export function GmStation({
         </div>
       </div>
 
-      {/* Floating Tactical Dice Result Banner */}
+      {/* Floating Tactical Dice Result Banner (Global Log) */}
       {lastDiceResult && (
         <div className="rounded border border-amber-500/80 bg-black/90 p-2.5 flex items-center justify-between shadow-[0_0_20px_rgba(245,158,11,0.25)] text-xs animate-in fade-in">
           <div className="flex items-center gap-3">
@@ -1090,7 +1206,6 @@ export function GmStation({
             </h3>
           </div>
           <div className="flex items-center gap-2">
-            {/* PREVIOUS TURN BUTTON */}
             <button
               type="button"
               onClick={handlePreviousTurnCycle}
@@ -1101,15 +1216,26 @@ export function GmStation({
               Prev Turn
             </button>
 
-            {/* NEXT TURN BUTTON (Auto-skips disabled ships) */}
-            <button
-              type="button"
-              onClick={handleNextTurnCycle}
-              className="px-3 py-1 rounded border border-emerald-500/60 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold uppercase transition flex items-center gap-1.5 cursor-pointer shadow-[0_0_8px_rgba(52,211,153,0.3)]"
-            >
-              <Play className="h-3.5 w-3.5 fill-current" />
-              Next Turn
-            </button>
+            {isRoundFinished && !hasCycledReactorThisRound ? (
+              <button
+                type="button"
+                onClick={handleGmCycleReactor}
+                className="px-3 py-1 rounded border border-cyan-400 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 text-xs font-bold uppercase transition flex items-center gap-1.5 cursor-pointer shadow-[0_0_8px_rgba(6,182,212,0.4)] animate-pulse"
+                title="Engineering must Cycle Reactor before Round advances. Click to Cycle now."
+              >
+                <Lock className="h-3.5 w-3.5" />
+                Cycle Reactor to Advance
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleNextTurnCycle}
+                className="px-3 py-1 rounded border border-emerald-500/60 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold uppercase transition flex items-center gap-1.5 cursor-pointer shadow-[0_0_8px_rgba(52,211,153,0.3)]"
+              >
+                <Play className="h-3.5 w-3.5 fill-current" />
+                Next Turn
+              </button>
+            )}
 
             {isInCombat && (
               <button
@@ -1143,7 +1269,6 @@ export function GmStation({
                 >
                   <div className="p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     <div className="flex items-center gap-3">
-                      {/* Interactive Player Ship Initiative Box */}
                       <div className="flex flex-col items-center">
                         <input
                           type="number"
@@ -1290,7 +1415,8 @@ export function GmStation({
               )
             }
 
-            // HOSTILE VESSEL COMBAT CARD
+            const activeRowStat = rowSaveStatMap[ship.id] || "dex"
+
             return (
               <div
                 key={`${ship.id}-${shipIdx}`}
@@ -1304,10 +1430,8 @@ export function GmStation({
                     : "border-bridge-border bg-black/60"
                 }`}
               >
-                {/* Header Row: Init, Ship Name, Active Badge, Turn and Actions */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                   <div className="flex items-center gap-3">
-                    {/* Interactive Hostile Ship Initiative Box */}
                     <div className="flex flex-col items-center">
                       <input
                         type="number"
@@ -1365,7 +1489,6 @@ export function GmStation({
                           {ship.name}
                         </button>
 
-                        {/* Status Tags */}
                         {ship.isDisabled ? (
                           <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-slate-800 text-amber-400 uppercase border border-amber-500/40 flex items-center gap-1">
                             <Wrench className="h-2.5 w-2.5" /> DISABLED // DERELICT
@@ -1386,7 +1509,6 @@ export function GmStation({
                     </div>
                   </div>
 
-                  {/* Right side controls */}
                   <div className="flex items-center gap-2 self-end sm:self-center">
                     {ship.statblock && (
                       <button
@@ -1425,7 +1547,6 @@ export function GmStation({
                       </button>
                     )}
 
-                    {/* Explode / Scuttle Vessel */}
                     <button
                       type="button"
                       onClick={() => handleExplodeEnemyShip(ship.id)}
@@ -1453,9 +1574,8 @@ export function GmStation({
                   </div>
                 </div>
 
-                {/* HP & Shield Tracker Row with quick buttons */}
+                {/* HP & Shield Tracker Row */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-800">
-                  {/* Shields tracker */}
                   <div className="flex items-center justify-between bg-black/60 p-1.5 rounded border border-cyan-500/30">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] uppercase font-bold text-cyan-300">SP:</span>
@@ -1508,7 +1628,6 @@ export function GmStation({
                     </div>
                   </div>
 
-                  {/* Hull HP tracker */}
                   <div className="flex items-center justify-between bg-black/60 p-1.5 rounded border border-rose-500/30">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] uppercase font-bold text-rose-400">HP:</span>
@@ -1562,37 +1681,71 @@ export function GmStation({
                   </div>
                 </div>
 
-                {/* Quick Attack Dice Roller Buttons directly on row */}
-                {ship.statblock?.actions && ship.statblock.actions.length > 0 && !ship.isDisabled && (
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    <span className="text-[9px] text-muted-foreground uppercase font-bold flex items-center gap-1">
-                      <Target className="h-3 w-3 text-rose-400" /> Attacks:
-                    </span>
-                    {ship.statblock.actions.map((act, aIdx) => (
-                      <div key={aIdx} className="flex items-center gap-1 bg-black/60 border border-slate-700 px-2 py-0.5 rounded text-[10px]">
-                        <span className="font-bold text-slate-200">{act.name}</span>
-                        {act.attackBonus !== undefined && (
-                          <button
-                            type="button"
-                            onClick={() => handleRollToHit(ship.name, act)}
-                            className="px-1.5 py-0.2 rounded bg-cyan-950 border border-cyan-neon/50 text-cyan-300 hover:bg-cyan-900 font-bold uppercase cursor-pointer"
-                            title={`Roll 1d20 + ${act.attackBonus}`}
-                          >
-                            +{act.attackBonus} Hit
-                          </button>
-                        )}
-                        {act.damage && (
-                          <button
-                            type="button"
-                            onClick={() => handleRollDamage(ship.name, act)}
-                            className="px-1.5 py-0.2 rounded bg-amber-950 border border-amber-500/50 text-amber-300 hover:bg-amber-900 font-bold uppercase cursor-pointer"
-                            title={`Roll ${act.damage}`}
-                          >
-                            Dmg ({act.damage})
-                          </button>
-                        )}
+                {/* Inline Action Bar: Attacks & Saves right on the combat row */}
+                {ship.statblock && !ship.isDisabled && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
+                    {/* Attack shortcuts */}
+                    {ship.statblock.actions && ship.statblock.actions.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[9px] text-muted-foreground uppercase font-bold flex items-center gap-1">
+                          <Target className="h-3 w-3 text-rose-400" /> Atk:
+                        </span>
+                        {ship.statblock.actions.map((act, aIdx) => (
+                          <div key={aIdx} className="flex items-center gap-1 bg-black/60 border border-slate-700 px-1.5 py-0.5 rounded text-[10px]">
+                            <span className="font-bold text-slate-200">{act.name}</span>
+                            {act.attackBonus !== undefined && (
+                              <button
+                                type="button"
+                                onClick={() => handleRollToHit(ship.name, act)}
+                                className="px-1.5 py-0.2 rounded bg-cyan-950 border border-cyan-neon/50 text-cyan-300 hover:bg-cyan-900 font-bold uppercase cursor-pointer"
+                                title={`Roll 1d20 + ${act.attackBonus}`}
+                              >
+                                +{act.attackBonus} Hit
+                              </button>
+                            )}
+                            {act.damage && (
+                              <button
+                                type="button"
+                                onClick={() => handleRollDamage(ship.name, act)}
+                                className="px-1.5 py-0.2 rounded bg-amber-950 border border-amber-500/50 text-amber-300 hover:bg-amber-900 font-bold uppercase cursor-pointer"
+                                title={`Roll ${act.damage}`}
+                              >
+                                Dmg
+                              </button>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
+
+                    {/* Inline Saving Throw Selector & Roll Button */}
+                    <div className="flex items-center gap-1.5 bg-black/70 border border-amber-500/40 px-2 py-0.5 rounded text-[10px]">
+                      <span className="text-[9px] text-amber-400 font-bold uppercase flex items-center gap-1">
+                        <ShieldCheck className="h-3 w-3 text-amber-400" /> Save:
+                      </span>
+                      <select
+                        value={activeRowStat}
+                        onChange={(e) => setRowSaveStatMap((prev) => ({ ...prev, [ship.id]: e.target.value as StatKey }))}
+                        className="bg-black border border-slate-700 rounded px-1 py-0.2 text-[10px] text-amber-200 font-bold focus:outline-none"
+                      >
+                        {STAT_KEYS.map((k) => {
+                          const { mod, isProficient } = computeSaveModifier(ship.statblock!, k)
+                          return (
+                            <option key={k} value={k}>
+                              {k.toUpperCase()} ({mod >= 0 ? `+${mod}` : mod}{isProficient ? "★" : ""})
+                            </option>
+                          )
+                        })}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => handleRollSavingThrow(ship.name, ship.statblock!, activeRowStat)}
+                        className="px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-500/60 text-amber-300 hover:bg-amber-500/30 font-bold uppercase text-[9px] cursor-pointer"
+                        title="Roll Saving Throw"
+                      >
+                        Roll
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1776,7 +1929,7 @@ export function GmStation({
             </span>
             <button
               type="button"
-              onClick={() => onCycleReactor?.()}
+              onClick={handleGmCycleReactor}
               className="w-full py-0.5 rounded bg-cyan-950/40 border border-cyan-neon/40 text-cyan-300 font-bold text-[10px] hover:bg-cyan-900/50 uppercase cursor-pointer"
             >
               Cycle Reactor
@@ -1845,7 +1998,6 @@ export function GmStation({
           </div>
 
           <form onSubmit={handleSubmitContact} className="flex flex-col gap-2.5 text-xs">
-            {/* Filtered Bestiary Picker Box */}
             <div className="flex flex-col gap-1.5 rounded bg-amber-500/5 border border-amber-500/20 p-2">
               <div className="flex items-center justify-between">
                 <label className="text-[10px] tracking-wider text-amber-400 uppercase font-bold flex items-center gap-1.5">
@@ -1870,7 +2022,7 @@ export function GmStation({
               </div>
 
               <div className="relative">
-                <Search className="w-3 h-3 absolute left-2 top-2 text-muted-foreground" />
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-muted-foreground" />
                 <input
                   type="text"
                   placeholder="Filter by name / faction / hull..."
@@ -1948,7 +2100,6 @@ export function GmStation({
               className="rounded border border-bridge-border bg-black/40 px-2.5 py-1.5 text-amber-200 placeholder:text-muted-foreground/40 focus:border-amber-500 focus:outline-none text-xs"
             />
 
-            {/* Cleaned Combat Specs Grid (Init input removed) */}
             <div className="p-2 rounded bg-black/60 border border-slate-700 flex flex-col gap-1.5">
               <span className="text-[9px] uppercase font-bold text-muted-foreground">
                 Base Combat Specifications:
@@ -2507,7 +2658,11 @@ export function GmStation({
 
       {/* 5. MODAL: 5E MONSTER MANUAL DRILL-DOWN STATBLOCK CARD */}
       {activeInspectStatblock && (() => {
-        const { statblock, currentHull, currentShields, shipId } = activeInspectStatblock
+        const { statblock, shipId } = activeInspectStatblock
+
+        const displayedHull = currentInspectedShip ? currentInspectedShip.hullCurrent : (activeInspectStatblock.currentHull ?? statblock.hullMax)
+        const displayedShields = currentInspectedShip ? currentInspectedShip.shieldsCurrent : (activeInspectStatblock.currentShields ?? statblock.shieldsMax)
+        const legendaryUsed = currentInspectedShip?.legendaryResistancesUsed ?? 0
 
         const formatMod = (score?: number) => {
           if (score === undefined) return "+0"
@@ -2535,7 +2690,44 @@ export function GmStation({
                 </button>
               </div>
 
-              {/* Defense & Motive bar with DR and DT */}
+              {/* In-Modal Direct Tactical Dice Result Banner */}
+              {lastDiceResult && lastDiceResult.shipName === statblock.name && (
+                <div className="rounded border border-amber-500/80 bg-black/95 p-2.5 flex items-center justify-between shadow-[0_0_20px_rgba(245,158,11,0.35)] text-xs animate-in fade-in">
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-1 rounded bg-amber-500/20 text-amber-300">
+                      <Dices className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase">
+                        {lastDiceResult.actionName} ({lastDiceResult.type}):
+                      </span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className={`font-black text-sm tracking-wider font-mono ${
+                          lastDiceResult.isCrit
+                            ? "text-emerald-400 animate-pulse text-base"
+                            : lastDiceResult.isFumble
+                            ? "text-rose-500 font-bold"
+                            : "text-amber-300 font-bold text-base"
+                        }`}>
+                          {lastDiceResult.rollText}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          ({lastDiceResult.detail})
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLastDiceResult(null)}
+                    className="text-slate-500 hover:text-white cursor-pointer px-1.5 py-0.5 text-xs"
+                  >
+                    &times;
+                  </button>
+                </div>
+              )}
+
+              {/* Defense & Motive bar with direct health adjustments */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 py-1 text-slate-200 border-b border-amber-500/40">
                 <div>
                   <span className="text-[10px] uppercase font-bold text-amber-300 block">Armor Class</span>
@@ -2543,15 +2735,55 @@ export function GmStation({
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-amber-300 block">Hull HP</span>
-                  <span className="text-sm sm:text-base font-bold text-rose-400">
-                    {currentHull !== undefined ? currentHull : statblock.hullMax} / {statblock.hullMax}
-                  </span>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-sm sm:text-base font-bold text-rose-400">
+                      {displayedHull} / {statblock.hullMax}
+                    </span>
+                    {shipId && (
+                      <div className="flex gap-0.5 ml-1">
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustEnemyHealth(shipId, "hull", -5)}
+                          className="px-1 py-0.2 rounded bg-slate-900 border border-slate-700 text-rose-300 font-bold text-[9px] hover:bg-slate-800"
+                        >
+                          -5
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustEnemyHealth(shipId, "hull", +5)}
+                          className="px-1 py-0.2 rounded bg-slate-900 border border-slate-700 text-rose-300 font-bold text-[9px] hover:bg-slate-800"
+                        >
+                          +5
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-amber-300 block">Shields</span>
-                  <span className="text-sm sm:text-base font-bold text-cyan-300">
-                    {currentShields !== undefined ? currentShields : statblock.shieldsMax} / {statblock.shieldsMax}
-                  </span>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-sm sm:text-base font-bold text-cyan-300">
+                      {displayedShields} / {statblock.shieldsMax}
+                    </span>
+                    {shipId && (
+                      <div className="flex gap-0.5 ml-1">
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustEnemyHealth(shipId, "shields", -5)}
+                          className="px-1 py-0.2 rounded bg-slate-900 border border-slate-700 text-cyan-300 font-bold text-[9px] hover:bg-slate-800"
+                        >
+                          -5
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustEnemyHealth(shipId, "shields", +5)}
+                          className="px-1 py-0.2 rounded bg-slate-900 border border-slate-700 text-cyan-300 font-bold text-[9px] hover:bg-slate-800"
+                        >
+                          +5
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-amber-300 block">DR / Threshold</span>
@@ -2568,36 +2800,80 @@ export function GmStation({
 
               {/* 6 Core Starship Ability Scores */}
               <div className="grid grid-cols-6 gap-1 text-center py-2 bg-amber-500/5 rounded border border-amber-500/20">
-                <div>
-                  <span className="text-[10px] font-bold text-amber-400 uppercase block">STR</span>
-                  <span className="font-bold text-xs text-slate-200">{statblock.stats?.str ?? 10} ({formatMod(statblock.stats?.str)})</span>
+                {STAT_KEYS.map((k) => (
+                  <div key={k}>
+                    <span className="text-[10px] font-bold text-amber-400 uppercase block">{k.toUpperCase()}</span>
+                    <span className="font-bold text-xs text-slate-200">
+                      {statblock.stats?.[k] ?? 10} ({formatMod(statblock.stats?.[k])})
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* AUTOMATED SAVING THROW ROLLER BAR */}
+              <div className="rounded bg-black/60 border border-amber-500/40 p-2.5 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase text-amber-400 flex items-center gap-1.5">
+                    <ShieldCheck className="h-4 w-4 text-amber-400" /> Automated Saving Throw:
+                  </span>
+                  {maxLegendaryResistances > 0 && shipId && (
+                    <div className="flex items-center gap-1 text-[10px]">
+                      <span className="text-muted-foreground">Legendary Res:</span>
+                      <span className={`font-bold ${maxLegendaryResistances - legendaryUsed > 0 ? "text-amber-300" : "text-slate-500"}`}>
+                        {maxLegendaryResistances - legendaryUsed} / {maxLegendaryResistances} Left
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <span className="text-[10px] font-bold text-amber-400 uppercase block">DEX</span>
-                  <span className="font-bold text-xs text-slate-200">{statblock.stats?.dex ?? 10} ({formatMod(statblock.stats?.dex)})</span>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-amber-400 uppercase block">CON</span>
-                  <span className="font-bold text-xs text-slate-200">{statblock.stats?.con ?? 10} ({formatMod(statblock.stats?.con)})</span>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-amber-400 uppercase block">INT</span>
-                  <span className="font-bold text-xs text-slate-200">{statblock.stats?.int ?? 10} ({formatMod(statblock.stats?.int)})</span>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-amber-400 uppercase block">WIS</span>
-                  <span className="font-bold text-xs text-slate-200">{statblock.stats?.wis ?? 10} ({formatMod(statblock.stats?.wis)})</span>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-amber-400 uppercase block">CHA</span>
-                  <span className="font-bold text-xs text-slate-200">{statblock.stats?.cha ?? 10} ({formatMod(statblock.stats?.cha)})</span>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={selectedSaveStat}
+                    onChange={(e) => setSelectedSaveStat(e.target.value as StatKey)}
+                    className="rounded bg-black border border-slate-700 px-2 py-1 text-xs text-amber-200 font-bold focus:border-amber-400 focus:outline-none"
+                  >
+                    {STAT_KEYS.map((k) => {
+                      const { mod, isProficient } = computeSaveModifier(statblock, k)
+                      return (
+                        <option key={k} value={k}>
+                          {k.toUpperCase()} Save ({mod >= 0 ? `+${mod}` : mod}{isProficient ? " • Prof" : ""})
+                        </option>
+                      )
+                    })}
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRollSavingThrow(statblock.name, statblock, selectedSaveStat)}
+                    className="px-3 py-1 rounded bg-amber-500/20 border border-amber-500/60 text-amber-300 hover:bg-amber-500/30 font-bold uppercase text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+                  >
+                    <Dices className="h-3.5 w-3.5" />
+                    Roll Save
+                  </button>
+
+                  {maxLegendaryResistances > 0 && shipId && (
+                    <button
+                      type="button"
+                      onClick={() => handleUseLegendaryResistance(shipId, statblock.name, maxLegendaryResistances)}
+                      disabled={legendaryUsed >= maxLegendaryResistances}
+                      className={`px-2.5 py-1 rounded text-xs font-bold uppercase transition flex items-center gap-1 cursor-pointer border ${
+                        legendaryUsed < maxLegendaryResistances
+                          ? "bg-purple-950/40 border-purple-500/60 text-purple-300 hover:bg-purple-900/50"
+                          : "bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed"
+                      }`}
+                      title="Expend a Legendary Resistance to succeed automatically"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      Auto-Pass (Legendary)
+                    </button>
+                  )}
                 </div>
               </div>
 
               {/* Saves, Skills, Resistances */}
               <div className="flex flex-col gap-1 text-[11px] text-slate-300 border-b border-amber-500/40 pb-2">
                 {statblock.savingThrows && (
-                  <div><strong className="text-amber-300">Saving Throws:</strong> {statblock.savingThrows}</div>
+                  <div><strong className="text-amber-300">Proficient Saves:</strong> {statblock.savingThrows}</div>
                 )}
                 {statblock.skills && (
                   <div><strong className="text-amber-300">Skills:</strong> {statblock.skills}</div>

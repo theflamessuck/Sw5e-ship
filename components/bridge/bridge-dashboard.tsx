@@ -150,6 +150,7 @@ export interface SyncedCombatState {
   manualPlayerInitOverride: number | null
   playerShipOrderTie: number
   playerShipHasActed: boolean
+  hasCycledReactorThisRound: boolean
   enemyShips: EnemyShip[]
 }
 
@@ -418,6 +419,7 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
     manualPlayerInitOverride: null,
     playerShipOrderTie: 0,
     playerShipHasActed: false,
+    hasCycledReactorThisRound: true,
     enemyShips: [],
   },
 }
@@ -533,6 +535,7 @@ export default function BridgeDashboard() {
       manualPlayerInitOverride: null,
       playerShipOrderTie: 0,
       playerShipHasActed: false,
+      hasCycledReactorThisRound: true,
       enemyShips: [],
     },
   } = roomState
@@ -604,6 +607,7 @@ export default function BridgeDashboard() {
         manualPlayerInitOverride: null,
         playerShipOrderTie: 0,
         playerShipHasActed: false,
+        hasCycledReactorThisRound: true,
         enemyShips: [],
       }
       const nextCombat =
@@ -618,6 +622,7 @@ export default function BridgeDashboard() {
         current.manualPlayerInitOverride === nextCombat.manualPlayerInitOverride &&
         current.playerShipOrderTie === nextCombat.playerShipOrderTie &&
         current.playerShipHasActed === nextCombat.playerShipHasActed &&
+        current.hasCycledReactorThisRound === nextCombat.hasCycledReactorThisRound &&
         current.enemyShips === nextCombat.enemyShips
       ) {
         return prev
@@ -1303,6 +1308,7 @@ export default function BridgeDashboard() {
         manualPlayerInitOverride: null,
         playerShipOrderTie: 0,
         playerShipHasActed: false,
+        hasCycledReactorThisRound: true,
         enemyShips: [],
       },
     }))
@@ -1516,7 +1522,7 @@ export default function BridgeDashboard() {
     }))
   }
 
-  // --- CYCLE REACTOR (ROUND RESET + MOVEMENT/TURN RESETS) ---
+  // --- CYCLE REACTOR (ROUND RESET + MOVEMENT/TURN RESETS + UNLOCKS COMBAT ROUND LOCK) ---
   const handleCycleReactor = (generatedAmount?: number) => {
     updateRoomData((prev) => {
       const amountToAdd =
@@ -1543,6 +1549,11 @@ export default function BridgeDashboard() {
         shieldState: {
           ...prev.shieldState,
           temp: nextTempShields,
+        },
+        // Unlocks next combat round if in combat
+        combatState: {
+          ...prev.combatState,
+          hasCycledReactorThisRound: true,
         },
       }
     })
@@ -1636,7 +1647,6 @@ export default function BridgeDashboard() {
       ? 3
       : 0
 
-  // Guard against SSR hydration mismatch by rendering a clean loading screen until mounted
   if (!isMounted) {
     return (
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col items-center justify-center p-6 font-mono text-neutral-400">

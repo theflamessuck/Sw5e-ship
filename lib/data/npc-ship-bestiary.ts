@@ -67,7 +67,7 @@ export interface NpcShipStatblock {
 
 export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
   // =========================================================================
-  // TIER 0: CANNON FODDER (MINIONS) - PROFICIENCY BONUS: +2
+  // TIER 0: CANNON FODDER (MINIONS) - PB: +2
   // =========================================================================
   {
     name: "Z-95 Headhunter (Pirate Refit)",
@@ -86,6 +86,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 10, dex: 14, con: 12, int: 8, wis: 10, cha: 8 },
+    savingThrows: "Dex +4",
     senses: "Passive Scan 10",
     scanDc: 11,
     distance: "10,000 km",
@@ -136,6 +137,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "400 ft (8 hexes)",
     turningSpeed: "50 ft",
     stats: { str: 10, dex: 16, con: 11, int: 8, wis: 12, cha: 8 },
+    savingThrows: "Dex +5",
     senses: "Passive Scan 11",
     scanDc: 12,
     distance: "12,000 km",
@@ -186,6 +188,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "300 ft (6 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 12, dex: 14, con: 12, int: 8, wis: 10, cha: 10 },
+    savingThrows: "Dex +4, Con +3",
     senses: "Passive Scan 10",
     scanDc: 11,
     distance: "14,000 km",
@@ -241,6 +244,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 8, dex: 12, con: 10, int: 8, wis: 8, cha: 6 },
+    savingThrows: "Dex +3",
     senses: "Passive Scan 9",
     scanDc: 10,
     distance: "11,000 km",
@@ -280,6 +284,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "400 ft (8 hexes)",
     turningSpeed: "50 ft",
     stats: { str: 10, dex: 16, con: 11, int: 10, wis: 10, cha: 8 },
+    savingThrows: "Dex +5",
     senses: "Passive Scan 10",
     scanDc: 11,
     distance: "13,000 km",
@@ -326,6 +331,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "250 ft (5 hexes)",
     turningSpeed: "150 ft",
     stats: { str: 14, dex: 12, con: 14, int: 8, wis: 10, cha: 8 },
+    savingThrows: "Str +4, Con +4",
     senses: "Passive Scan 10",
     scanDc: 11,
     distance: "15,000 km",
@@ -367,6 +373,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "300 ft (6 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 12, dex: 14, con: 12, int: 8, wis: 10, cha: 8 },
+    savingThrows: "Dex +4, Con +3",
     senses: "Passive Scan 10",
     scanDc: 11,
     distance: "12,500 km",
@@ -400,6 +407,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "300 ft (6 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 8, dex: 12, con: 10, int: 8, wis: 8, cha: 8 },
+    savingThrows: "Dex +3",
     senses: "Passive Scan 9",
     scanDc: 10,
     distance: "9,000 km",
@@ -433,6 +441,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "450 ft (9 hexes)",
     turningSpeed: "50 ft",
     stats: { str: 10, dex: 18, con: 11, int: 10, wis: 12, cha: 8 },
+    savingThrows: "Dex +6",
     senses: "Passive Scan 11",
     scanDc: 13,
     distance: "14,000 km",
@@ -458,7 +467,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
   },
 
   // =========================================================================
-  // TIER 1: TACTICAL SKIRMISHER (ELITE) - PROFICIENCY BONUS: +2
+  // TIER 1: TACTICAL SKIRMISHER (ELITE) - PB: +2
   // =========================================================================
   {
     name: "TIE/in Interceptor",
@@ -477,7 +486,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "450 ft (9 hexes)",
     turningSpeed: "50 ft",
     stats: { str: 10, dex: 18, con: 12, int: 10, wis: 14, cha: 8 },
-    savingThrows: "Dex +6",
+    savingThrows: "Dex +6, Wis +4",
     senses: "Passive Scan 12",
     scanDc: 14,
     distance: "15,000 km",
@@ -533,7 +542,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "300 ft (6 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 14, dex: 14, con: 14, int: 8, wis: 10, cha: 8 },
-    savingThrows: "Con +4",
+    savingThrows: "Str +4, Con +4",
     senses: "Passive Scan 10",
     scanDc: 12,
     distance: "13,500 km",
@@ -618,6 +627,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "300 ft (6 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 14, dex: 14, con: 14, int: 10, wis: 12, cha: 8 },
+    savingThrows: "Str +4, Con +4",
     senses: "Passive Scan 11",
     scanDc: 13,
     distance: "14,000 km",
@@ -659,6 +669,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 12, dex: 16, con: 14, int: 10, wis: 12, cha: 10 },
+    savingThrows: "Dex +5, Con +4",
     senses: "Passive Scan 11",
     scanDc: 13,
     distance: "16,000 km",
@@ -692,6 +703,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 14, dex: 16, con: 14, int: 10, wis: 12, cha: 10 },
+    savingThrows: "Dex +5, Con +4",
     senses: "Passive Scan 11",
     scanDc: 13,
     distance: "15,500 km",
@@ -736,7 +748,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "300 ft (6 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 16, dex: 12, con: 16, int: 10, wis: 12, cha: 10 },
-    savingThrows: "Con +5",
+    savingThrows: "Str +5, Con +5",
     senses: "Passive Scan 11",
     scanDc: 13,
     distance: "17,000 km",
@@ -770,7 +782,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 16, dex: 14, con: 16, int: 12, wis: 12, cha: 10 },
-    savingThrows: "Con +5",
+    savingThrows: "Str +5, Con +5",
     senses: "Passive Scan 11",
     scanDc: 14,
     distance: "18,000 km",
@@ -804,7 +816,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "400 ft (8 hexes)",
     turningSpeed: "50 ft",
     stats: { str: 12, dex: 18, con: 14, int: 12, wis: 14, cha: 12 },
-    savingThrows: "Dex +6",
+    savingThrows: "Dex +6, Wis +4",
     senses: "Passive Scan 12",
     scanDc: 15,
     distance: "16,500 km",
@@ -851,6 +863,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 14, dex: 16, con: 14, int: 12, wis: 14, cha: 14 },
+    savingThrows: "Dex +5, Cha +4",
     senses: "Passive Scan 12",
     scanDc: 14,
     distance: "19,000 km",
@@ -890,6 +903,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "450 ft (9 hexes)",
     turningSpeed: "50 ft",
     stats: { str: 10, dex: 18, con: 12, int: 10, wis: 12, cha: 8 },
+    savingThrows: "Dex +6",
     senses: "Passive Scan 11",
     scanDc: 13,
     distance: "14,500 km",
@@ -908,7 +922,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
   },
 
   // =========================================================================
-  // TIER 2: COMBAT BRAWLER (MINI-BOSS) - PROFICIENCY BONUS: +3
+  // TIER 2: COMBAT BRAWLER (MINI-BOSS) - PB: +3
   // =========================================================================
   {
     name: "Gozanti-class Armed Cruiser",
@@ -972,7 +986,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "300 ft (6 hexes)",
     turningSpeed: "150 ft",
     stats: { str: 18, dex: 12, con: 16, int: 12, wis: 14, cha: 10 },
-    savingThrows: "Con +6",
+    savingThrows: "Str +7, Con +6",
     senses: "Passive Scan 12",
     scanDc: 15,
     distance: "21,000 km",
@@ -1006,7 +1020,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "150 ft",
     stats: { str: 20, dex: 14, con: 18, int: 14, wis: 14, cha: 14 },
-    savingThrows: "Str +8, Con +7",
+    savingThrows: "Str +8, Con +7, Dex +5",
     senses: "Passive Scan 12",
     scanDc: 16,
     distance: "25,000 km",
@@ -1015,6 +1029,10 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
       {
         name: "Blockade Runner Engines",
         description: "Immune to speed reduction effects; can Dash as a bonus action."
+      },
+      {
+        name: "Legendary Resistance (1/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
       }
     ],
     actions: [
@@ -1053,11 +1071,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 16, dex: 14, con: 16, int: 14, wis: 14, cha: 12 },
-    savingThrows: "Dex +5, Con +6",
+    savingThrows: "Dex +5, Con +6, Wis +5",
     senses: "Passive Scan 12",
     scanDc: 16,
     distance: "18,000 km",
     defaultNotes: "Infamous Kuat Systems Engineering pursuit craft retrofitted for lethal bounties.",
+    traits: [
+      {
+        name: "Legendary Resistance (1/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Twin Heavy Blaster Cannons",
@@ -1100,7 +1124,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "400 ft (8 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 16, dex: 16, con: 16, int: 12, wis: 14, cha: 12 },
-    savingThrows: "Dex +6",
+    savingThrows: "Dex +6, Con +6",
     senses: "Passive Scan 12",
     scanDc: 15,
     distance: "20,000 km",
@@ -1173,6 +1197,12 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     scanDc: 16,
     distance: "22,000 km",
     defaultNotes: "Imperial fast-attack corvette designed specifically to hunt Rebel starfighters.",
+    traits: [
+      {
+        name: "Legendary Resistance (1/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Heavy Laser Cannons",
@@ -1211,7 +1241,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 16, dex: 16, con: 16, int: 12, wis: 14, cha: 12 },
-    savingThrows: "Dex +6",
+    savingThrows: "Dex +6, Con +6",
     senses: "Passive Scan 12",
     scanDc: 15,
     distance: "19,000 km",
@@ -1245,7 +1275,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 16, dex: 14, con: 16, int: 12, wis: 12, cha: 12 },
-    savingThrows: "Con +6",
+    savingThrows: "Str +6, Con +6",
     senses: "Passive Scan 11",
     scanDc: 14,
     distance: "18,500 km",
@@ -1313,7 +1343,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "400 ft (8 hexes)",
     turningSpeed: "100 ft",
     stats: { str: 14, dex: 16, con: 14, int: 12, wis: 14, cha: 12 },
-    savingThrows: "Dex +6",
+    savingThrows: "Dex +6, Con +5",
     senses: "Passive Scan 12",
     scanDc: 14,
     distance: "19,500 km",
@@ -1366,7 +1396,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
   },
 
   // =========================================================================
-  // TIER 3: TACTICAL CONTROLLER (DEADLY) - PROFICIENCY BONUS: +4
+  // TIER 3: TACTICAL CONTROLLER (DEADLY) - PB: +4
   // =========================================================================
   {
     name: "Nebulon-B Escort Frigate",
@@ -1394,6 +1424,10 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
       {
         name: "Vulnerable Mid-Section",
         description: "Attacks targeting the narrow connecting neck ignore DR and score critical hits on 19-20."
+      },
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
       }
     ],
     actions: [
@@ -1435,11 +1469,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "250 ft (5 hexes)",
     turningSpeed: "200 ft",
     stats: { str: 22, dex: 12, con: 20, int: 16, wis: 16, cha: 14 },
-    savingThrows: "Str +10, Con +9, Wis +7",
+    savingThrows: "Str +10, Con +9, Int +7, Wis +7",
     senses: "Passive Scan 13",
     scanDc: 17,
     distance: "27,000 km",
     defaultNotes: "Fast imperial patrol cruiser with twin dual turbolasers in recessed wing mounts.",
+    traits: [
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Dual Turbolaser Salvo",
@@ -1479,7 +1519,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "250 ft (5 hexes)",
     turningSpeed: "200 ft",
     stats: { str: 20, dex: 14, con: 18, int: 16, wis: 16, cha: 12 },
-    savingThrows: "Con +8",
+    savingThrows: "Str +9, Con +8, Wis +7",
     senses: "Passive Scan 13",
     scanDc: 16,
     distance: "26,000 km",
@@ -1513,11 +1553,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "150 ft",
     stats: { str: 22, dex: 14, con: 18, int: 16, wis: 14, cha: 12 },
-    savingThrows: "Str +10, Con +8",
+    savingThrows: "Str +10, Dex +6, Con +8",
     senses: "Passive Scan 12",
     scanDc: 17,
     distance: "29,000 km",
     defaultNotes: "Exceptionally fast capital ship capable of keeping pace with pursuit starfighters.",
+    traits: [
+      {
+        name: "Legendary Resistance (1/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Heavy Laser & Ion Batteries",
@@ -1562,6 +1608,12 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     scanDc: 16,
     distance: "30,000 km",
     defaultNotes: "Cumbersome vintage battleship retrofitted with automated Katana fleet slave circuitry.",
+    traits: [
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Broadside Turbolasers",
@@ -1631,7 +1683,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "200 ft (4 hexes)",
     turningSpeed: "250 ft",
     stats: { str: 22, dex: 10, con: 20, int: 20, wis: 18, cha: 14 },
-    savingThrows: "Con +9, Int +9, Wis +8",
+    savingThrows: "Str +10, Con +9, Int +9, Wis +8",
     senses: "Passive Scan 14",
     scanDc: 18,
     distance: "32,000 km",
@@ -1640,6 +1692,10 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
       {
         name: "Gravity Well Projectors",
         description: "Hyperspace calculations fail automatically within 1,000 km of this vessel."
+      },
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
       }
     ],
     actions: [
@@ -1671,7 +1727,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "350 ft (7 hexes)",
     turningSpeed: "150 ft",
     stats: { str: 20, dex: 14, con: 18, int: 16, wis: 16, cha: 12 },
-    savingThrows: "Dex +6, Con +8",
+    savingThrows: "Dex +6, Con +8, Wis +7",
     senses: "Passive Scan 13",
     scanDc: 16,
     distance: "26,000 km",
@@ -1705,11 +1761,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "200 ft (4 hexes)",
     turningSpeed: "250 ft",
     stats: { str: 24, dex: 10, con: 22, int: 16, wis: 16, cha: 14 },
-    savingThrows: "Str +11, Con +10",
+    savingThrows: "Str +11, Con +10, Wis +7",
     senses: "Passive Scan 13",
     scanDc: 17,
     distance: "32,000 km",
     defaultNotes: "Medium capital warship with a cavernous belly hangar designed for sector subjugation.",
+    traits: [
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Heavy Turbolaser Batteries",
@@ -1749,7 +1811,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "250 ft (5 hexes)",
     turningSpeed: "200 ft",
     stats: { str: 20, dex: 12, con: 18, int: 16, wis: 16, cha: 14 },
-    savingThrows: "Con +8, Wis +7",
+    savingThrows: "Str +9, Con +8, Wis +7",
     senses: "Passive Scan 13",
     scanDc: 16,
     distance: "25,000 km",
@@ -1783,11 +1845,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "200 ft (4 hexes)",
     turningSpeed: "250 ft",
     stats: { str: 24, dex: 10, con: 20, int: 18, wis: 16, cha: 12 },
-    savingThrows: "Str +11, Con +9",
+    savingThrows: "Str +11, Con +9, Int +8",
     senses: "Passive Scan 13",
     scanDc: 17,
     distance: "31,000 km",
     defaultNotes: "Separatist Banking Clan warship built around two enormous bow-mounted heavy prow turbolasers.",
+    traits: [
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Prow Heavy Turbolaser Cannons",
@@ -1802,7 +1870,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
   },
 
   // =========================================================================
-  // TIER 4: APEX THREAT (RUN AWAY) - PROFICIENCY BONUS: +5
+  // TIER 4: APEX THREAT (RUN AWAY) - PB: +5
   // =========================================================================
   {
     name: "Vindicator-class Heavy Cruiser",
@@ -1821,11 +1889,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "200 ft (4 hexes)",
     turningSpeed: "250 ft",
     stats: { str: 26, dex: 8, con: 22, int: 16, wis: 16, cha: 14 },
-    savingThrows: "Str +13, Con +11",
+    savingThrows: "Str +13, Con +11, Wis +8",
     senses: "Passive Scan 13",
     scanDc: 18,
     distance: "35,000 km",
     defaultNotes: "Heavy line cruiser bristling with light and medium turbolasers for fleet engagements.",
+    traits: [
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Full Battery Barrage",
@@ -1865,7 +1939,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "150 ft (3 hexes)",
     turningSpeed: "300 ft",
     stats: { str: 28, dex: 8, con: 24, int: 18, wis: 16, cha: 18 },
-    savingThrows: "Str +14, Con +12, Int +9",
+    savingThrows: "Str +14, Con +12, Int +9, Wis +8, Cha +9",
     senses: "Passive Scan 13",
     scanDc: 19,
     distance: "40,000 km",
@@ -1874,6 +1948,10 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
       {
         name: "Dominance Aura",
         description: "Hostile ships within 1,000 ft suffer -2 on attack rolls unless they succeed on a DC 16 Wisdom check."
+      },
+      {
+        name: "Legendary Resistance (3/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
       }
     ],
     actions: [
@@ -1931,11 +2009,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "200 ft (4 hexes)",
     turningSpeed: "250 ft",
     stats: { str: 26, dex: 10, con: 22, int: 18, wis: 16, cha: 16 },
-    savingThrows: "Str +13, Con +11",
+    savingThrows: "Str +13, Con +11, Wis +8",
     senses: "Passive Scan 13",
     scanDc: 18,
     distance: "38,000 km",
     defaultNotes: "Clone Wars fleet carrier with massive red dorsal hangar doors housing hundreds of craft.",
+    traits: [
+      {
+        name: "Legendary Resistance (3/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Heavy Dual Turbolasers",
@@ -1980,6 +2064,12 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     scanDc: 18,
     distance: "36,000 km",
     defaultNotes: "Planetary bombardment platform equipped with atmospheric maneuvering flaps and concussion missile tubes.",
+    traits: [
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Turbolaser & Missile Barrage",
@@ -2009,11 +2099,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "200 ft (4 hexes)",
     turningSpeed: "250 ft",
     stats: { str: 28, dex: 10, con: 24, int: 16, wis: 16, cha: 16 },
-    savingThrows: "Str +14, Con +12",
+    savingThrows: "Str +14, Con +12, Wis +8",
     senses: "Passive Scan 13",
     scanDc: 18,
     distance: "37,000 km",
     defaultNotes: "Refit designed for deep-space combat, replacing atmospheric gear with heavier ion batteries.",
+    traits: [
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Heavy Ion & Turbolasers",
@@ -2043,11 +2139,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "150 ft (3 hexes)",
     turningSpeed: "300 ft",
     stats: { str: 30, dex: 8, con: 26, int: 18, wis: 18, cha: 18 },
-    savingThrows: "Str +15, Con +13",
+    savingThrows: "Str +15, Con +13, Int +9, Wis +9, Cha +9",
     senses: "Passive Scan 14",
     scanDc: 20,
     distance: "42,000 km",
     defaultNotes: "Upgraded hull plating, solid-state sensor dome, and massive heavy octuple barbette turbolaser turrets.",
+    traits: [
+      {
+        name: "Legendary Resistance (3/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Octuple Barbette Turbolasers",
@@ -2092,11 +2194,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "200 ft (4 hexes)",
     turningSpeed: "250 ft",
     stats: { str: 28, dex: 10, con: 24, int: 18, wis: 16, cha: 16 },
-    savingThrows: "Str +14, Con +12",
+    savingThrows: "Str +14, Con +12, Wis +8",
     senses: "Passive Scan 13",
     scanDc: 18,
     distance: "39,000 km",
     defaultNotes: "Separatist command flagship archetype built to brawl with Venator-class destroyers.",
+    traits: [
+      {
+        name: "Legendary Resistance (3/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Heavy Turbolaser Batteries",
@@ -2126,11 +2234,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "150 ft (3 hexes)",
     turningSpeed: "300 ft",
     stats: { str: 30, dex: 6, con: 28, int: 18, wis: 16, cha: 18 },
-    savingThrows: "Str +15, Con +14",
+    savingThrows: "Str +15, Con +14, Int +9, Wis +8",
     senses: "Passive Scan 13",
     scanDc: 20,
     distance: "45,000 km",
     defaultNotes: "Monstrous Separatist dreadnought armed with dual flank-mounted mega-ion pulse cannons.",
+    traits: [
+      {
+        name: "Legendary Resistance (3/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Mega-Ion Pulse Cannon (Recharge 5-6)",
@@ -2162,6 +2276,12 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     scanDc: 17,
     distance: "34,000 km",
     defaultNotes: "Needle-thin automated Separatist warship built around a heavy prow turbolaser array.",
+    traits: [
+      {
+        name: "Legendary Resistance (2/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Prow Heavy Turbolasers",
@@ -2191,11 +2311,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "150 ft (3 hexes)",
     turningSpeed: "300 ft",
     stats: { str: 28, dex: 8, con: 26, int: 18, wis: 16, cha: 16 },
-    savingThrows: "Str +14, Con +13",
+    savingThrows: "Str +14, Con +13, Wis +8",
     senses: "Passive Scan 13",
     scanDc: 19,
     distance: "41,000 km",
     defaultNotes: "Massive wedge-shaped fleet carrier designed to flood entire star sectors with fighter wings.",
+    traits: [
+      {
+        name: "Legendary Resistance (3/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Dual Heavy Turbolasers",
@@ -2210,7 +2336,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
   },
 
   // =========================================================================
-  // TIER 5: GALACTIC TITAN (HIDE & PRAY) - PROFICIENCY BONUS: +6
+  // TIER 5: GALACTIC TITAN (HIDE & PRAY) - PB: +6
   // =========================================================================
   {
     name: "Bellator-class Dreadnought",
@@ -2229,11 +2355,17 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "200 ft (4 hexes)",
     turningSpeed: "350 ft",
     stats: { str: 30, dex: 8, con: 30, int: 20, wis: 18, cha: 20 },
-    savingThrows: "Str +16, Con +16, Int +11, Wis +10",
+    savingThrows: "Str +16, Con +16, Int +11, Wis +10, Cha +11",
     senses: "Passive Scan 14",
     scanDc: 22,
     distance: "55,000 km",
     defaultNotes: "7.2-kilometer battlecruiser built for deep bombardment and capital fleet destruction.",
+    traits: [
+      {
+        name: "Legendary Resistance (3/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
+      }
+    ],
     actions: [
       {
         name: "Cataclysmic Broadside",
@@ -2278,7 +2410,7 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
     speed: "100 ft (2 hexes)",
     turningSpeed: "500 ft",
     stats: { str: 30, dex: 6, con: 30, int: 22, wis: 20, cha: 24 },
-    savingThrows: "Str +16, Con +16, Int +12, Wis +11, Cha +12",
+    savingThrows: "Str +16, Con +16, Int +12, Wis +11, Cha +13",
     senses: "Passive Scan 15",
     scanDc: 25,
     distance: "75,000 km",
@@ -2287,6 +2419,10 @@ export const DEFAULT_NPC_SHIP_BESTIARY: NpcShipStatblock[] = [
       {
         name: "Galactic Dreadnought Hegemony",
         description: "Immune to non-heavy weapon damage. Damage under 50 is completely ignored by Damage Threshold."
+      },
+      {
+        name: "Legendary Resistance (3/Day)",
+        description: "If this ship fails a saving throw, it can choose to succeed instead."
       }
     ],
     actions: [
