@@ -277,11 +277,7 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
     id: ammo.id,
     name: ammo.name,
     category: ammo.launcherFamily,
-    currentReserve: ammo.name.toLowerCase().includes("concussion missile")
-      ? 6
-      : ammo.name.toLowerCase().includes("proton torpedo")
-      ? 4
-      : 0,
+    currentReserve: 0,
     costPerUnit: ammo.cost,
     damage: ammo.standardDamage,
     damageType: ammo.damageType,
@@ -1288,9 +1284,9 @@ export default function BridgeDashboard() {
         name: ammo.name,
         category: ammo.launcherFamily,
         currentReserve: ammo.name.toLowerCase().includes("concussion missile")
-          ? 6
+          ? 0
           : ammo.name.toLowerCase().includes("proton torpedo")
-          ? 4
+          ? 0
           : 0,
         costPerUnit: ammo.cost,
         damage: ammo.standardDamage,

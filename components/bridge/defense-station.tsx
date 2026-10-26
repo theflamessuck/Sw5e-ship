@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { ShieldAlert, ShieldCheck, Users, CheckCircle2, Clock, UserMinus } from "lucide-react"
 import { CombatResources } from "./combat-resources"
 import { StationModifications, Modification } from "./ship-modifications"
@@ -162,7 +162,6 @@ interface DefenseStationProps {
   statuses?: ActiveStatus[]
   onAddStatus?: (status: ActiveStatus) => void
   onRemoveStatus?: (statusId: string) => void
-  // Manifest & Turn Integration
   manifest?: ManifestMember[]
   onAssignCrew?: (memberId: string, targetLocation: ShipCompartmentId) => void
   onToggleTurn?: (memberId: string) => void
@@ -207,6 +206,8 @@ export function DefenseStation({
   onAssignCrew,
   onToggleTurn,
 }: DefenseStationProps) {
+  const isInitialMount = useRef(true)
+
   // --- CREW ASSIGNMENT EXTRACTION ---
   const assignedCrew = useMemo(() => {
     return manifest
@@ -408,8 +409,15 @@ export function DefenseStation({
   }, [currentShields, maxShields, tempShields, isLevel4Damage, effectiveMaxShields])
 
   useEffect(() => {
-    setHull((prev) => ({ ...prev, ac: dynamicAC }))
-    onHullChange?.(hull.current, hull.max, dynamicAC)
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      return
+    }
+    setHull((prev) => {
+      if (prev.ac === dynamicAC) return prev
+      onHullChange?.(prev.current, prev.max, dynamicAC)
+      return { ...prev, ac: dynamicAC }
+    })
   }, [dynamicAC])
 
   const [isAutoRegenActive, setIsAutoRegenActive] = useState<boolean>(false)
@@ -449,13 +457,10 @@ export function DefenseStation({
     }
 
     if (delta > 0) {
-      setShipShields((prev) => {
-        const ceiling = isLevel4Damage ? effectiveMaxShields : prev.max
-        const newCurrent = Math.min(ceiling, prev.current + delta)
-        const updated = { ...prev, current: newCurrent }
-        onShieldChange?.(updated.current, prev.max, updated.temp)
-        return updated
-      })
+      const ceiling = isLevel4Damage ? effectiveMaxShields : shipShields.max
+      const newCurrent = Math.min(ceiling, shipShields.current + delta)
+      setShipShields((prev) => ({ ...prev, current: newCurrent }))
+      onShieldChange?.(newCurrent, shipShields.max, shipShields.temp)
     } else {
       let damageRemaining = Math.abs(delta)
       let newTemp = shipShields.temp
@@ -473,11 +478,8 @@ export function DefenseStation({
         damageRemaining -= absorbedByCurrent
       }
 
-      setShipShields((prev) => {
-        const updated = { ...prev, current: newCurrent, temp: newTemp }
-        onShieldChange?.(updated.current, prev.max, updated.temp)
-        return updated
-      })
+      setShipShields((prev) => ({ ...prev, current: newCurrent, temp: newTemp }))
+      onShieldChange?.(newCurrent, shipShields.max, newTemp)
 
       if (damageRemaining > 0) {
         handleAdjustHull(-damageRemaining)
@@ -491,19 +493,16 @@ export function DefenseStation({
       return
     }
 
-    setHull((prev) => {
-      const incomingDamage = delta < 0
-      const ceiling = isLevel4Damage ? effectiveMaxHull : prev.max
-      const newCurrent = Math.max(0, Math.min(ceiling, prev.current + delta))
-      
-      if (prev.current === 0 && incomingDamage) {
-        setDestructionSaves(ds => ({ ...ds, isStable: false }))
-      }
+    const incomingDamage = delta < 0
+    const ceiling = isLevel4Damage ? effectiveMaxHull : hull.max
+    const newCurrent = Math.max(0, Math.min(ceiling, hull.current + delta))
 
-      const updated = { ...prev, current: newCurrent }
-      onHullChange?.(updated.current, prev.max, dynamicAC)
-      return updated
-    })
+    if (hull.current === 0 && incomingDamage) {
+      setDestructionSaves((ds) => ({ ...ds, isStable: false }))
+    }
+
+    setHull((prev) => ({ ...prev, current: newCurrent }))
+    onHullChange?.(newCurrent, hull.max, dynamicAC)
   }
 
   const ceilingShieldMax = isLevel4Damage ? effectiveMaxShields : shipShields.max
@@ -540,12 +539,11 @@ export function DefenseStation({
       rollDetails += ` -> Halved to +${finalHealAmount} SP (System Damage Lvl 4)`
     }
 
-    setShipShields((prev) => {
-      const ceiling = isLevel4Damage ? effectiveMaxShields : prev.max
-      const newCurrent = Math.min(ceiling, prev.current + finalHealAmount)
-      onShieldChange?.(newCurrent, prev.max, prev.temp)
-      return { ...prev, current: newCurrent }
-    })
+    const ceiling = isLevel4Damage ? effectiveMaxShields : shipShields.max
+    const newCurrent = Math.min(ceiling, shipShields.current + finalHealAmount)
+
+    setShipShields((prev) => ({ ...prev, current: newCurrent }))
+    onShieldChange?.(newCurrent, shipShields.max, shipShields.temp)
 
     setHasRegeneratedThisTurn(true)
     setRegenLog(rollDetails)
@@ -641,7 +639,6 @@ export function DefenseStation({
 
     onAddStatus?.(newStatusEntry)
 
-    // Automatically append connected Slowed Level 4 for Disabled, Stunned, or Tractored
     if (statusDef.id === "disabled" || statusDef.id === "stunned" || statusDef.id === "tractored") {
       const hasSlowed4 = statuses.some((s) => s.title.includes("SLOWED") && s.level === 4)
       if (!hasSlowed4) {
@@ -661,7 +658,6 @@ export function DefenseStation({
     const target = statuses.find((s) => s.id === statusId)
     onRemoveStatus?.(statusId)
 
-    // If removing Disabled/Stunned/Tractored, remove any linked automatic Slowed status
     if (target && (target.id.includes("disabled") || target.title.includes("DISABLED") || target.id.includes("stunned") || target.title.includes("STUNNED") || target.id.includes("tractored") || target.title.includes("TRACTORED"))) {
       const autoSlowed = statuses.find((s) => s.id.includes("slowed-auto"))
       if (autoSlowed) {
