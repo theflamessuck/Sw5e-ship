@@ -18,7 +18,9 @@ import {
   Clock,
   ShieldAlert,
   ShieldCheck,
-  Lock
+  Lock,
+  Sparkles,
+  Flame
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { CombatResources } from "./combat-resources"
@@ -28,6 +30,13 @@ import { STARSHIP_AMMUNITION, STARSHIP_WEAPONS } from "@/lib/starship-weapons"
 import type { ActiveStatus } from "./defense-station"
 import type { ManifestMember, ShipCompartmentId } from "./bridge-dashboard"
 import { getCrewRole } from "./bridge-dashboard"
+import {
+  rollAttackD20,
+  rollDamage,
+  resolveAdvantageMode,
+  type AttackRollResult,
+  type DamageRollBreakdown
+} from "@/lib/combat-roller"
 
 type LauncherFamily = "Missile launcher" | "Cluster pod" | "Torpedo launcher" | "Quaternary Ammunition"
 
@@ -98,24 +107,6 @@ function findArmedAmmoCatalog(launcherState: LauncherLoadState | null) {
     STARSHIP_AMMUNITION.find((a) => a.name.toLowerCase() === (launcherState.ordnanceName || "").toLowerCase()) ||
     null
   )
-}
-
-function rollDiceFormula(formula: string): { individualRolls: number[]; totalDice: number } {
-  const matches = [...formula.matchAll(/(\d+)d(\d+)/g)]
-  const rolls: number[] = []
-  let total = 0
-
-  matches.forEach((m) => {
-    const count = parseInt(m[1], 10)
-    const sides = parseInt(m[2], 10)
-    for (let i = 0; i < count; i++) {
-      const roll = Math.floor(Math.random() * sides) + 1
-      rolls.push(roll)
-      total += roll
-    }
-  })
-
-  return { individualRolls: rolls, totalDice: total }
 }
 
 export function WeaponsStation({
@@ -291,7 +282,6 @@ export function WeaponsStation({
     }
   }
 
-  // Synchronized Cooling directly into shared installedMods state
   const handleCoolMountedWeapon = (instanceId: string) => {
     onUpdateMod?.(instanceId, { currentHeat: 0 } as any)
   }
@@ -443,9 +433,9 @@ export function WeaponsStation({
   const [toggleMelt, setToggleMelt] = useState<boolean>(false)
   const [toggleDire, setToggleDire] = useState<boolean>(false)
   
-  const [digitalRoll, setDigitalRoll] = useState<number | null>(null)
-  const [digitalRollPair, setDigitalRollPair] = useState<[number, number] | null>(null)
-  const [digitalDamageResult, setDigitalDamageResult] = useState<{ rolls: number[]; total: number } | null>(null)
+  // Roller states
+  const [attackRollData, setAttackRollData] = useState<AttackRollResult | null>(null)
+  const [damageRollData, setDamageRollData] = useState<DamageRollBreakdown | null>(null)
   const [manualAttackInput, setManualAttackInput] = useState<string>("")
   const [manualDamageInput, setManualDamageInput] = useState<string>("")
   const [attackOutcome, setAttackOutcome] = useState<"pending" | "hit" | "crit" | "miss" | "saved" | "failed">("pending")
@@ -458,9 +448,8 @@ export function WeaponsStation({
     setTogglePiercing(false)
     setToggleMelt(false)
     setToggleDire(false)
-    setDigitalRoll(null)
-    setDigitalRollPair(null)
-    setDigitalDamageResult(null)
+    setAttackRollData(null)
+    setDamageRollData(null)
     setManualAttackInput("")
     setManualDamageInput("")
     setAttackOutcome("pending")
@@ -522,15 +511,13 @@ export function WeaponsStation({
     setTogglePiercing(false)
     setToggleMelt(false)
     setToggleDire(false)
-    setDigitalRoll(null)
-    setDigitalRollPair(null)
-    setDigitalDamageResult(null)
+    setAttackRollData(null)
+    setDamageRollData(null)
     setManualAttackInput("")
     setManualDamageInput("")
     setAttackOutcome("pending")
   }
 
-  // Completes attack: marks weapon as firedThisRound and updates shared heat/ammo state
   const completeAttack = (heatCost: number) => {
     if (!activeWizardWeapon) return
     const key = activeWizardWeapon.instanceId || activeWizardWeapon.id
@@ -590,6 +577,13 @@ export function WeaponsStation({
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {shipConfig?.useBrutalCriticals && (
+            <span className="rounded-sm border border-amber-500/80 bg-amber-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-amber-300 flex items-center gap-1">
+              <Flame className="w-3 h-3 text-amber-400" />
+              BRUTAL CRITICALS ACTIVE
+            </span>
+          )}
+
           {isBlinded && (
             <span className="rounded-sm border border-red-500/80 bg-red-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.4)]">
               ⚠️ BLINDED: ATTACKS AT DISADVANTAGE
@@ -664,7 +658,6 @@ export function WeaponsStation({
             </span>
           )}
           
-          {/* Dynamic Weapons Armed / Safe Badge */}
           {isArmed ? (
             <span className="rounded-sm border border-red-alert/80 bg-red-alert/20 px-3 py-1.5 text-[10px] font-bold tracking-[0.2em] text-red-alert text-glow-amber animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.4)]">
               WEAPONS: HOT
@@ -1482,11 +1475,9 @@ export function WeaponsStation({
         const hasSaturate = props.some((p: string) => p.includes("saturate"))
         const keenProp = props.find((p: string) => p.includes("keen"))
         const keenRating = keenProp ? parseInt(keenProp.replace(/[^0-9]/g, ""), 10) || 1 : 0
-        const critThreshold = 20 - keenRating
+        const critThreshold = Math.max(1, 20 - keenRating)
 
-        const heavyDmgBonus = hasHeavy ? Math.max(1, Math.ceil(strMod / 2)) : 0
         const baseAttackAbilityMod = hasSaturate ? Math.max(strMod, wisMod) : wisMod
-
         const sFoilsAtkDelta = hasSFoils && !isOrdnance ? (sFoilsMode === "locked" ? -2 : 1) : 0
         let attackMod = baseAttackAbilityMod + (isAttackFighter ? 1 : 0) + sFoilsAtkDelta
 
@@ -1515,11 +1506,10 @@ export function WeaponsStation({
 
         const saveDC = 8 + attackMod
 
+        // Advantage/Disadvantage net calculation via combat-roller
         const hasAdvantage = isInvisible
-        const hasDisadvConditions = rangeBracket === "long" || failsCon || hasSystemDamageAtkDisadv || isBlinded || isIonized || (!isManned && isTurret)
-        
-        const isDisadvantageRoll = hasDisadvConditions && !hasAdvantage
-        const isAdvantageRoll = hasAdvantage && !hasDisadvConditions
+        const hasDisadvantage = rangeBracket === "long" || failsCon || hasSystemDamageAtkDisadv || isBlinded || isIonized || (!isManned && isTurret)
+        const netRollMode = resolveAdvantageMode(hasAdvantage, hasDisadvantage)
 
         const currentHeatCost = firingMode === "rapid" ? rapidRating : firingMode === "burst" ? burstRating : 1
         const hasSufficientHeat = isOrdnance ? (launcherState && launcherState.loadedCount > 0) : remainingHeadroom >= currentHeatCost
@@ -1555,14 +1545,43 @@ export function WeaponsStation({
         if (dynamicFlat > 0) finalDmgFormula = `${diceString} + ${dynamicFlat}`
         else if (dynamicFlat < 0) finalDmgFormula = `${diceString} - ${Math.abs(dynamicFlat)}`
 
-        const handleRollDigitalDamage = () => {
-          const { individualRolls, totalDice } = rollDiceFormula(diceString)
-          const finalTotal = Math.max(1, totalDice + dynamicFlat)
-          setDigitalDamageResult({
-            rolls: individualRolls,
-            total: finalTotal,
+        // Trigger digital d20 roll via combat-roller
+        const handleRollDigitalAttack = () => {
+          const res = rollAttackD20({
+            modifier: attackMod,
+            mode: netRollMode,
+            critThreshold,
           })
-          setManualDamageInput(finalTotal.toString())
+          setAttackRollData(res)
+          setManualAttackInput(res.total.toString())
+
+          if (res.isCrit) {
+            setAttackOutcome("crit")
+            // Auto calculate critical damage
+            const dmgRes = rollDamage({
+              formula: diceString,
+              isCrit: true,
+              useBrutalCriticals: Boolean(shipConfig?.useBrutalCriticals),
+              additionalBonus: dynamicFlat,
+            })
+            setDamageRollData(dmgRes)
+            setManualDamageInput(dmgRes.totalDamage.toString())
+          } else if (res.isFumble) {
+            setAttackOutcome("miss")
+          }
+        }
+
+        // Trigger damage roll via combat-roller
+        const handleRollDigitalDamage = (forceCrit?: boolean) => {
+          const isCrit = forceCrit !== undefined ? forceCrit : (attackOutcome === "crit" || attackRollData?.isCrit === true)
+          const dmgRes = rollDamage({
+            formula: diceString,
+            isCrit,
+            useBrutalCriticals: Boolean(shipConfig?.useBrutalCriticals),
+            additionalBonus: dynamicFlat,
+          })
+          setDamageRollData(dmgRes)
+          setManualDamageInput(dmgRes.totalDamage.toString())
         }
 
         return (
@@ -1838,7 +1857,7 @@ export function WeaponsStation({
                       <span className="text-xs font-bold uppercase block">Normal Range</span>
                       <span className="text-[10px] block mt-1">≤ {normalRange} Feet</span>
                       <span className="text-[9px] text-muted-foreground block mt-1">
-                        {isDisadvantageRoll ? "Disadvantage Active" : isAdvantageRoll ? "Advantage Active" : "Normal Roll"}
+                        {netRollMode === "disadvantage" ? "Disadvantage Active" : netRollMode === "advantage" ? "Advantage Active" : "Normal Roll"}
                       </span>
                     </button>
 
@@ -1852,7 +1871,7 @@ export function WeaponsStation({
                     >
                       <span className="text-xs font-bold uppercase block">Long Range</span>
                       <span className="text-[10px] block mt-1">{normalRange + 1} – {maxRange} Feet</span>
-                      <span className="text-[9px] text-amber-300 block mt-1">Disadv / Target Save Adv</span>
+                      <span className="text-[9px] text-amber-300 block mt-1">Imposes Disadvantage</span>
                     </button>
 
                     <button
@@ -1966,14 +1985,14 @@ export function WeaponsStation({
                   </div>
 
                   <div className={`p-2.5 rounded border text-center text-[11px] ${
-                    isDisadvantageRoll 
+                    netRollMode === "disadvantage" 
                       ? "bg-amber-950/40 border-amber-500/60 text-amber-300" 
-                      : isAdvantageRoll 
+                      : netRollMode === "advantage" 
                       ? "bg-purple-950/40 border-purple-500/60 text-purple-300"
                       : "bg-black/60 border-bridge-border text-emerald-400"
                   }`}>
                     Roll Trait: <strong>
-                      {isDisadvantageRoll 
+                      {netRollMode === "disadvantage" 
                         ? `DISADVANTAGE (Roll 2d20, Take Lower) — Source: ${[
                             !isManned && isTurret ? "Unmanned Turret" : null,
                             isBlinded ? "Blinded" : null,
@@ -1982,9 +2001,9 @@ export function WeaponsStation({
                             rangeBracket === "long" ? "Long Range" : null,
                             failsCon ? "Constitution Penalty" : null,
                           ].filter(Boolean).join(", ")}`
-                        : isAdvantageRoll 
+                        : netRollMode === "advantage" 
                         ? "ADVANTAGE (Roll 2d20, Take Higher) — Source: Invisibility"
-                        : hasAdvantage && hasDisadvConditions 
+                        : hasAdvantage && hasDisadvantage 
                         ? "STRAIGHT ROLL (Advantage & Disadvantage Cancel Out)" 
                         : "NORMAL ATTACK ROLL (1d20)"}
                     </strong>
@@ -2004,12 +2023,12 @@ export function WeaponsStation({
                             <span className="text-xl font-bold text-cyan-neon font-mono">
                               1d20{attackMod >= 0 ? `+${attackMod}` : attackMod} to Hit
                             </span>
-                            {isDisadvantageRoll && (
+                            {netRollMode === "disadvantage" && (
                               <span className="text-[9px] font-bold text-amber-400 block mt-0.5">
                                 [DISADVANTAGE ACTIVE: Roll 2d20, keep lower]
                               </span>
                             )}
-                            {isAdvantageRoll && (
+                            {netRollMode === "advantage" && (
                               <span className="text-[9px] font-bold text-purple-300 block mt-0.5">
                                 [ADVANTAGE ACTIVE: Roll 2d20, keep higher]
                               </span>
@@ -2033,45 +2052,56 @@ export function WeaponsStation({
                         </div>
                       </div>
 
+                      {/* Dice Rolling Panel */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2.5 rounded bg-black/40 border border-bridge-border">
                         <div className="flex flex-col justify-between gap-1 border-b sm:border-b-0 sm:border-r border-bridge-border/60 pb-2 sm:pb-0 sm:pr-2">
-                          <span className="text-[10px] text-muted-foreground uppercase">Digital Dice Roll</span>
-                          <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground uppercase">Digital Dice Roller</span>
+                          <div className="flex items-center gap-2 flex-wrap">
                             <button
                               type="button"
-                              onClick={() => {
-                                const r1 = Math.floor(Math.random() * 20) + 1
-                                const r2 = Math.floor(Math.random() * 20) + 1
-                                if (isDisadvantageRoll) {
-                                  setDigitalRollPair([r1, r2])
-                                  setDigitalRoll(Math.min(r1, r2))
-                                } else if (isAdvantageRoll) {
-                                  setDigitalRollPair([r1, r2])
-                                  setDigitalRoll(Math.max(r1, r2))
-                                } else {
-                                  setDigitalRollPair(null)
-                                  setDigitalRoll(r1)
-                                }
-                              }}
-                              className="px-2.5 py-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 text-cyan-neon text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-cyan-neon/20 cursor-pointer"
+                              onClick={handleRollDigitalAttack}
+                              className="px-2.5 py-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 text-cyan-neon text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-cyan-neon/20 cursor-pointer shadow-sm transition"
                             >
                               <Dices className="w-3.5 h-3.5" />
                               Roll d20
                             </button>
-                            {digitalRoll !== null && (
-                              <span className="text-xs font-mono font-bold text-cyan-neon">
-                                [{digitalRoll}] + {attackMod} = <strong>{digitalRoll + attackMod}</strong>
-                              </span>
+
+                            {attackRollData && (
+                              <div className="text-xs font-mono">
+                                {attackRollData.mode !== "normal" && attackRollData.d2 !== undefined ? (
+                                  <span>
+                                    Dice: [
+                                    <strong className="text-cyan-neon">{attackRollData.naturalRoll}</strong>,{" "}
+                                    <span className="line-through text-slate-500">{attackRollData.discardedDie}</span>
+                                    ] + {attackMod} = <strong className="text-cyan-neon text-sm">{attackRollData.total}</strong>
+                                  </span>
+                                ) : (
+                                  <span>
+                                    Die: [<strong className="text-cyan-neon">{attackRollData.naturalRoll}</strong>] + {attackMod} = <strong className="text-cyan-neon text-sm">{attackRollData.total}</strong>
+                                  </span>
+                                )}
+
+                                {attackRollData.isCrit && (
+                                  <span className="ml-1.5 font-bold text-amber-300 animate-pulse text-[10px] uppercase bg-amber-500/20 border border-amber-500/40 px-1 py-0.2 rounded inline-flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3" /> CRITICAL!
+                                  </span>
+                                )}
+                                {attackRollData.isFumble && (
+                                  <span className="ml-1.5 font-bold text-red-400 text-[10px] uppercase bg-red-950/40 border border-red-500/40 px-1 py-0.2 rounded">
+                                    FUMBLE (1)
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>
 
                         <div className="flex flex-col justify-between gap-1">
-                          <span className="text-[10px] text-muted-foreground uppercase">Tabletop Physical Roll Total</span>
+                          <span className="text-[10px] text-muted-foreground uppercase">Physical Tabletop Roll Entry</span>
                           <div className="flex items-center gap-2">
                             <input
                               type="number"
-                              placeholder="Final Roll Total"
+                              placeholder="Final Total"
                               value={manualAttackInput}
                               onChange={(e) => setManualAttackInput(e.target.value)}
                               className="w-28 rounded bg-black border border-slate-700 px-2 py-1 text-xs text-cyan-300 font-bold focus:outline-none focus:border-cyan-neon"
@@ -2081,31 +2111,65 @@ export function WeaponsStation({
                         </div>
                       </div>
 
+                      {/* Outcome Selection Buttons */}
                       {attackOutcome === "pending" && (
-                        <div className="grid grid-cols-2 gap-3 pt-2">
+                        <div className="grid grid-cols-3 gap-2 pt-2">
                           <button
                             onClick={() => completeAttack(currentHeatCost)}
-                            className="p-3 rounded border border-red-500/50 bg-red-500/10 text-red-400 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-red-500/20 cursor-pointer"
+                            className="p-3 rounded border border-red-500/50 bg-red-500/10 text-red-400 font-bold uppercase text-xs flex items-center justify-center gap-1.5 hover:bg-red-500/20 cursor-pointer"
                           >
                             <XCircle className="w-4 h-4" />
-                            Miss ({isOrdnance ? "Expend 1 Warhead" : `Add ${currentHeatCost} Heat`})
+                            Miss ({isOrdnance ? "1 Warhead" : `+${currentHeatCost} Heat`})
                           </button>
 
                           <button
-                            onClick={() => setAttackOutcome("hit")}
-                            className="p-3 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-emerald-500/30 cursor-pointer"
+                            onClick={() => {
+                              setAttackOutcome("hit")
+                              handleRollDigitalDamage(false)
+                            }}
+                            className="p-3 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 font-bold uppercase text-xs flex items-center justify-center gap-1.5 hover:bg-emerald-500/30 cursor-pointer"
                           >
                             <CheckCircle2 className="w-4 h-4" />
-                            Target Hit (Roll Damage)
+                            Target Hit
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setAttackOutcome("crit")
+                              handleRollDigitalDamage(true)
+                            }}
+                            className="p-3 rounded border border-amber-500/80 bg-amber-500/20 text-amber-300 font-bold uppercase text-xs flex items-center justify-center gap-1.5 hover:bg-amber-500/30 cursor-pointer shadow-[0_0_12px_rgba(245,158,11,0.25)] animate-pulse"
+                          >
+                            <Sparkles className="w-4 h-4 text-amber-400" />
+                            Critical Hit!
                           </button>
                         </div>
                       )}
 
-                      {attackOutcome === "hit" && (
-                        <div className="bg-emerald-950/30 border border-emerald-500/60 p-3.5 rounded flex flex-col gap-2.5">
-                          <span className="text-xs font-bold text-emerald-400 uppercase">
-                            Hit Confirmed! Report Damage to GM:
-                          </span>
+                      {/* Hit or Critical Damage Resolution Panel */}
+                      {(attackOutcome === "hit" || attackOutcome === "crit") && (
+                        <div className={`border p-3.5 rounded flex flex-col gap-2.5 ${
+                          attackOutcome === "crit"
+                            ? "bg-amber-950/30 border-amber-500/70 shadow-[0_0_20px_rgba(245,158,11,0.2)]"
+                            : "bg-emerald-950/30 border-emerald-500/60"
+                        }`}>
+                          <div className="flex items-center justify-between">
+                            <span className={`text-xs font-bold uppercase flex items-center gap-1.5 ${
+                              attackOutcome === "crit" ? "text-amber-300" : "text-emerald-400"
+                            }`}>
+                              {attackOutcome === "crit" ? (
+                                <>
+                                  <Sparkles className="w-4 h-4 text-amber-400" />
+                                  Critical Hit Confirmed! {shipConfig?.useBrutalCriticals ? "(Brutal Critical Formula Active)" : "(Standard 5e Critical)"}
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                  Hit Confirmed! Report Damage to GM:
+                                </>
+                              )}
+                            </span>
+                          </div>
                           
                           <div className="flex flex-col gap-1">
                             <span className="text-lg font-bold font-mono text-cyan-neon">
@@ -2119,18 +2183,19 @@ export function WeaponsStation({
                           </div>
 
                           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/60 p-2.5 rounded border border-slate-700">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <button
                                 type="button"
-                                onClick={handleRollDigitalDamage}
+                                onClick={() => handleRollDigitalDamage(attackOutcome === "crit")}
                                 className="px-3 py-1.5 rounded border border-cyan-neon/40 bg-cyan-neon/10 hover:bg-cyan-neon/25 text-cyan-neon text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition"
                               >
                                 <Dices className="w-4 h-4" />
                                 Roll Damage
                               </button>
-                              {digitalDamageResult && (
+
+                              {damageRollData && (
                                 <span className="text-xs font-mono font-bold text-cyan-neon">
-                                  [{digitalDamageResult.rolls.join(" + ")}]{dynamicFlat !== 0 ? ` ${dynamicFlat >= 0 ? `+ ${dynamicFlat}` : `- ${Math.abs(dynamicFlat)}`}` : ""} = <strong className="text-emerald-400 text-sm">{digitalDamageResult.total}</strong>
+                                  {damageRollData.breakdownString}
                                 </span>
                               )}
                             </div>
@@ -2144,14 +2209,22 @@ export function WeaponsStation({
                                 placeholder="Damage"
                                 value={manualDamageInput}
                                 onChange={(e) => setManualDamageInput(e.target.value)}
-                                className="w-24 rounded bg-black border border-slate-700 px-2 py-1 text-xs text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
+                                className={`w-24 rounded bg-black border px-2 py-1 text-xs font-bold focus:outline-none ${
+                                  attackOutcome === "crit"
+                                    ? "border-amber-500/70 text-amber-300 focus:border-amber-400"
+                                    : "border-slate-700 text-emerald-300 focus:border-emerald-500"
+                                }`}
                               />
                             </div>
                           </div>
 
                           <button
                             onClick={() => completeAttack(currentHeatCost)}
-                            className="mt-2 w-full py-2 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 text-xs font-bold uppercase tracking-wider hover:bg-emerald-500/30 cursor-pointer"
+                            className={`mt-2 w-full py-2 rounded border text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                              attackOutcome === "crit"
+                                ? "border-amber-500/70 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.25)]"
+                                : "border-emerald-500/60 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+                            }`}
                           >
                             Complete Attack ({isOrdnance ? "-1 Warhead" : `+${currentHeatCost} Heat`})
                           </button>
@@ -2186,7 +2259,10 @@ export function WeaponsStation({
                           </button>
 
                           <button
-                            onClick={() => setAttackOutcome("failed")}
+                            onClick={() => {
+                              setAttackOutcome("failed")
+                              handleRollDigitalDamage(false)
+                            }}
                             className="p-3 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-emerald-500/30 cursor-pointer"
                           >
                             Target Failed (Roll Damage)
@@ -2206,18 +2282,18 @@ export function WeaponsStation({
                           </div>
 
                           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/60 p-2.5 rounded border border-slate-700">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <button
                                 type="button"
-                                onClick={handleRollDigitalDamage}
+                                onClick={() => handleRollDigitalDamage(false)}
                                 className="px-3 py-1.5 rounded border border-cyan-neon/40 bg-cyan-neon/10 hover:bg-cyan-neon/25 text-cyan-neon text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition"
                               >
                                 <Dices className="w-4 h-4" />
                                 Roll Damage
                               </button>
-                              {digitalDamageResult && (
+                              {damageRollData && (
                                 <span className="text-xs font-mono font-bold text-cyan-neon">
-                                  [{digitalDamageResult.rolls.join(" + ")}]{dynamicFlat !== 0 ? ` ${dynamicFlat >= 0 ? `+ ${dynamicFlat}` : `- ${Math.abs(dynamicFlat)}`}` : ""} = <strong className="text-emerald-400 text-sm">{digitalDamageResult.total}</strong>
+                                  {damageRollData.breakdownString}
                                 </span>
                               )}
                             </div>

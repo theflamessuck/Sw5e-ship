@@ -15,6 +15,7 @@ import { NavcomputerStation, type JourneyData } from "./navcomputer-station"
 import { FinanceStation, type Transaction } from "./finance-station"
 import { EngineeringStation, type RechargeResultPayload } from "./engineering-station"
 import { GmStation, type SensorContact, type CombatTurnState, type EnemyShip } from "./gm-station"
+import { SuitesStation } from "./suites-station"
 import { ShipSetup, type ShipConfig } from "./ship-setup"
 import { SHIP_SIZE_RULES, SHIP_TYPE_RULES, ShipSize } from "@/lib/ship-rules"
 import { STARSHIP_AMMUNITION } from "@/lib/starship-weapons"
@@ -39,6 +40,7 @@ export type ShipStationId =
 export type ShipCompartmentId =
   | ShipStationId
   | `turret-${string}`
+  | `suite-${string}`
   | "crew_quarters"
   | "passenger_lounge"
   | "cargo_bay"
@@ -53,6 +55,7 @@ export type CrewRoleTitle =
   | "Sensor Officer"
   | "Weapons Officer"
   | "Gunner"
+  | "Suite Specialist"
   | "Support"
   | "Off Duty"
   | "Passenger"
@@ -91,6 +94,10 @@ export function getCrewRole(
 
   if (member.location.startsWith("turret-")) {
     return "Gunner"
+  }
+
+  if (member.location.startsWith("suite-")) {
+    return "Suite Specialist"
   }
 
   const stationmates = allMembers
@@ -1785,6 +1792,7 @@ export default function BridgeDashboard() {
               onSelect={setActive}
               isBlackout={isLevel6Blackout}
               manifest={manifest}
+              installedSuites={installedSuites}
             />
             <main className="min-w-0 flex-1 relative">
               {isLevel6Blackout && active !== "GM Station" ? (
@@ -2132,6 +2140,14 @@ export default function BridgeDashboard() {
                   }
                   manifest={manifest}
                   onAssignCrew={handleAssignLocation}
+                  onToggleTurn={handleToggleTurnTaken}
+                />
+              ) : active === "Suites" ? (
+                <SuitesStation
+                  shipConfig={effectiveShipConfig}
+                  installedSuites={installedSuites}
+                  manifest={manifest}
+                  onAssignLocation={handleAssignLocation}
                   onToggleTurn={handleToggleTurnTaken}
                 />
               ) : active === "Ship Modifications" ? (

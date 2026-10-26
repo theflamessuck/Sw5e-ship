@@ -48,11 +48,20 @@ import {
 } from "lucide-react"
 import type { ActiveStatus } from "./defense-station"
 import type { ManifestMember } from "./bridge-dashboard"
+import type { ShipConfig } from "./ship-setup"
 import {
   DEFAULT_NPC_SHIP_BESTIARY,
   type NpcAction,
   type NpcShipStatblock
 } from "@/lib/data/npc-ship-bestiary"
+import {
+  rollAttackD20,
+  rollDamage,
+  resolveAdvantageMode,
+  type RollAdvantageMode,
+  type AttackRollResult,
+  type DamageRollBreakdown
+} from "@/lib/combat-roller"
 
 export type { NpcAction, NpcShipStatblock }
 
@@ -131,6 +140,7 @@ interface GmStationProps {
   onUpdateSystemDamageLevel?: (level: number | ((prev: number) => number)) => void
   availablePowerDice?: number
   maxPowerDice?: number
+  shipConfig?: ShipConfig
   combatState?: CombatTurnState
   onUpdateCombatState?: (
     updater:
@@ -151,28 +161,6 @@ type StatKey = typeof STAT_KEYS[number]
 function getStatMod(score?: number): number {
   if (score === undefined) return 0
   return Math.floor((score - 10) / 2)
-}
-
-function rollDiceExpression(expr: string): { total: number; rolls: number[]; modifier: number } {
-  const clean = expr.replace(/\s+/g, "").toLowerCase()
-  const match = clean.match(/^(\d+)d(\d+)([+-]\d+)?/)
-  if (!match) {
-    const rawVal = parseInt(clean, 10) || 0
-    return { total: rawVal, rolls: [rawVal], modifier: 0 }
-  }
-
-  const count = parseInt(match[1], 10)
-  const sides = parseInt(match[2], 10)
-  const mod = match[3] ? parseInt(match[3], 10) : 0
-
-  const rolls: number[] = []
-  let sum = 0
-  for (let i = 0; i < count; i++) {
-    const r = Math.floor(Math.random() * sides) + 1
-    rolls.push(r)
-    sum += r
-  }
-  return { total: Math.max(0, sum + mod), rolls, modifier: mod }
 }
 
 function computeSaveModifier(statblock: NpcShipStatblock, stat: StatKey): { mod: number; isProficient: boolean } {
@@ -221,6 +209,7 @@ export function GmStation({
   onUpdateSystemDamageLevel,
   availablePowerDice = 4,
   maxPowerDice = 4,
+  shipConfig,
   combatState,
   onUpdateCombatState,
   onCombatStateChange,
@@ -255,13 +244,18 @@ export function GmStation({
   const manualPlayerInitOverride = combatState?.manualPlayerInitOverride ?? null
   const playerShipOrderTie = combatState?.playerShipOrderTie || 0
   const playerShipHasActed = combatState?.playerShipHasActed || false
-
-  // Fallback MUST be false so round 1 cannot advance without a reactor cycle
   const hasCycledReactorThisRound = combatState?.hasCycledReactorThisRound ?? false
 
   const [isCrewExpanded, setIsCrewExpanded] = useState<boolean>(true)
   const [selectedSaveStat, setSelectedSaveStat] = useState<StatKey>("dex")
   const [rowSaveStatMap, setRowSaveStatMap] = useState<Record<string, StatKey>>({})
+
+  // Advantage mode toggles for attacks/saves
+  const [globalAdvantageMode, setGlobalAdvantageMode] = useState<RollAdvantageMode>("normal")
+  const [rowAdvantageMap, setRowAdvantageMap] = useState<Record<string, RollAdvantageMode>>({})
+
+  // Global Brutal Criticals preference fallback
+  const isBrutalCriticals = Boolean(shipConfig?.useBrutalCriticals)
 
   const [lastDiceResult, setLastDiceResult] = useState<{
     shipName: string
@@ -449,7 +443,6 @@ export function GmStation({
 
   const isInCombat = enemyShips.length > 0
 
-  // Check whether every active, non-disabled ship has taken its turn
   const isRoundFinished = useMemo(() => {
     if (!isInCombat || shipQueue.length === 0) return false
     const activeCandidates = shipQueue.filter((s) => !s.isDisabled && !s.isExploded)
@@ -565,54 +558,88 @@ export function GmStation({
     }
   }
 
-  const handleRollToHit = (shipName: string, action: NpcAction) => {
+  // --- AUTOMATED ATTACK ROLLER USING COMBAT-ROLLER ---
+  const handleRollToHit = (shipId: string, shipName: string, action: NpcAction, overrideMode?: RollAdvantageMode) => {
     const bonus = action.attackBonus ?? 0
-    const d20 = Math.floor(Math.random() * 20) + 1
-    const total = d20 + bonus
-    const isCrit = d20 === 20
-    const isFumble = d20 === 1
+    const mode = overrideMode || rowAdvantageMap[shipId] || globalAdvantageMode
+
+    const attackRes = rollAttackD20({
+      modifier: bonus,
+      mode,
+      critThreshold: 20,
+    })
+
+    const rollBreakdown =
+      attackRes.mode !== "normal" && attackRes.d2 !== undefined
+        ? `[Dice: ${attackRes.naturalRoll}, discarded ${attackRes.discardedDie}] + ${bonus}`
+        : `[d20: ${attackRes.naturalRoll}] + [bonus: ${bonus}]`
 
     setLastDiceResult({
       shipName,
       actionName: action.name,
       type: "Hit",
-      rollText: isCrit ? `NAT 20 CRITICAL! (${total})` : isFumble ? `NAT 1 FUMBLE! (${total})` : `${total} TO HIT`,
-      detail: `[d20: ${d20}] + [bonus: ${bonus}] = ${total}`,
-      isCrit,
-      isFumble,
+      rollText: attackRes.isCrit
+        ? `NAT 20 CRITICAL! (${attackRes.total})`
+        : attackRes.isFumble
+        ? `NAT 1 FUMBLE! (${attackRes.total})`
+        : `${attackRes.total} TO HIT`,
+      detail: `${rollBreakdown} = ${attackRes.total}${mode !== "normal" ? ` (${mode.toUpperCase()})` : ""}`,
+      isCrit: attackRes.isCrit,
+      isFumble: attackRes.isFumble,
     })
   }
 
-  const handleRollDamage = (shipName: string, action: NpcAction) => {
+  // --- AUTOMATED DAMAGE ROLLER WITH BRUTAL CRITICAL SUPPORT ---
+  const handleRollDamage = (shipName: string, action: NpcAction, isCrit: boolean = false) => {
     if (!action.damage) return
-    const res = rollDiceExpression(action.damage)
+
+    const dmgRes = rollDamage({
+      formula: action.damage,
+      isCrit,
+      useBrutalCriticals: isBrutalCriticals,
+    })
+
     const typeStr = action.damageType ? ` ${action.damageType}` : ""
 
     setLastDiceResult({
       shipName,
-      actionName: action.name,
+      actionName: `${action.name}${isCrit ? " (CRIT)" : ""}`,
       type: "Damage",
-      rollText: `${res.total}${typeStr}`,
-      detail: `Dice: [${res.rolls.join(" + ")}]${res.modifier ? ` ${res.modifier >= 0 ? `+ ${res.modifier}` : `- ${Math.abs(res.modifier)}`}` : ""}`,
+      rollText: `${dmgRes.totalDamage}${typeStr}${isCrit ? " ★ CRIT" : ""}`,
+      detail: `${dmgRes.breakdownString}${dmgRes.isBrutalCrit ? " [BRUTAL CRIT]" : ""}`,
+      isCrit,
     })
   }
 
-  const handleRollSavingThrow = (shipName: string, statblock: NpcShipStatblock, stat: StatKey) => {
+  // --- AUTOMATED SAVING THROW ROLLER ---
+  const handleRollSavingThrow = (shipName: string, statblock: NpcShipStatblock, stat: StatKey, overrideMode?: RollAdvantageMode) => {
     const { mod, isProficient } = computeSaveModifier(statblock, stat)
-    const d20 = Math.floor(Math.random() * 20) + 1
-    const total = d20 + mod
-    const isCrit = d20 === 20
-    const isFumble = d20 === 1
+    const mode = overrideMode || globalAdvantageMode
+
+    const saveRes = rollAttackD20({
+      modifier: mod,
+      mode,
+      critThreshold: 20,
+    })
 
     const statLabel = stat.toUpperCase()
+    const rollBreakdown =
+      saveRes.mode !== "normal" && saveRes.d2 !== undefined
+        ? `[Dice: ${saveRes.naturalRoll}, discarded ${saveRes.discardedDie}] + ${mod >= 0 ? `+${mod}` : mod}`
+        : `[d20: ${saveRes.naturalRoll}] + [${statLabel} ${isProficient ? "Prof" : "Mod"}: ${mod >= 0 ? `+${mod}` : mod}]`
+
     setLastDiceResult({
       shipName,
       actionName: `${statLabel} Save`,
       type: "Save",
-      rollText: isCrit ? `NAT 20! Total: ${total}` : isFumble ? `NAT 1! Total: ${total}` : `Save Total: ${total}`,
-      detail: `[d20: ${d20}] + [${statLabel} ${isProficient ? "Prof" : "Mod"}: ${mod >= 0 ? `+${mod}` : mod}]`,
-      isCrit,
-      isFumble,
+      rollText: saveRes.isCrit
+        ? `NAT 20! Total: ${saveRes.total}`
+        : saveRes.isFumble
+        ? `NAT 1! Total: ${saveRes.total}`
+        : `Save Total: ${saveRes.total}`,
+      detail: `${rollBreakdown} = ${saveRes.total}${mode !== "normal" ? ` (${mode.toUpperCase()})` : ""}`,
+      isCrit: saveRes.isCrit,
+      isFumble: saveRes.isFumble,
     })
   }
 
@@ -684,9 +711,7 @@ export function GmStation({
     })
   }, [bestiaryList, managerTierFilter, managerSearchQuery])
 
-  // Turn advance: Enforces round lock before any wrap-around occurs
   const handleNextTurnCycle = () => {
-    // 1. If every active ship has acted this round, we must verify reactor cycle before Round advances
     if (isRoundFinished) {
       if (!hasCycledReactorThisRound) {
         alert(`Round ${combatRound} Complete: Engineering or the GM must Cycle the Reactor before Round ${combatRound + 1} can begin!`)
@@ -696,7 +721,6 @@ export function GmStation({
       return
     }
 
-    // 2. Otherwise find the next ship in queue that hasn't acted yet
     const nextShip = shipQueue.find((s) => !s.hasTakenTurn && !s.isDisabled && !s.isExploded)
     if (nextShip) {
       if (nextShip.isPlayerShip) {
@@ -708,7 +732,6 @@ export function GmStation({
         onUpdateCombatState?.({ enemyShips: updated })
       }
     } else {
-      // 3. Fallback check if queue exhausted
       if (!hasCycledReactorThisRound) {
         alert(`Round ${combatRound} Complete: Engineering or the GM must Cycle the Reactor before Round ${combatRound + 1} can begin!`)
         return
@@ -759,7 +782,7 @@ export function GmStation({
     onUpdateCombatState?.({
       round: nextRound,
       playerShipHasActed: false,
-      hasCycledReactorThisRound: false, // New round requires a fresh reactor cycle at its completion
+      hasCycledReactorThisRound: false,
       enemyShips: resetEnemies,
     })
   }
@@ -1088,37 +1111,54 @@ export function GmStation({
             >
               {isInCombat ? "STATUS: COMBAT" : "STATUS: PATROL / STANDBY"}
             </span>
-            <span className="text-[10px] tracking-[0.2em] text-muted-foreground/60 hidden sm:inline">
-              ENCRYPTED GM CONSOLE // BESTIARY &amp; INITIATIVE DIRECTOR
-            </span>
+            {isBrutalCriticals && (
+              <span className="rounded px-2 py-0.5 text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                <Flame className="h-3 w-3 text-amber-400" />
+                BRUTAL CRITS ACTIVE
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Turn HUD & Round Director */}
+        {/* Global Roller Stance & Round Director */}
         <div className="flex items-center gap-2 flex-wrap">
-          {isInCombat && (
-            <div className="flex items-center gap-2 bg-black/70 border border-rose-500/50 rounded px-2.5 py-1 text-xs">
-              <div className="flex flex-col">
-                <span className="text-[8px] text-muted-foreground uppercase">Active Turn:</span>
-                <span className="font-bold text-amber-300 text-xs truncate max-w-[120px] sm:max-w-[160px]">
-                  {isRoundFinished && !hasCycledReactorThisRound ? (
-                    <span className="text-amber-400 font-extrabold flex items-center gap-1">
-                      <Lock className="h-3 w-3" /> Awaiting Reactor Cycle
-                    </span>
-                  ) : (
-                    activeTurnShip?.name || "All Non-Disabled Acted"
-                  )}
-                </span>
-              </div>
-              <span className="text-slate-600">|</span>
-              <div className="flex flex-col">
-                <span className="text-[8px] text-muted-foreground uppercase">On Deck:</span>
-                <span className="font-bold text-cyan-300 text-xs truncate max-w-[100px] sm:max-w-[140px]">
-                  {nextTurnShip?.name || "—"}
-                </span>
-              </div>
-            </div>
-          )}
+          {/* Global Roll Stance Selector */}
+          <div className="flex items-center gap-1 bg-black/70 border border-slate-700 rounded p-0.5 text-[9px] font-bold uppercase">
+            <span className="text-muted-foreground px-1">Roll Stance:</span>
+            <button
+              type="button"
+              onClick={() => setGlobalAdvantageMode("advantage")}
+              className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
+                globalAdvantageMode === "advantage"
+                  ? "bg-purple-500 text-white shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              Adv
+            </button>
+            <button
+              type="button"
+              onClick={() => setGlobalAdvantageMode("normal")}
+              className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
+                globalAdvantageMode === "normal"
+                  ? "bg-slate-700 text-white shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              Norm
+            </button>
+            <button
+              type="button"
+              onClick={() => setGlobalAdvantageMode("disadvantage")}
+              className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
+                globalAdvantageMode === "disadvantage"
+                  ? "bg-amber-500 text-black shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              Dis
+            </button>
+          </div>
 
           <span
             className={`rounded-sm border px-3 py-1 text-[10px] font-bold tracking-[0.2em] animate-pulse ${
@@ -1179,7 +1219,7 @@ export function GmStation({
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={`font-black text-sm tracking-wider font-mono ${
                   lastDiceResult.isCrit
-                    ? "text-emerald-400 animate-pulse text-base"
+                    ? "text-amber-300 animate-pulse text-base"
                     : lastDiceResult.isFumble
                     ? "text-rose-500 font-bold"
                     : "text-amber-300 font-bold text-base"
@@ -1432,6 +1472,7 @@ export function GmStation({
             }
 
             const activeRowStat = rowSaveStatMap[ship.id] || "dex"
+            const rowAdvMode = rowAdvantageMap[ship.id] || globalAdvantageMode
 
             return (
               <div
@@ -1526,6 +1567,42 @@ export function GmStation({
                   </div>
 
                   <div className="flex items-center gap-2 self-end sm:self-center">
+                    {/* Row Stance Selector */}
+                    {!ship.isDisabled && (
+                      <div className="flex items-center gap-0.5 bg-black/70 border border-slate-700 rounded p-0.5 text-[8px] font-bold uppercase">
+                        <button
+                          type="button"
+                          onClick={() => setRowAdvantageMap((prev) => ({ ...prev, [ship.id]: "advantage" }))}
+                          className={`px-1 py-0.2 rounded transition cursor-pointer ${
+                            rowAdvMode === "advantage" ? "bg-purple-500 text-white" : "text-slate-400 hover:text-white"
+                          }`}
+                          title="Advantage on attacks/saves"
+                        >
+                          Adv
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRowAdvantageMap((prev) => ({ ...prev, [ship.id]: "normal" }))}
+                          className={`px-1 py-0.2 rounded transition cursor-pointer ${
+                            rowAdvMode === "normal" ? "bg-slate-700 text-white" : "text-slate-400 hover:text-white"
+                          }`}
+                          title="Normal roll"
+                        >
+                          Norm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRowAdvantageMap((prev) => ({ ...prev, [ship.id]: "disadvantage" }))}
+                          className={`px-1 py-0.2 rounded transition cursor-pointer ${
+                            rowAdvMode === "disadvantage" ? "bg-amber-500 text-black" : "text-slate-400 hover:text-white"
+                          }`}
+                          title="Disadvantage on attacks/saves"
+                        >
+                          Dis
+                        </button>
+                      </div>
+                    )}
+
                     {ship.statblock && (
                       <button
                         type="button"
@@ -1697,7 +1774,7 @@ export function GmStation({
                   </div>
                 </div>
 
-                {/* Inline Action Bar */}
+                {/* Inline Action Bar with Attack & Damage buttons */}
                 {ship.statblock && !ship.isDisabled && (
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
                     {ship.statblock.actions && ship.statblock.actions.length > 0 && (
@@ -1711,22 +1788,32 @@ export function GmStation({
                             {act.attackBonus !== undefined && (
                               <button
                                 type="button"
-                                onClick={() => handleRollToHit(ship.name, act)}
+                                onClick={() => handleRollToHit(ship.id, ship.name, act)}
                                 className="px-1.5 py-0.2 rounded bg-cyan-950 border border-cyan-neon/50 text-cyan-300 hover:bg-cyan-900 font-bold uppercase cursor-pointer"
-                                title={`Roll 1d20 + ${act.attackBonus}`}
+                                title={`Roll 1d20 + ${act.attackBonus} (${rowAdvMode})`}
                               >
                                 +{act.attackBonus} Hit
                               </button>
                             )}
                             {act.damage && (
-                              <button
-                                type="button"
-                                onClick={() => handleRollDamage(ship.name, act)}
-                                className="px-1.5 py-0.2 rounded bg-amber-950 border border-amber-500/50 text-amber-300 hover:bg-amber-900 font-bold uppercase cursor-pointer"
-                                title={`Roll ${act.damage}`}
-                              >
-                                Dmg
-                              </button>
+                              <div className="flex items-center gap-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRollDamage(ship.name, act, false)}
+                                  className="px-1.5 py-0.2 rounded bg-amber-950 border border-amber-500/50 text-amber-300 hover:bg-amber-900 font-bold uppercase cursor-pointer"
+                                  title={`Roll normal damage ${act.damage}`}
+                                >
+                                  Dmg
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRollDamage(ship.name, act, true)}
+                                  className="px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-400 text-amber-200 hover:bg-amber-500/30 font-bold uppercase cursor-pointer text-[8px]"
+                                  title="Roll critical hit damage"
+                                >
+                                  Crit
+                                </button>
+                              </div>
                             )}
                           </div>
                         ))}
@@ -1753,7 +1840,7 @@ export function GmStation({
                       </select>
                       <button
                         type="button"
-                        onClick={() => handleRollSavingThrow(ship.name, ship.statblock!, activeRowStat)}
+                        onClick={() => handleRollSavingThrow(ship.name, ship.statblock!, activeRowStat, rowAdvMode)}
                         className="px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-500/60 text-amber-300 hover:bg-amber-500/30 font-bold uppercase text-[9px] cursor-pointer"
                         title="Roll Saving Throw"
                       >
@@ -2066,7 +2153,7 @@ export function GmStation({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Ship / Squadron Base Name"
-                className="flex-1 rounded border border-bridge-border bg-black/40 px-2.5 py-1.5 text-amber-200 placeholder:text-muted-foreground/40 focus:border-amber-500 focus:outline-none text-xs"
+                className="flex-1 min-w-[140px] rounded border border-bridge-border bg-black/40 px-2.5 py-1.5 text-amber-200 placeholder:text-muted-foreground/40 focus:border-amber-500 focus:outline-none text-xs"
                 required
               />
               <div className="flex items-center gap-1 bg-black/60 border border-slate-700 px-2 rounded" title="Number of ships to deploy as a wing">
@@ -2718,7 +2805,7 @@ export function GmStation({
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className={`font-black text-sm tracking-wider font-mono ${
                           lastDiceResult.isCrit
-                            ? "text-emerald-400 animate-pulse text-base"
+                            ? "text-amber-300 animate-pulse text-base"
                             : lastDiceResult.isFumble
                             ? "text-rose-500 font-bold"
                             : "text-amber-300 font-bold text-base"
@@ -2741,7 +2828,7 @@ export function GmStation({
                 </div>
               )}
 
-              {/* Defense & Motive bar with direct health adjustments */}
+              {/* Defense & Motive bar */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 py-1 text-slate-200 border-b border-amber-500/40">
                 <div>
                   <span className="text-[10px] uppercase font-bold text-amber-300 block">Armor Class</span>
@@ -2858,11 +2945,11 @@ export function GmStation({
 
                   <button
                     type="button"
-                    onClick={() => handleRollSavingThrow(statblock.name, statblock, selectedSaveStat)}
+                    onClick={() => handleRollSavingThrow(statblock.name, statblock, selectedSaveStat, globalAdvantageMode)}
                     className="px-3 py-1 rounded bg-amber-500/20 border border-amber-500/60 text-amber-300 hover:bg-amber-500/30 font-bold uppercase text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition"
                   >
                     <Dices className="h-3.5 w-3.5" />
-                    Roll Save
+                    Roll Save ({globalAdvantageMode.toUpperCase()})
                   </button>
 
                   {maxLegendaryResistances > 0 && shipId && (
@@ -2917,7 +3004,7 @@ export function GmStation({
                 </div>
               )}
 
-              {/* Actions with Interactive Dice Rolling Buttons */}
+              {/* Actions with Attack & Damage buttons */}
               <div className="flex flex-col gap-2.5">
                 <h4 className="text-xs sm:text-sm font-bold text-amber-400 uppercase border-b border-amber-500/30 pb-0.5 tracking-wider">
                   Actions
@@ -2930,24 +3017,35 @@ export function GmStation({
                         {act.attackBonus !== undefined && (
                           <button
                             type="button"
-                            onClick={() => handleRollToHit(statblock.name, act)}
+                            onClick={() => handleRollToHit(shipId || "inspect", statblock.name, act, globalAdvantageMode)}
                             className="px-2 py-0.5 rounded bg-cyan-950 border border-cyan-neon/60 text-cyan-300 hover:bg-cyan-900 font-bold uppercase text-[10px] flex items-center gap-1 cursor-pointer shadow-sm"
-                            title={`Roll 1d20 + ${act.attackBonus}`}
+                            title={`Roll 1d20 + ${act.attackBonus} (${globalAdvantageMode})`}
                           >
                             <Dices className="h-3 w-3" />
                             Roll To Hit (+{act.attackBonus})
                           </button>
                         )}
                         {act.damage && (
-                          <button
-                            type="button"
-                            onClick={() => handleRollDamage(statblock.name, act)}
-                            className="px-2 py-0.5 rounded bg-amber-950 border border-amber-500/60 text-amber-300 hover:bg-amber-900 font-bold uppercase text-[10px] flex items-center gap-1 cursor-pointer shadow-sm"
-                            title={`Roll ${act.damage}`}
-                          >
-                            <Target className="h-3 w-3" />
-                            Roll Dmg ({act.damage})
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleRollDamage(statblock.name, act, false)}
+                              className="px-2 py-0.5 rounded bg-amber-950 border border-amber-500/60 text-amber-300 hover:bg-amber-900 font-bold uppercase text-[10px] flex items-center gap-1 cursor-pointer shadow-sm"
+                              title={`Roll damage ${act.damage}`}
+                            >
+                              <Target className="h-3 w-3" />
+                              Dmg
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRollDamage(statblock.name, act, true)}
+                              className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400 text-amber-200 hover:bg-amber-500/30 font-bold uppercase text-[9px] flex items-center gap-0.5 cursor-pointer shadow-sm"
+                              title="Roll critical damage"
+                            >
+                              <Sparkles className="h-3 w-3 text-amber-300" />
+                              Crit
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>

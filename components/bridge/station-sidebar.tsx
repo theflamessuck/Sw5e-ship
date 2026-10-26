@@ -19,9 +19,11 @@ import {
   CheckCircle2,
   Clock,
   UserCheck,
+  Layers,
   type LucideIcon,
 } from "lucide-react"
 import type { ManifestMember, ShipCompartmentId } from "./bridge-dashboard"
+import type { InstalledSuite } from "./ship-modifications"
 
 export type Station =
   | "Ship Setup"
@@ -36,6 +38,7 @@ export type Station =
   | "Sensors"
   | "Cargo"
   | "Finance"
+  | "Suites"
   | "GM Station"
   | "Codex"
 
@@ -58,6 +61,7 @@ const PRIMARY_STATIONS: StationItem[] = [
 // 2. Logistics & Utility
 const UTILITY_STATIONS: StationItem[] = [
   { id: "Navcomputer", icon: Cpu, code: "NAV" },
+  { id: "Suites", icon: Layers, code: "STE" },
   { id: "Cargo", icon: Package, code: "CRG" },
   { id: "Finance", icon: Coins, code: "FIN" },
   { id: "Codex", icon: BookOpen, code: "CDX" },
@@ -70,9 +74,21 @@ const SETUP_STATIONS: StationItem[] = [
   { id: "Ship Modifications", icon: Wrench, code: "MOD" },
 ]
 
-function formatCompartmentName(loc: ShipCompartmentId): string {
-  if (loc.startsWith("turret-")) {
+function formatCompartmentName(
+  loc: ShipCompartmentId,
+  installedSuites: InstalledSuite[] = []
+): string {
+  if (typeof loc === "string" && loc.startsWith("turret-")) {
     return "Turret"
+  }
+  if (typeof loc === "string" && loc.startsWith("suite-")) {
+    const suiteId = loc.replace("suite-", "")
+    const foundSuite = installedSuites.find((s) => s.id === suiteId)
+    if (foundSuite) {
+      return `Suite: ${foundSuite.name}`
+    }
+    const suiteName = suiteId.replace(/[-_]/g, " ")
+    return `Suite: ${suiteName.charAt(0).toUpperCase() + suiteName.slice(1)}`
   }
   switch (loc) {
     case "helm":
@@ -105,11 +121,13 @@ export function StationSidebar({
   onSelect,
   isBlackout = false,
   manifest = [],
+  installedSuites = [],
 }: {
   active: Station
   onSelect: (station: Station) => void
   isBlackout?: boolean
   manifest?: ManifestMember[]
+  installedSuites?: InstalledSuite[]
 }) {
   const handleStationClick = (id: Station) => {
     if (id === "GM Station") {
@@ -158,6 +176,10 @@ export function StationSidebar({
         return manifest.some((m) => m.location === "defense" && !m.isPassenger)
       case "Sensors":
         return manifest.some((m) => m.location === "sensors" && !m.isPassenger)
+      case "Suites":
+        return manifest.some(
+          (m) => typeof m.location === "string" && m.location.startsWith("suite-") && !m.isPassenger
+        )
       default:
         return false
     }
@@ -320,7 +342,7 @@ export function StationSidebar({
         ) : (
           <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto pr-1">
             {playerCharacters.map((pc) => {
-              const locationLabel = formatCompartmentName(pc.location)
+              const locationLabel = formatCompartmentName(pc.location, installedSuites)
               const hasTakenTurn = pc.hasTakenTurnThisRound
 
               return (

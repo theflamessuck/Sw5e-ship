@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo, useEffect } from "react"
-import { Shield, Heart, Zap, Check, Rocket, Cpu, Award, AlertTriangle, AlertOctagon, Power, ArrowUpCircle, Dices, Crosshair, Sparkles, Wind, Info } from "lucide-react"
+import { Shield, Heart, Zap, Check, Rocket, Cpu, Award, AlertTriangle, AlertOctagon, Power, ArrowUpCircle, Dices, Crosshair, Sparkles, Wind, Info, Flame, Settings } from "lucide-react"
 import { 
   SHIP_SIZE_RULES, 
   SHIP_TYPE_RULES, 
@@ -149,6 +149,8 @@ export interface ShipConfig {
   paragonSnubfighter?: ParagonSnubfighter | null
   paragonTransportStats?: string[] | null
   extraSuiteCapacity?: number
+  // Homebrew Rules
+  useBrutalCriticals?: boolean
   stats: {
     strength: number
     dexterity: number
@@ -268,6 +270,7 @@ const DEFAULT_CONFIG: ShipConfig = {
   paragonSnubfighter: null,
   paragonTransportStats: [],
   extraSuiteCapacity: 0,
+  useBrutalCriticals: false,
   stats: { strength: 8, dexterity: 8, constitution: 8, intelligence: 8, wisdom: 8, charisma: 8 },
   tierStatBoosts: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
   tierAsiHistory: {},
@@ -932,6 +935,7 @@ export function ShipSetup({
       paragonSnubfighter: initialConfig?.paragonSnubfighter ?? null,
       paragonTransportStats: initialConfig?.paragonTransportStats ?? [],
       extraSuiteCapacity: initialConfig?.extraSuiteCapacity ?? 0,
+      useBrutalCriticals: initialConfig?.useBrutalCriticals ?? DEFAULT_CONFIG.useBrutalCriticals,
       baseHull: calcBaseHull,
       baseShields: calcBaseShields,
       maxShields: calcMaxShields,
@@ -958,6 +962,7 @@ export function ShipSetup({
         paragonSnubfighter: initialConfig.paragonSnubfighter ?? null,
         paragonTransportStats: initialConfig.paragonTransportStats ?? [],
         extraSuiteCapacity: initialConfig.extraSuiteCapacity ?? 0,
+        useBrutalCriticals: initialConfig.useBrutalCriticals !== undefined ? initialConfig.useBrutalCriticals : (prev.useBrutalCriticals ?? false),
       }))
     }
   }, [initialConfig])
@@ -1173,7 +1178,8 @@ export function ShipSetup({
         baseShields: computedBaseShields,
         maxShields: computedMaxShields,
         savingThrows: computedSavingThrows,
-        skills: computedSkills
+        skills: computedSkills,
+        useBrutalCriticals: config.useBrutalCriticals ?? false,
       }
 
       setConfig(nextConfig)
@@ -1238,7 +1244,8 @@ export function ShipSetup({
       baseShields: computedBaseShields,
       maxShields: computedMaxShields,
       savingThrows: computedSavingThrows,
-      skills: computedSkills
+      skills: computedSkills,
+      useBrutalCriticals: config.useBrutalCriticals ?? false,
     }
 
     setConfig(nextConfig)
@@ -1317,6 +1324,13 @@ export function ShipSetup({
     })
   }
 
+  const handleToggleBrutalCriticals = () => {
+    setConfig(prev => ({
+      ...prev,
+      useBrutalCriticals: !prev.useBrutalCriticals
+    }))
+  }
+
   const handleApplyRecommendedDefaults = () => {
     if (!activeTypeRules) return
     setConfig(prev => ({
@@ -1353,7 +1367,8 @@ export function ShipSetup({
       baseShields: computedBaseShields,
       maxShields: computedMaxShields,
       savingThrows: computedSavingThrows, 
-      skills: computedSkills 
+      skills: computedSkills,
+      useBrutalCriticals: Boolean(config.useBrutalCriticals),
     }
     onSaveConfig(finalConfig)
     setSavedMessage(true)
@@ -1655,6 +1670,89 @@ export function ShipSetup({
               )}
             </div>
           )}
+        </section>
+
+        {/* HOMEBREW & HOUSE RULES SECTION */}
+        <section className="rounded-md border border-amber-500/50 bg-bridge-panel p-4 shadow-[0_0_15px_rgba(245,158,11,0.06)]">
+          <div className="flex items-center justify-between border-b border-bridge-border/60 pb-3 mb-4">
+            <h3 className="text-xs font-bold tracking-[0.2em] text-amber-400 uppercase flex items-center gap-2 font-mono">
+              <Settings className="w-4 h-4 text-amber-400" /> Homebrew &amp; House Rule Matrices
+            </h3>
+            <span className="text-[10px] tracking-widest font-mono text-amber-300/80 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded uppercase">
+              CAMPAIGN OVERRIDES
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Brutal Criticals Toggle Card */}
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={handleToggleBrutalCriticals}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  handleToggleBrutalCriticals()
+                }
+              }}
+              className={`p-4 rounded border transition-all cursor-pointer select-none ${
+                config.useBrutalCriticals 
+                  ? "bg-amber-950/30 border-amber-500/80 shadow-[0_0_15px_rgba(245,158,11,0.2)]" 
+                  : "bg-black/40 border-bridge-border/60 hover:border-amber-500/40 hover:bg-black/60"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className={`p-2 rounded border mt-0.5 shrink-0 ${
+                    config.useBrutalCriticals 
+                      ? "bg-amber-500/20 border-amber-400 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.3)]" 
+                      : "bg-black/60 border-bridge-border text-slate-500"
+                  }`}>
+                    <Flame className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-100 font-mono">
+                        Brutal Critical Hits
+                      </span>
+                      <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border uppercase ${
+                        config.useBrutalCriticals 
+                          ? "bg-amber-500/20 text-amber-300 border-amber-500/40" 
+                          : "bg-slate-900 border-slate-700 text-slate-500"
+                      }`}>
+                        {config.useBrutalCriticals ? "HOMEBREW ACTIVE" : "STANDARD 5E (OFF)"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 font-mono mt-1 leading-relaxed">
+                      {config.useBrutalCriticals ? (
+                        <>
+                          <strong className="text-amber-300">Homebrew Active:</strong> All base damage dice are maximized, plus all damage dice are rolled again and added, then flat ability modifiers are applied. <span className="text-amber-200/80 italic">(e.g. 3d6 + 3 becomes 18 + 3d6 + 3)</span>.
+                        </>
+                      ) : (
+                        <>
+                          <strong className="text-slate-400">Standard 5e Rules:</strong> Roll all weapon damage dice twice, then add flat ability modifiers. <span className="text-slate-400/80 italic">(e.g. 3d6 + 3 becomes 6d6 + 3)</span>.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="shrink-0 pt-0.5">
+                  <span
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      config.useBrutalCriticals ? "bg-amber-500" : "bg-neutral-800"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        config.useBrutalCriticals ? "translate-x-6" : "translate-x-1"
+                      }`}
+                    />
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
         {/* CORE ATTRIBUTES SECTION */}

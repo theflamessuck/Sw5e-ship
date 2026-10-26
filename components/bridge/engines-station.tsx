@@ -44,8 +44,16 @@ import {
   ShieldAlert,
   ShieldCheck,
   Swords,
-  Target
+  Target,
+  Sparkles
 } from "lucide-react"
+import {
+  rollAttackD20,
+  rollDamage,
+  resolveAdvantageMode,
+  type AttackRollResult,
+  type DamageRollBreakdown
+} from "@/lib/combat-roller"
 
 type FlightEnvironment = "Space" | "Atmosphere" | "Underwater"
 type TransponderMode = "PRIMARY" | "SECURE_BACKUP"
@@ -77,24 +85,6 @@ function findArmedAmmoCatalog(launcherState: LauncherLoadState | null) {
     STARSHIP_AMMUNITION.find((a) => a.name.toLowerCase() === (launcherState.ordnanceName || "").toLowerCase()) ||
     null
   )
-}
-
-function rollDiceFormula(formula: string): { individualRolls: number[]; totalDice: number } {
-  const matches = [...formula.matchAll(/(\d+)d(\d+)/g)]
-  const rolls: number[] = []
-  let total = 0
-
-  matches.forEach((m) => {
-    const count = parseInt(m[1], 10)
-    const sides = parseInt(m[2], 10)
-    for (let i = 0; i < count; i++) {
-      const roll = Math.floor(Math.random() * sides) + 1
-      rolls.push(roll)
-      total += roll
-    }
-  })
-
-  return { individualRolls: rolls, totalDice: total }
 }
 
 interface PilotAction {
@@ -301,10 +291,8 @@ export function EnginesStation({
   const [forcedStartupSafety, setForcedStartupSafety] = useState(false)
   const [awayMissionDaysInput, setAwayMissionDaysInput] = useState<string>("7")
 
-  // Helm Firing Mode Selector: Standard (Disadv), Attack Run (150ft moved, straight), Dogfight (Maneuver opposed, straight)
   const [helmAttackType, setHelmAttackType] = useState<HelmAttackType>("standard")
 
-  // Crew assignment extraction
   const assignedCrew = useMemo(() => {
     return manifest
       .filter((m) => m.location === "helm" && !m.isPassenger)
@@ -324,9 +312,6 @@ export function EnginesStation({
     else setInternalSFoilsMode(newMode)
   }
 
-  // =========================================================================
-  // PILOT WEAPONS FILTER & SYNCHRONIZATION
-  // =========================================================================
   const isTurretMounted = (w: Modification): boolean => {
     if (w.mountedOnInstanceId) {
       const parent = installedMods.find((m) => m.instanceId === w.mountedOnInstanceId || m.id === w.mountedOnInstanceId)
@@ -342,7 +327,6 @@ export function EnginesStation({
     return manifest.find((m) => m.location === turretCompartmentId && !m.isPassenger) || null
   }
 
-  // Forward facing limited arc: Bow-mounted OR unmanned turrets (excluding structural hardpoints)
   const forwardWeapons = useMemo(() => {
     return installedMods.filter((mod) => {
       if (mod.name === "Fixed Hardpoint" || mod.name === "Turret Hardpoint") return false
@@ -454,7 +438,6 @@ export function EnginesStation({
     }))
   }
 
-  // Combat Stat Modifiers
   const specialization = shipConfig?.roleSpecialization
   const isAttackFighter = specialization === "Attack Fighter"
   const isBomber = specialization === "Bomber"
@@ -531,9 +514,9 @@ export function EnginesStation({
   const [toggleMelt, setToggleMelt] = useState<boolean>(false)
   const [toggleDire, setToggleDire] = useState<boolean>(false)
   
-  const [digitalRoll, setDigitalRoll] = useState<number | null>(null)
-  const [digitalRollPair, setDigitalRollPair] = useState<[number, number] | null>(null)
-  const [digitalDamageResult, setDigitalDamageResult] = useState<{ rolls: number[]; total: number } | null>(null)
+  // Roller states
+  const [attackRollData, setAttackRollData] = useState<AttackRollResult | null>(null)
+  const [damageRollData, setDamageRollData] = useState<DamageRollBreakdown | null>(null)
   const [manualAttackInput, setManualAttackInput] = useState<string>("")
   const [manualDamageInput, setManualDamageInput] = useState<string>("")
   const [attackOutcome, setAttackOutcome] = useState<"pending" | "hit" | "crit" | "miss" | "saved" | "failed">("pending")
@@ -546,9 +529,8 @@ export function EnginesStation({
     setTogglePiercing(false)
     setToggleMelt(false)
     setToggleDire(false)
-    setDigitalRoll(null)
-    setDigitalRollPair(null)
-    setDigitalDamageResult(null)
+    setAttackRollData(null)
+    setDamageRollData(null)
     setManualAttackInput("")
     setManualDamageInput("")
     setAttackOutcome("pending")
@@ -610,9 +592,8 @@ export function EnginesStation({
     setTogglePiercing(false)
     setToggleMelt(false)
     setToggleDire(false)
-    setDigitalRoll(null)
-    setDigitalRollPair(null)
-    setDigitalDamageResult(null)
+    setAttackRollData(null)
+    setDamageRollData(null)
     setManualAttackInput("")
     setManualDamageInput("")
     setAttackOutcome("pending")
@@ -1583,21 +1564,21 @@ export function EnginesStation({
           <div className="text-[10px] font-mono px-2.5 py-1.5 rounded bg-black/60 border border-bridge-border/60">
             {helmAttackType === "standard" && (
               <span className="text-amber-300">
-                ⚠️ <strong>Helm Standard Fire:</strong> Firing from the helm without an Attack Run or Dogfight imposes disadvantage on the attack roll.
+                ⚠️ <strong>Helm Standard Fire:</strong> Firing from the helm without an Attack Run or Dogfight imposes disadvantage on the attack roll[cite: 9].
               </span>
             )}
             {helmAttackType === "attack_run" && (
               <span className={tacticalMovement.spentFeet >= 150 ? "text-cyan-300" : "text-amber-400 font-bold"}>
                 {tacticalMovement.spentFeet >= 150 ? (
-                  <>✓ <strong>Attack Run Ready:</strong> 150+ ft forward movement completed. Weapon attack made without normal helm disadvantage.</>
+                  <>✓ <strong>Attack Run Ready:</strong> 150+ ft forward movement completed. Weapon attack made without normal helm disadvantage[cite: 9].</>
                 ) : (
-                  <>⚠️ <strong>Attack Run Blocked:</strong> Requires at least 150 ft forward movement towards target in unobstructed space (Currently spent: {tacticalMovement.spentFeet} ft).</>
+                  <>⚠️ <strong>Attack Run Blocked:</strong> Requires at least 150 ft forward movement towards target in unobstructed space (Currently spent: {tacticalMovement.spentFeet} ft)[cite: 9].</>
                 )}
               </span>
             )}
             {helmAttackType === "dogfight" && (
               <span className="text-purple-300">
-                ★ <strong>Dogfight Maneuver:</strong> Make an opposed Dexterity (Maneuvering) check. If successful, notify GM that the target has disadvantage on its next attack against your ship. Fire without normal helm disadvantage.
+                ★ <strong>Dogfight Maneuver:</strong> Make an opposed Dexterity (Maneuvering) check. If successful, notify GM that the target has disadvantage on its next attack against your ship[cite: 9]. Fire without normal helm disadvantage[cite: 9].
               </span>
             )}
           </div>
@@ -2307,11 +2288,9 @@ export function EnginesStation({
         const hasSaturate = props.some((p: string) => p.includes("saturate"))
         const keenProp = props.find((p: string) => p.includes("keen"))
         const keenRating = keenProp ? parseInt(keenProp.replace(/[^0-9]/g, ""), 10) || 1 : 0
-        const critThreshold = 20 - keenRating
+        const critThreshold = Math.max(1, 20 - keenRating)
 
-        const heavyDmgBonus = hasHeavy ? Math.max(1, Math.ceil(strMod / 2)) : 0
         const baseAttackAbilityMod = hasSaturate ? Math.max(strMod, wisMod) : wisMod
-
         const sFoilsAtkDelta = hasSFoils && !isOrdnance ? (activeSFoilsMode === "locked" ? -2 : 1) : 0
         let attackMod = baseAttackAbilityMod + (isAttackFighter ? 1 : 0) + sFoilsAtkDelta
 
@@ -2340,8 +2319,9 @@ export function EnginesStation({
 
         // Disadvantage evaluation: Helm Standard Fire imposes disadvantage unless Attack Run or Dogfight is selected
         const isHelmDisadvantage = helmAttackType === "standard"
-        const hasDisadvConditions = rangeBracket === "long" || failsCon || (effectiveSlowedLevel >= 3) || isHelmDisadvantage
-        const isDisadvantageRoll = hasDisadvConditions
+        const hasDisadvantage = rangeBracket === "long" || failsCon || (effectiveSlowedLevel >= 3) || isHelmDisadvantage
+        const hasAdvantage = false // Forward arc defaults to false unless external advantage applies
+        const netRollMode = resolveAdvantageMode(hasAdvantage, hasDisadvantage)
 
         const currentHeatCost = firingMode === "rapid" ? rapidRating : firingMode === "burst" ? burstRating : 1
         const hasSufficientHeat = isOrdnance ? (launcherState && launcherState.loadedCount > 0) : remainingHeadroom >= currentHeatCost
@@ -2375,14 +2355,42 @@ export function EnginesStation({
         if (dynamicFlat > 0) finalDmgFormula = `${diceString} + ${dynamicFlat}`
         else if (dynamicFlat < 0) finalDmgFormula = `${diceString} - ${Math.abs(dynamicFlat)}`
 
-        const handleRollDigitalDamage = () => {
-          const { individualRolls, totalDice } = rollDiceFormula(diceString)
-          const finalTotal = Math.max(1, totalDice + dynamicFlat)
-          setDigitalDamageResult({
-            rolls: individualRolls,
-            total: finalTotal,
+        // Centralized Digital Attack Roll
+        const handleRollDigitalAttack = () => {
+          const res = rollAttackD20({
+            modifier: attackMod,
+            mode: netRollMode,
+            critThreshold,
           })
-          setManualDamageInput(finalTotal.toString())
+          setAttackRollData(res)
+          setManualAttackInput(res.total.toString())
+
+          if (res.isCrit) {
+            setAttackOutcome("crit")
+            const dmgRes = rollDamage({
+              formula: diceString,
+              isCrit: true,
+              useBrutalCriticals: Boolean(shipConfig?.useBrutalCriticals),
+              additionalBonus: dynamicFlat,
+            })
+            setDamageRollData(dmgRes)
+            setManualDamageInput(dmgRes.totalDamage.toString())
+          } else if (res.isFumble) {
+            setAttackOutcome("miss")
+          }
+        }
+
+        // Centralized Digital Damage Roll
+        const handleRollDigitalDamage = (forceCrit?: boolean) => {
+          const isCrit = forceCrit !== undefined ? forceCrit : (attackOutcome === "crit" || attackRollData?.isCrit === true)
+          const dmgRes = rollDamage({
+            formula: diceString,
+            isCrit,
+            useBrutalCriticals: Boolean(shipConfig?.useBrutalCriticals),
+            additionalBonus: dynamicFlat,
+          })
+          setDamageRollData(dmgRes)
+          setManualDamageInput(dmgRes.totalDamage.toString())
         }
 
         return (
@@ -2414,17 +2422,17 @@ export function EnginesStation({
               {/* Tactical Mode Context Alert Banner */}
               {isHelmDisadvantage && (
                 <div className="p-2 rounded bg-amber-950/40 border border-amber-500/50 text-[10px] text-amber-300">
-                  ⚠️ Firing from the Helm without an Attack Run or Dogfight imposes disadvantage on the attack roll.
+                  ⚠️ Firing from the Helm without an Attack Run or Dogfight imposes disadvantage on the attack roll[cite: 9].
                 </div>
               )}
               {helmAttackType === "attack_run" && (
                 <div className="p-2 rounded bg-cyan-950/40 border border-cyan-neon/50 text-[10px] text-cyan-300">
-                  ✓ Attack Run: 150+ ft forward movement completed. Disadvantage removed.
+                  ✓ Attack Run: 150+ ft forward movement completed. Disadvantage removed[cite: 9].
                 </div>
               )}
               {helmAttackType === "dogfight" && (
                 <div className="p-2 rounded bg-purple-950/40 border border-purple-500/50 text-[10px] text-purple-300">
-                  ★ Dogfight: Disadvantage removed. On a successful Maneuvering check, notify GM that target has disadvantage on their next attack.
+                  ★ Dogfight: Disadvantage removed[cite: 9]. On a successful Maneuvering check, notify GM that target has disadvantage on their next attack[cite: 9].
                 </div>
               )}
 
@@ -2647,9 +2655,14 @@ export function EnginesStation({
                             <span className="text-xl font-bold text-cyan-neon font-mono">
                               1d20{attackMod >= 0 ? `+${attackMod}` : attackMod} to Hit
                             </span>
-                            {isDisadvantageRoll && (
+                            {netRollMode === "disadvantage" && (
                               <span className="text-[9px] font-bold text-amber-400 block mt-0.5">
                                 [DISADVANTAGE ACTIVE: Roll 2d20, keep lower]
+                              </span>
+                            )}
+                            {netRollMode === "advantage" && (
+                              <span className="text-[9px] font-bold text-purple-300 block mt-0.5">
+                                [ADVANTAGE ACTIVE: Roll 2d20, keep higher]
                               </span>
                             )}
                           </div>
@@ -2665,29 +2678,42 @@ export function EnginesStation({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2.5 rounded bg-black/40 border border-bridge-border">
                         <div className="flex flex-col justify-between gap-1 border-b sm:border-b-0 sm:border-r border-bridge-border/60 pb-2 sm:pb-0 sm:pr-2">
                           <span className="text-[10px] text-muted-foreground uppercase">Digital Dice Roll</span>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <button
                               type="button"
-                              onClick={() => {
-                                const r1 = Math.floor(Math.random() * 20) + 1
-                                const r2 = Math.floor(Math.random() * 20) + 1
-                                if (isDisadvantageRoll) {
-                                  setDigitalRollPair([r1, r2])
-                                  setDigitalRoll(Math.min(r1, r2))
-                                } else {
-                                  setDigitalRollPair(null)
-                                  setDigitalRoll(r1)
-                                }
-                              }}
+                              onClick={handleRollDigitalAttack}
                               className="px-2.5 py-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 text-cyan-neon text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-cyan-neon/20 cursor-pointer"
                             >
                               <Dices className="w-3.5 h-3.5" />
                               Roll d20
                             </button>
-                            {digitalRoll !== null && (
-                              <span className="text-xs font-mono font-bold text-cyan-neon">
-                                [{digitalRoll}] + {attackMod} = <strong>{digitalRoll + attackMod}</strong>
-                              </span>
+
+                            {attackRollData && (
+                              <div className="text-xs font-mono">
+                                {attackRollData.mode !== "normal" && attackRollData.d2 !== undefined ? (
+                                  <span>
+                                    Dice: [
+                                    <strong className="text-cyan-neon">{attackRollData.naturalRoll}</strong>,{" "}
+                                    <span className="line-through text-slate-500">{attackRollData.discardedDie}</span>
+                                    ] + {attackMod} = <strong className="text-cyan-neon text-sm">{attackRollData.total}</strong>
+                                  </span>
+                                ) : (
+                                  <span>
+                                    Die: [<strong className="text-cyan-neon">{attackRollData.naturalRoll}</strong>] + {attackMod} = <strong className="text-cyan-neon text-sm">{attackRollData.total}</strong>
+                                  </span>
+                                )}
+
+                                {attackRollData.isCrit && (
+                                  <span className="ml-1.5 font-bold text-amber-300 animate-pulse text-[10px] uppercase bg-amber-500/20 border border-amber-500/40 px-1 py-0.2 rounded inline-flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3" /> CRITICAL!
+                                  </span>
+                                )}
+                                {attackRollData.isFumble && (
+                                  <span className="ml-1.5 font-bold text-red-400 text-[10px] uppercase bg-red-950/40 border border-red-500/40 px-1 py-0.2 rounded">
+                                    FUMBLE (1)
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>
@@ -2705,7 +2731,7 @@ export function EnginesStation({
                       </div>
 
                       {attackOutcome === "pending" && (
-                        <div className="grid grid-cols-2 gap-3 pt-2">
+                        <div className="grid grid-cols-3 gap-2 pt-2">
                           <button
                             onClick={() => completeAttack(currentHeatCost)}
                             className="p-3 rounded border border-red-500/50 bg-red-500/10 text-red-400 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-red-500/20 cursor-pointer"
@@ -2715,20 +2741,52 @@ export function EnginesStation({
                           </button>
 
                           <button
-                            onClick={() => setAttackOutcome("hit")}
+                            onClick={() => {
+                              setAttackOutcome("hit")
+                              handleRollDigitalDamage(false)
+                            }}
                             className="p-3 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-emerald-500/30 cursor-pointer"
                           >
                             <CheckCircle2 className="w-4 h-4" />
-                            Target Hit (Roll Damage)
+                            Target Hit
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setAttackOutcome("crit")
+                              handleRollDigitalDamage(true)
+                            }}
+                            className="p-3 rounded border border-amber-500/80 bg-amber-500/20 text-amber-300 font-bold uppercase text-xs flex items-center justify-center gap-1.5 hover:bg-amber-500/30 cursor-pointer shadow-[0_0_12px_rgba(245,158,11,0.25)] animate-pulse"
+                          >
+                            <Sparkles className="w-4 h-4 text-amber-400" />
+                            Critical Hit!
                           </button>
                         </div>
                       )}
 
-                      {attackOutcome === "hit" && (
-                        <div className="bg-emerald-950/30 border border-emerald-500/60 p-3.5 rounded flex flex-col gap-2.5">
-                          <span className="text-xs font-bold text-emerald-400 uppercase">
-                            Hit Confirmed! Report Damage to GM:
-                          </span>
+                      {(attackOutcome === "hit" || attackOutcome === "crit") && (
+                        <div className={`border p-3.5 rounded flex flex-col gap-2.5 ${
+                          attackOutcome === "crit"
+                            ? "bg-amber-950/30 border-amber-500/70 shadow-[0_0_20px_rgba(245,158,11,0.2)]"
+                            : "bg-emerald-950/30 border-emerald-500/60"
+                        }`}>
+                          <div className="flex items-center justify-between">
+                            <span className={`text-xs font-bold uppercase flex items-center gap-1.5 ${
+                              attackOutcome === "crit" ? "text-amber-300" : "text-emerald-400"
+                            }`}>
+                              {attackOutcome === "crit" ? (
+                                <>
+                                  <Sparkles className="w-4 h-4 text-amber-400" />
+                                  Critical Hit Confirmed! {shipConfig?.useBrutalCriticals ? "(Brutal Critical Formula Active)" : "(Standard 5e Critical)"}
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                  Hit Confirmed! Report Damage to GM:
+                                </>
+                              )}
+                            </span>
+                          </div>
                           
                           <div className="flex flex-col gap-1">
                             <span className="text-lg font-bold font-mono text-cyan-neon">
@@ -2737,18 +2795,18 @@ export function EnginesStation({
                           </div>
 
                           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/60 p-2.5 rounded border border-slate-700">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <button
                                 type="button"
-                                onClick={handleRollDigitalDamage}
+                                onClick={() => handleRollDigitalDamage(attackOutcome === "crit")}
                                 className="px-3 py-1.5 rounded border border-cyan-neon/40 bg-cyan-neon/10 hover:bg-cyan-neon/25 text-cyan-neon text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition"
                               >
                                 <Dices className="w-4 h-4" />
                                 Roll Damage
                               </button>
-                              {digitalDamageResult && (
+                              {damageRollData && (
                                 <span className="text-xs font-mono font-bold text-cyan-neon">
-                                  [{digitalDamageResult.rolls.join(" + ")}]{dynamicFlat !== 0 ? ` ${dynamicFlat >= 0 ? `+ ${dynamicFlat}` : `- ${Math.abs(dynamicFlat)}`}` : ""} = <strong className="text-emerald-400 text-sm">{digitalDamageResult.total}</strong>
+                                  {damageRollData.breakdownString}
                                 </span>
                               )}
                             </div>
@@ -2759,14 +2817,22 @@ export function EnginesStation({
                                 placeholder="Damage"
                                 value={manualDamageInput}
                                 onChange={(e) => setManualDamageInput(e.target.value)}
-                                className="w-24 rounded bg-black border border-slate-700 px-2 py-1 text-xs text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
+                                className={`w-24 rounded bg-black border px-2 py-1 text-xs font-bold focus:outline-none ${
+                                  attackOutcome === "crit"
+                                    ? "border-amber-500/70 text-amber-300 focus:border-amber-400"
+                                    : "border-slate-700 text-emerald-300 focus:border-emerald-500"
+                                }`}
                               />
                             </div>
                           </div>
 
                           <button
                             onClick={() => completeAttack(currentHeatCost)}
-                            className="mt-2 w-full py-2 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 text-xs font-bold uppercase tracking-wider hover:bg-emerald-500/30 cursor-pointer"
+                            className={`mt-2 w-full py-2 rounded border text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                              attackOutcome === "crit"
+                                ? "border-amber-500/70 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.25)]"
+                                : "border-emerald-500/60 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+                            }`}
                           >
                             Complete Attack ({isOrdnance ? "-1 Warhead" : `+${currentHeatCost} Heat`})
                           </button>
@@ -2798,7 +2864,10 @@ export function EnginesStation({
                           </button>
 
                           <button
-                            onClick={() => setAttackOutcome("failed")}
+                            onClick={() => {
+                              setAttackOutcome("failed")
+                              handleRollDigitalDamage(false)
+                            }}
                             className="p-3 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-emerald-500/30 cursor-pointer"
                           >
                             Target Failed (Roll Damage)
@@ -2818,18 +2887,18 @@ export function EnginesStation({
                           </div>
 
                           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/60 p-2.5 rounded border border-slate-700">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <button
                                 type="button"
-                                onClick={handleRollDigitalDamage}
+                                onClick={() => handleRollDigitalDamage(false)}
                                 className="px-3 py-1.5 rounded border border-cyan-neon/40 bg-cyan-neon/10 hover:bg-cyan-neon/25 text-cyan-neon text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition"
                               >
                                 <Dices className="w-4 h-4" />
                                 Roll Damage
                               </button>
-                              {digitalDamageResult && (
+                              {damageRollData && (
                                 <span className="text-xs font-mono font-bold text-cyan-neon">
-                                  [{digitalDamageResult.rolls.join(" + ")}]{dynamicFlat !== 0 ? ` ${dynamicFlat >= 0 ? `+ ${dynamicFlat}` : `- ${Math.abs(dynamicFlat)}`}` : ""} = <strong className="text-emerald-400 text-sm">{digitalDamageResult.total}</strong>
+                                  {damageRollData.breakdownString}
                                 </span>
                               )}
                             </div>
@@ -2911,7 +2980,7 @@ export function EnginesStation({
 
             <div className="flex justify-between items-center text-xs">
               <span className="text-slate-300">
-                Chassis Warm-Up: <strong className="text-amber-300">{normalStartupTime}</strong>
+                Chassis Warm-Up: <strong className="text-amber-300">{normalStartupTime}</strong>[cite: 9]
               </span>
               <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${
                 duressCondition === "advantage"
@@ -2920,7 +2989,7 @@ export function EnginesStation({
                   ? "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse"
                   : "bg-cyan-neon/10 text-cyan-neon border-cyan-neon/40"
               }`}>
-                Repair: {duressCondition.toUpperCase()} ({currentHull}/{maxHull} HP)
+                Repair: {duressCondition.toUpperCase()} ({currentHull}/{maxHull} HP)[cite: 9]
               </span>
             </div>
 
