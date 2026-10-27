@@ -11,6 +11,7 @@ import {
   type PlanetRecord,
   type GalacticRegion,
 } from "@/lib/travel-matrix"
+import { Rocket, Clock, CheckCircle2, Navigation, Compass } from "lucide-react"
 
 export interface JourneyData {
   origin: string
@@ -99,7 +100,6 @@ export function NavcomputerStation({
   const hasBackupHyperdrive = Boolean(installedBackupHyperdrive)
   const hasHyperdrive = hasPrimaryHyperdrive || hasBackupHyperdrive
 
-  // Primary Hyperdrive rating parsed from mod name (defaults to 1.0)
   const primaryClass = useMemo(() => {
     if (!installedHyperdrive) return 1.0
     const match = installedHyperdrive.name.match(/class\s*([0-9]+(?:\.[0-9]+)?)/i)
@@ -112,7 +112,6 @@ export function NavcomputerStation({
   const [useBackupHyperdrive, setUseBackupHyperdrive] = useState<boolean>(false)
   const [activeHyperdriveClass, setActiveHyperdriveClass] = useState<number>(primaryClass)
 
-  // Automatically fall back to primary if backup drive is uninstalled
   useEffect(() => {
     if (!hasBackupHyperdrive && useBackupHyperdrive) {
       setUseBackupHyperdrive(false)
@@ -199,7 +198,66 @@ export function NavcomputerStation({
   }, [])
 
   // -------------------------------------------------------------
-  // 3. SYSTEM & SECTOR DIRECTORY MODAL
+  // 3. INTRA-SYSTEM SUBLIGHT FLIGHT (1d12 HOURS REALSPACE)
+  // -------------------------------------------------------------
+  // Cache stores bidirectional planetary leg durations: e.g. "Corellia:Selonia" -> 5
+  const [systemTransitCache, setSystemTransitCache] = useState<Record<string, number>>({})
+  const [sublightArrivalLog, setSublightArrivalLog] = useState<string | null>(null)
+
+  const isIntraSystemFlight = useMemo(() => {
+    if (!selectedOrigin || !selectedDest) return false
+    if (selectedOrigin.name.toLowerCase() === selectedDest.name.toLowerCase()) return false
+    return (
+      Boolean(selectedOrigin.system) &&
+      Boolean(selectedDest.system) &&
+      selectedOrigin.system.trim().toLowerCase() === selectedDest.system.trim().toLowerCase()
+    )
+  }, [selectedOrigin, selectedDest])
+
+  // Get or roll the 1d12 sublight hours for this route
+  const sublightDurationHours = useMemo(() => {
+    if (!isIntraSystemFlight || !selectedOrigin || !selectedDest) return null
+
+    const p1 = selectedOrigin.name.toLowerCase()
+    const p2 = selectedDest.name.toLowerCase()
+    const legKey = [p1, p2].sort().join(":")
+
+    if (systemTransitCache[legKey]) {
+      return systemTransitCache[legKey]
+    }
+
+    // Roll fresh 1d12
+    const rolledHours = Math.floor(Math.random() * 12) + 1
+    setSystemTransitCache((prev) => ({
+      ...prev,
+      [legKey]: rolledHours,
+    }))
+    return rolledHours
+  }, [isIntraSystemFlight, selectedOrigin, selectedDest, systemTransitCache])
+
+  const handleEngageSublightThrusters = () => {
+    if (!selectedDest || !sublightDurationHours) return
+
+    const destName = selectedDest.name
+    const hours = sublightDurationHours
+
+    // Update location directly
+    onUpdateCurrentLocationPlanet?.(destName)
+    onUpdateTargetDestinationPlanet?.("")
+    setSelectedDest(null)
+    setDestSearch("")
+
+    setSublightArrivalLog(
+      `Arrived at ${destName}! Sublight transit completed in ${hours} hour${hours > 1 ? "s" : ""} via realspace thrusters.`
+    )
+
+    setEquationsCompleted(0)
+    setLastRollResult(null)
+    setJumpResult(null)
+  }
+
+  // -------------------------------------------------------------
+  // 4. SYSTEM & SECTOR DIRECTORY MODAL
   // -------------------------------------------------------------
   const [directoryModal, setDirectoryModal] = useState<{
     open: boolean
@@ -243,7 +301,7 @@ export function NavcomputerStation({
   }
 
   // -------------------------------------------------------------
-  // 4. MID-TRIP REROUTE PROMPT (ASK DM REGION)
+  // 5. MID-TRIP REROUTE PROMPT (ASK DM REGION)
   // -------------------------------------------------------------
   const [rerouteModalOpen, setRerouteModalOpen] = useState<boolean>(false)
   const [selectedRerouteRegion, setSelectedRerouteRegion] = useState<GalacticRegion>("Outer Rim Territories")
@@ -282,7 +340,7 @@ export function NavcomputerStation({
   }
 
   // -------------------------------------------------------------
-  // 5. CALCULATION & MATRIX DURATION
+  // 6. CALCULATION & MATRIX DURATION
   // -------------------------------------------------------------
   const [modifierChoice, setModifierChoice] = useState<number>(0)
   const [equationsCompleted, setEquationsCompleted] = useState<number>(0)
@@ -311,7 +369,7 @@ export function NavcomputerStation({
   const totalAstrogationMod = astrogationSkillMod + modifierChoice
 
   const travelDuration = useMemo(() => {
-    if (!selectedOrigin || !selectedDest) return null
+    if (!selectedOrigin || !selectedDest || isIntraSystemFlight) return null
 
     const baseResult = calculateTravelTime(
       selectedOrigin.region,
@@ -345,10 +403,10 @@ export function NavcomputerStation({
       displayWeeks: `${weeks} wks`,
       combinedDisplay: `${adjustedHours} Hours (${days} Days / ${weeks} Weeks)`,
     }
-  }, [selectedOrigin, selectedDest, activeHyperdriveClass, modifierChoice])
+  }, [selectedOrigin, selectedDest, isIntraSystemFlight, activeHyperdriveClass, modifierChoice])
 
   // -------------------------------------------------------------
-  // 6. ASTROGATION ROLL RESOLUTION (ADVANTAGE / DISADVANTAGE)
+  // 7. ASTROGATION ROLL RESOLUTION
   // -------------------------------------------------------------
   const evaluateRoll = (total: number) => {
     if (total >= 30) return { successes: 5, label: "PERFECT (+5 Equations)" }
@@ -359,9 +417,8 @@ export function NavcomputerStation({
     return { successes: 0, label: "FAILURE (0 Equations)" }
   }
 
-  // Rolls d20 (with Advantage/Disadvantage) + Skill Mod + Parameter Mod (-5 / +0 / +5)
   const handlePerformCheck = () => {
-    if (!selectedOrigin || !selectedDest) return
+    if (!selectedOrigin || !selectedDest || isIntraSystemFlight) return
 
     let finalD20 = Math.floor(Math.random() * 20) + 1
     let rolledPair: [number, number] | null = null
@@ -395,10 +452,9 @@ export function NavcomputerStation({
     setEquationsCompleted((prev) => Math.min(targetEquations, prev + evaluation.successes))
   }
 
-  // Manual total entered directly by the player/GM
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedOrigin || !selectedDest) return
+    if (!selectedOrigin || !selectedDest || isIntraSystemFlight) return
 
     const parsedTotal = parseInt(customRollInput, 10)
     if (!isNaN(parsedTotal)) {
@@ -427,7 +483,7 @@ export function NavcomputerStation({
   }
 
   // -------------------------------------------------------------
-  // 7. ENGAGE HYPERDRIVE & ARRIVAL DROP-OUT
+  // 8. ENGAGE HYPERDRIVE & ARRIVAL DROP-OUT
   // -------------------------------------------------------------
   const handleEngageHyperdrive = () => {
     if (!hasHyperdrive) {
@@ -516,7 +572,6 @@ export function NavcomputerStation({
     })
   }
 
-  // Transit calculations
   const daysElapsed = activeJourney ? Math.max(0, currentDay - activeJourney.startDay) : 0
   const isArrived = activeJourney ? daysElapsed >= activeJourney.totalDays : false
   const progressPercent = activeJourney
@@ -553,7 +608,6 @@ export function NavcomputerStation({
             </div>
           )}
 
-          {/* Hyperdrive Switcher (Only visible if a Backup Hyperdrive is installed) */}
           {hasBackupHyperdrive && (
             <button
               type="button"
@@ -599,8 +653,25 @@ export function NavcomputerStation({
         </div>
       </div>
 
+      {/* SUBLIGHT ARRIVAL BANNER */}
+      {sublightArrivalLog && (
+        <section className="rounded-md border border-emerald-500/60 bg-emerald-950/30 p-3 shadow-[0_0_15px_rgba(52,211,153,0.2)] flex items-center justify-between font-mono text-xs">
+          <div className="flex items-center gap-2.5 text-emerald-300">
+            <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+            <span>{sublightArrivalLog}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSublightArrivalLog(null)}
+            className="text-slate-400 hover:text-white uppercase font-bold text-[10px] cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </section>
+      )}
+
       {/* NO HYPERDRIVE WARNING */}
-      {!hasHyperdrive && (
+      {!hasHyperdrive && !isIntraSystemFlight && (
         <section className="rounded-md border border-red-500/60 bg-red-950/30 p-3.5 shadow-[0_0_15px_rgba(239,68,68,0.2)]">
           <div className="flex items-center gap-2.5">
             <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
@@ -627,9 +698,13 @@ export function NavcomputerStation({
           </div>
 
           <div className="flex items-center gap-2 font-mono text-[9px]">
-            <span className="text-muted-foreground uppercase">Active Multiplier:</span>
-            <span className="rounded border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 font-bold text-amber-300">
-              Class {activeHyperdriveClass}
+            <span className="text-muted-foreground uppercase">Flight Regime:</span>
+            <span className={`rounded border px-2 py-0.5 font-bold uppercase ${
+              isIntraSystemFlight
+                ? "border-emerald-400/60 bg-emerald-950/40 text-emerald-300"
+                : "border-amber-400/40 bg-amber-500/10 text-amber-300"
+            }`}>
+              {isIntraSystemFlight ? "Sublight (Intra-System)" : `Class ${activeHyperdriveClass} Hyperdrive`}
             </span>
           </div>
         </div>
@@ -679,7 +754,6 @@ export function NavcomputerStation({
               )}
             </div>
 
-            {/* Current Origin Telemetry & Planet Directory Lookup */}
             {selectedOrigin && (
               <div className="mt-1 flex flex-col gap-1 text-[10px] font-mono text-slate-300 bg-black/50 p-2.5 rounded border border-bridge-border/40">
                 <div className="grid grid-cols-2 gap-1.5">
@@ -765,7 +839,6 @@ export function NavcomputerStation({
               )}
             </div>
 
-            {/* Destination Telemetry */}
             {selectedDest ? (
               <div className="mt-1 flex flex-col gap-1 text-[10px] font-mono text-slate-300 bg-black/50 p-2.5 rounded border border-bridge-border/40">
                 <div className="grid grid-cols-2 gap-1.5">
@@ -779,7 +852,9 @@ export function NavcomputerStation({
                   </div>
                   <div>
                     <span className="text-muted-foreground uppercase text-[8px] block">System</span>
-                    <strong className="text-white font-bold">{selectedDest.system}</strong>
+                    <strong className={isIntraSystemFlight ? "text-emerald-400 font-bold" : "text-white font-bold"}>
+                      {selectedDest.system} {isIntraSystemFlight ? "(SAME SYSTEM)" : ""}
+                    </strong>
                   </div>
                   <div>
                     <span className="text-muted-foreground uppercase text-[8px] block">Capital City</span>
@@ -795,43 +870,79 @@ export function NavcomputerStation({
           </div>
         </div>
 
-        {/* CONCURRENT ROUTE DURATION BREAKDOWN */}
-        {selectedOrigin && selectedDest && travelDuration && (
-          <div className="mt-4 p-3.5 rounded bg-black/70 border border-cyan-neon/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 font-mono">
-            <div>
-              <span className="text-[9px] uppercase tracking-wider text-muted-foreground block">
-                Calculated Transit Trajectory ({selectedOrigin.region} &rarr; {selectedDest.region})
-              </span>
-              <span className="text-sm font-bold text-cyan-neon">
-                {selectedOrigin.name} &rarr; {selectedDest.name}
-              </span>
-            </div>
+        {/* INTRA-SYSTEM SUBLIGHT CALLOUT OR FTL DURATION BREAKDOWN */}
+        {selectedOrigin && selectedDest && (
+          isIntraSystemFlight ? (
+            <div className="mt-4 p-4 rounded bg-emerald-950/30 border border-emerald-500/60 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 font-mono shadow-[0_0_15px_rgba(52,211,153,0.15)]">
+              <div>
+                <span className="text-[9px] uppercase tracking-wider text-emerald-400 font-bold block flex items-center gap-1.5">
+                  <Navigation className="h-3.5 w-3.5" />
+                  Intra-System Realspace Transit ({selectedOrigin.system} System)
+                </span>
+                <span className="text-sm font-bold text-white">
+                  {selectedOrigin.name} &rarr; {selectedDest.name}
+                </span>
+                <p className="text-[10px] text-slate-300 mt-1">
+                  Planets share the same solar system. Hyperdrive is not required; sublight thrusters can be engaged directly.
+                </p>
+              </div>
 
-            {travelDuration.isUnknown ? (
-              <div className="text-red-400 font-bold text-sm">
-                ⚠️ UNMAPPED OR EXTRAGALACTIC CORRIDOR (DURATION UNKNOWN)
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <span className="text-[9px] text-muted-foreground uppercase block">Sublight Flight Time</span>
+                  <span className="text-base font-bold text-emerald-300 flex items-center gap-1 font-mono">
+                    <Clock className="h-4 w-4 text-emerald-400" />
+                    {sublightDurationHours} Hour{sublightDurationHours && sublightDurationHours > 1 ? "s" : ""}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleEngageSublightThrusters}
+                  className="px-5 py-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-[0_0_12px_rgba(52,211,153,0.4)] flex items-center gap-2 cursor-pointer"
+                >
+                  <Rocket className="h-4 w-4" />
+                  Engage Thrusters (Instant Arrival)
+                </button>
               </div>
-            ) : (
-              <div className="flex items-center gap-4 flex-wrap">
-                <div className="flex flex-col text-right">
-                  <span className="text-[8px] uppercase tracking-wider text-muted-foreground">Hours</span>
-                  <span className="text-sm font-bold text-cyan-neon">{travelDuration.displayHours}</span>
-                </div>
-                <div className="flex flex-col text-right border-l border-bridge-border/40 pl-3">
-                  <span className="text-[8px] uppercase tracking-wider text-muted-foreground">Days</span>
-                  <span className="text-sm font-bold text-amber-300">{travelDuration.displayDays}</span>
-                </div>
-                <div className="flex flex-col text-right border-l border-bridge-border/40 pl-3">
-                  <span className="text-[8px] uppercase tracking-wider text-muted-foreground">Weeks</span>
-                  <span className="text-sm font-bold text-emerald-400">{travelDuration.displayWeeks}</span>
-                </div>
+            </div>
+          ) : travelDuration ? (
+            <div className="mt-4 p-3.5 rounded bg-black/70 border border-cyan-neon/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 font-mono">
+              <div>
+                <span className="text-[9px] uppercase tracking-wider text-muted-foreground block">
+                  Calculated Transit Trajectory ({selectedOrigin.region} &rarr; {selectedDest.region})
+                </span>
+                <span className="text-sm font-bold text-cyan-neon">
+                  {selectedOrigin.name} &rarr; {selectedDest.name}
+                </span>
               </div>
-            )}
-          </div>
+
+              {travelDuration.isUnknown ? (
+                <div className="text-red-400 font-bold text-sm">
+                  ⚠️ UNMAPPED OR EXTRAGALACTIC CORRIDOR (DURATION UNKNOWN)
+                </div>
+              ) : (
+                <div className="flex items-center gap-4 flex-wrap">
+                  <div className="flex flex-col text-right">
+                    <span className="text-[8px] uppercase tracking-wider text-muted-foreground">Hours</span>
+                    <span className="text-sm font-bold text-cyan-neon">{travelDuration.displayHours}</span>
+                  </div>
+                  <div className="flex flex-col text-right border-l border-bridge-border/40 pl-3">
+                    <span className="text-[8px] uppercase tracking-wider text-muted-foreground">Days</span>
+                    <span className="text-sm font-bold text-amber-300">{travelDuration.displayDays}</span>
+                  </div>
+                  <div className="flex flex-col text-right border-l border-bridge-border/40 pl-3">
+                    <span className="text-[8px] uppercase tracking-wider text-muted-foreground">Weeks</span>
+                    <span className="text-sm font-bold text-emerald-400">{travelDuration.displayWeeks}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null
         )}
       </section>
 
-      {/* ACTIVE HYPERSPACE TRANSIT STATUS (DIRECTLY BELOW ROUTE CALCULATOR) */}
+      {/* ACTIVE HYPERSPACE TRANSIT STATUS */}
       {activeJourney && (
         <section
           className={`rounded-md border p-4 font-mono ${
@@ -918,268 +1029,272 @@ export function NavcomputerStation({
         </section>
       )}
 
-      {/* EQUATION COMPLETION & ENGAGE HYPERDRIVE */}
-      <Panel title="Astrogation Calculation Status" code="NAV // EXECUTION">
-        <div className="flex flex-col gap-4 p-2">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-            <div className="flex-1 w-full">
-              <div className="flex justify-between items-end mb-2">
-                <div>
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
-                    Calculated Navigation Equations
-                  </span>
-                  <span className="text-2xl font-bold font-mono text-cyan-neon">
-                    {equationsCompleted} / {targetEquations}{" "}
-                    {equationsCompleted >= targetEquations ? "— READY FOR JUMP!" : ""}
-                  </span>
+      {/* EQUATION COMPLETION & ENGAGE HYPERDRIVE (ONLY FOR INTERSTELLAR FTL) */}
+      {!isIntraSystemFlight ? (
+        <Panel title="Astrogation Calculation Status" code="NAV // EXECUTION">
+          <div className="flex flex-col gap-4 p-2">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+              <div className="flex-1 w-full">
+                <div className="flex justify-between items-end mb-2">
+                  <div>
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">
+                      Calculated Navigation Equations
+                    </span>
+                    <span className="text-2xl font-bold font-mono text-cyan-neon">
+                      {equationsCompleted} / {targetEquations}{" "}
+                      {equationsCompleted >= targetEquations ? "— READY FOR JUMP!" : ""}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleResetComputer}
+                    className="rounded border border-bridge-border bg-black/40 px-3 py-1 text-[10px] text-muted-foreground hover:text-red-400 hover:border-red-500/40 cursor-pointer"
+                  >
+                    RESET COMPUTER
+                  </button>
                 </div>
+
+                <div className="h-3 w-full bg-slate-900 rounded-sm overflow-hidden border border-bridge-border/50">
+                  <div
+                    className={`h-full transition-all duration-300 ${
+                      equationsCompleted >= targetEquations
+                        ? "bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.6)]"
+                        : "bg-cyan-neon shadow-[0_0_8px_rgba(0,255,255,0.4)]"
+                    }`}
+                    style={{ width: `${Math.min(100, (equationsCompleted / targetEquations) * 100)}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="w-full md:w-auto">
                 <button
-                  onClick={handleResetComputer}
-                  className="rounded border border-bridge-border bg-black/40 px-3 py-1 text-[10px] text-muted-foreground hover:text-red-400 hover:border-red-500/40 cursor-pointer"
+                  onClick={handleEngageHyperdrive}
+                  disabled={!hasHyperdrive || !selectedOrigin || !selectedDest}
+                  title={!hasHyperdrive ? "No hyperdrive installed on this vessel" : undefined}
+                  className={`w-full md:w-auto px-6 py-3 rounded border font-bold text-xs tracking-wider shadow-lg transition-all cursor-pointer ${
+                    !hasHyperdrive || !selectedOrigin || !selectedDest
+                      ? "border-red-500/40 bg-red-950/20 text-red-400/60 cursor-not-allowed opacity-60"
+                      : equationsCompleted >= targetEquations
+                      ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.4)] animate-pulse"
+                      : "border-amber-400/60 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20 shadow-[0_0_10px_rgba(251,191,36,0.2)]"
+                  }`}
                 >
-                  RESET COMPUTER
+                  {!hasHyperdrive
+                    ? "ENGAGE HYPERDRIVE (NO DRIVE DETECTED)"
+                    : equationsCompleted >= targetEquations
+                    ? "ENGAGE HYPERDRIVE (OPTIMAL VECTOR)"
+                    : "ENGAGE HYPERDRIVE (INCOMPLETE EQUATIONS)"}
+                </button>
+              </div>
+            </div>
+
+            {jumpResult && (
+              <div
+                className={`mt-3 p-3 rounded border font-mono text-xs flex flex-col gap-1 ${
+                  jumpResult.type === "success"
+                    ? "bg-emerald-950/40 border-emerald-500/60 text-emerald-300"
+                    : jumpResult.type === "error"
+                    ? "bg-red-950/50 border-red-500/80 text-red-200"
+                    : "bg-red-950/40 border-red-500/60 text-red-300"
+                }`}
+              >
+                <div className="flex justify-between items-center font-bold">
+                  <span className="uppercase tracking-wider">
+                    {jumpResult.type === "success"
+                      ? "Hyperdrive Jump: Execution Successful"
+                      : jumpResult.type === "error"
+                      ? "Astrogation Terminal Error"
+                      : "Hyperdrive Mishap Detected"}
+                  </span>
+                  {jumpResult.roll !== undefined && (
+                    <span className="text-[10px] text-muted-foreground">
+                      Roll (d20: {jumpResult.roll}) + Equations ({jumpResult.mod}) ={" "}
+                      <strong className="text-white">{jumpResult.total}</strong>
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-white/90 mt-1">{jumpResult.message}</p>
+              </div>
+            )}
+          </div>
+        </Panel>
+      ) : null}
+
+      {/* ROUTING PARAMETERS & ROLL SIMULATOR (ONLY FOR INTERSTELLAR FTL) */}
+      {!isIntraSystemFlight && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col justify-between">
+            <div>
+              <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase mb-2 border-b border-bridge-border/60 pb-1">
+                Routing Parameter Adjustments
+              </h3>
+              <p className="text-[10px] text-muted-foreground mb-3">
+                Apply tactical modifiers to hasten travel time or secure safer astrogation calculations.
+              </p>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModifierChoice(-5)}
+                  className={`rounded border p-2 text-left flex flex-col justify-between transition-colors cursor-pointer ${
+                    modifierChoice === -5
+                      ? "border-amber-400 bg-amber-400/10 text-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.3)]"
+                      : "border-bridge-border bg-black/40 text-muted-foreground hover:text-cyan-neon"
+                  }`}
+                >
+                  <span className="text-[9px] uppercase font-bold">Fast Travel</span>
+                  <span className="text-xs font-mono font-bold text-amber-300">-5 Roll / -24h Time</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setModifierChoice(0)}
+                  className={`rounded border p-2 text-left flex flex-col justify-between transition-colors cursor-pointer ${
+                    modifierChoice === 0
+                      ? "border-cyan-neon bg-cyan-neon/10 text-cyan-neon shadow-[0_0_10px_rgba(0,255,255,0.3)]"
+                      : "border-bridge-border bg-black/40 text-muted-foreground hover:text-cyan-neon"
+                  }`}
+                >
+                  <span className="text-[9px] uppercase font-bold">Standard</span>
+                  <span className="text-xs font-mono font-bold text-cyan-neon">+0 Roll / Normal</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setModifierChoice(5)}
+                  className={`rounded border p-2 text-left flex flex-col justify-between transition-colors cursor-pointer ${
+                    modifierChoice === 5
+                      ? "border-emerald-400 bg-emerald-400/10 text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.3)]"
+                      : "border-bridge-border bg-black/40 text-muted-foreground hover:text-cyan-neon"
+                  }`}
+                >
+                  <span className="text-[9px] uppercase font-bold">Safe Route</span>
+                  <span className="text-xs font-mono font-bold text-emerald-300">+5 Roll / 2x Time</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-2 border-t border-bridge-border/40 text-[10px] text-muted-foreground font-mono">
+              Calculation: Base Skill ({astrogationSkillMod >= 0 ? `+${astrogationSkillMod}` : astrogationSkillMod}){" "}
+              {modifierChoice !== 0 && (
+                <span className={modifierChoice > 0 ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                  {modifierChoice > 0 ? `+ Safe Route (${modifierChoice})` : `- Fast Travel (${Math.abs(modifierChoice)})`}
+                </span>
+              )}{" "}
+              = <strong className="text-cyan-neon font-bold text-xs">{totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod}</strong>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between border-b border-bridge-border/60 pb-1 mb-2">
+                <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
+                  Astrogation Calculator
+                </h3>
+                <span
+                  className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded border uppercase ${
+                    astrogationAdvantage === "advantage"
+                      ? "border-emerald-500/60 bg-emerald-500/20 text-emerald-300"
+                      : astrogationAdvantage === "disadvantage"
+                      ? "border-red-500/60 bg-red-500/20 text-red-300 animate-pulse"
+                      : "border-cyan-neon/40 bg-cyan-neon/10 text-cyan-neon"
+                  }`}
+                >
+                  {astrogationAdvantage === "advantage"
+                    ? "Data: Advantage"
+                    : astrogationAdvantage === "disadvantage"
+                    ? "Data: Disadvantage"
+                    : "Data: Current"}
+                </span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-3">
+                Chart sync state applies <strong>{astrogationAdvantage.toUpperCase()}</strong>. Total modifier: {totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod}.
+              </p>
+
+              <div className="flex gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={handlePerformCheck}
+                  disabled={equationsCompleted >= targetEquations || !selectedOrigin || !selectedDest}
+                  className="flex-1 rounded border border-cyan-neon/60 bg-cyan-neon/20 py-2.5 text-xs font-bold text-cyan-neon hover:bg-cyan-neon/30 disabled:opacity-40 tracking-wider shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
+                >
+                  {!selectedOrigin || !selectedDest
+                    ? "SET DESTINATION TO PLOT EQUATIONS"
+                    : `ROLL ASTROGATION CHECK (${
+                        astrogationAdvantage === "advantage"
+                          ? "ADVANTAGE"
+                          : astrogationAdvantage === "disadvantage"
+                          ? "DISADVANTAGE"
+                          : "NORMAL"
+                      } ${totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod})`}
                 </button>
               </div>
 
-              <div className="h-3 w-full bg-slate-900 rounded-sm overflow-hidden border border-bridge-border/50">
-                <div
-                  className={`h-full transition-all duration-300 ${
-                    equationsCompleted >= targetEquations
-                      ? "bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.6)]"
-                      : "bg-cyan-neon shadow-[0_0_8px_rgba(0,255,255,0.4)]"
-                  }`}
-                  style={{ width: `${Math.min(100, (equationsCompleted / targetEquations) * 100)}%` }}
+              <form onSubmit={handleManualSubmit} className="flex gap-2">
+                <input
+                  type="number"
+                  placeholder={!selectedOrigin || !selectedDest ? "Select destination first..." : "Enter manual total..."}
+                  value={customRollInput}
+                  disabled={!selectedOrigin || !selectedDest}
+                  onChange={(e) => setCustomRollInput(e.target.value)}
+                  className="flex-1 rounded border border-bridge-border bg-black/50 px-3 py-1.5 text-xs text-cyan-neon font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:border-cyan-neon disabled:opacity-40"
                 />
-              </div>
+                <button
+                  type="submit"
+                  disabled={equationsCompleted >= targetEquations || !selectedOrigin || !selectedDest}
+                  className="rounded border border-bridge-border bg-slate-900 px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-cyan-neon hover:border-cyan-neon/40 disabled:opacity-40 cursor-pointer"
+                >
+                  SUBMIT TOTAL
+                </button>
+              </form>
+
+              {(!selectedOrigin || !selectedDest) && (
+                <p className="mt-2 text-[10px] font-mono text-amber-300/80">
+                  ⚠️ Select a Destination Planet in the route planner above before plotting astrogation equations.
+                </p>
+              )}
             </div>
 
-            <div className="w-full md:w-auto">
-              <button
-                onClick={handleEngageHyperdrive}
-                disabled={!hasHyperdrive || !selectedOrigin || !selectedDest}
-                title={!hasHyperdrive ? "No hyperdrive installed on this vessel" : undefined}
-                className={`w-full md:w-auto px-6 py-3 rounded border font-bold text-xs tracking-wider shadow-lg transition-all cursor-pointer ${
-                  !hasHyperdrive || !selectedOrigin || !selectedDest
-                    ? "border-red-500/40 bg-red-950/20 text-red-400/60 cursor-not-allowed opacity-60"
-                    : equationsCompleted >= targetEquations
-                    ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.4)] animate-pulse"
-                    : "border-amber-400/60 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20 shadow-[0_0_10px_rgba(251,191,36,0.2)]"
-                }`}
-              >
-                {!hasHyperdrive
-                  ? "ENGAGE HYPERDRIVE (NO DRIVE DETECTED)"
-                  : equationsCompleted >= targetEquations
-                  ? "ENGAGE HYPERDRIVE (OPTIMAL VECTOR)"
-                  : "ENGAGE HYPERDRIVE (INCOMPLETE EQUATIONS)"}
-              </button>
-            </div>
-          </div>
-
-          {jumpResult && (
-            <div
-              className={`mt-3 p-3 rounded border font-mono text-xs flex flex-col gap-1 ${
-                jumpResult.type === "success"
-                  ? "bg-emerald-950/40 border-emerald-500/60 text-emerald-300"
-                  : jumpResult.type === "error"
-                  ? "bg-red-950/50 border-red-500/80 text-red-200"
-                  : "bg-red-950/40 border-red-500/60 text-red-300"
-              }`}
-            >
-              <div className="flex justify-between items-center font-bold">
-                <span className="uppercase tracking-wider">
-                  {jumpResult.type === "success"
-                    ? "Hyperdrive Jump: Execution Successful"
-                    : jumpResult.type === "error"
-                    ? "Astrogation Terminal Error"
-                    : "Hyperdrive Mishap Detected"}
+            {lastRollResult && (
+              <div className="mt-4 p-2.5 rounded bg-black/70 border border-cyan-neon/40 text-[11px] flex flex-col md:flex-row justify-between items-start md:items-center gap-2 font-mono">
+                <div>
+                  {lastRollResult.d20 !== null ? (
+                    <span className="text-slate-300">
+                      d20 (
+                      {lastRollResult.d20_rolls ? (
+                        <span className="text-white">
+                          [{lastRollResult.d20_rolls[0]}, {lastRollResult.d20_rolls[1]}] &rarr; Kept{" "}
+                          <strong className="text-cyan-300">{lastRollResult.d20}</strong>
+                          <span className="text-[9px] text-muted-foreground ml-1">
+                            ({lastRollResult.rollType})
+                          </span>
+                        </span>
+                      ) : (
+                        <strong className="text-white">{lastRollResult.d20}</strong>
+                      )}
+                      ) + Skill (<strong className="text-cyan-300">+{lastRollResult.skillMod}</strong>)
+                      {lastRollResult.parameterMod > 0 && (
+                        <span className="text-emerald-400 font-bold"> + Safe Route (+{lastRollResult.parameterMod})</span>
+                      )}
+                      {lastRollResult.parameterMod < 0 && (
+                        <span className="text-amber-400 font-bold"> - Fast Travel ({Math.abs(lastRollResult.parameterMod)})</span>
+                      )}
+                      {" = "}
+                      <strong className="text-cyan-neon text-sm font-bold">{lastRollResult.total}</strong>
+                    </span>
+                  ) : (
+                    <span className="text-slate-300">
+                      Manual Total Entered: <strong className="text-cyan-neon text-sm font-bold">{lastRollResult.total}</strong>
+                    </span>
+                  )}
+                </div>
+                <span className="rounded bg-amber-500/20 border border-amber-400/50 px-2 py-0.5 text-xs font-bold text-amber-300">
+                  {lastRollResult.tierLabel}
                 </span>
-                {jumpResult.roll !== undefined && (
-                  <span className="text-[10px] text-muted-foreground">
-                    Roll (d20: {jumpResult.roll}) + Equations ({jumpResult.mod}) ={" "}
-                    <strong className="text-white">{jumpResult.total}</strong>
-                  </span>
-                )}
               </div>
-              <p className="text-[11px] text-white/90 mt-1">{jumpResult.message}</p>
-            </div>
-          )}
-        </div>
-      </Panel>
-
-      {/* ROUTING PARAMETERS & ROLL SIMULATOR */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col justify-between">
-          <div>
-            <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase mb-2 border-b border-bridge-border/60 pb-1">
-              Routing Parameter Adjustments
-            </h3>
-            <p className="text-[10px] text-muted-foreground mb-3">
-              Apply tactical modifiers to hasten travel time or secure safer astrogation calculations.
-            </p>
-
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setModifierChoice(-5)}
-                className={`rounded border p-2 text-left flex flex-col justify-between transition-colors cursor-pointer ${
-                  modifierChoice === -5
-                    ? "border-amber-400 bg-amber-400/10 text-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.3)]"
-                    : "border-bridge-border bg-black/40 text-muted-foreground hover:text-cyan-neon"
-                }`}
-              >
-                <span className="text-[9px] uppercase font-bold">Fast Travel</span>
-                <span className="text-xs font-mono font-bold text-amber-300">-5 Roll / -24h Time</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setModifierChoice(0)}
-                className={`rounded border p-2 text-left flex flex-col justify-between transition-colors cursor-pointer ${
-                  modifierChoice === 0
-                    ? "border-cyan-neon bg-cyan-neon/10 text-cyan-neon shadow-[0_0_10px_rgba(0,255,255,0.3)]"
-                    : "border-bridge-border bg-black/40 text-muted-foreground hover:text-cyan-neon"
-                }`}
-              >
-                <span className="text-[9px] uppercase font-bold">Standard</span>
-                <span className="text-xs font-mono font-bold text-cyan-neon">+0 Roll / Normal</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setModifierChoice(5)}
-                className={`rounded border p-2 text-left flex flex-col justify-between transition-colors cursor-pointer ${
-                  modifierChoice === 5
-                    ? "border-emerald-400 bg-emerald-400/10 text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.3)]"
-                    : "border-bridge-border bg-black/40 text-muted-foreground hover:text-cyan-neon"
-                }`}
-              >
-                <span className="text-[9px] uppercase font-bold">Safe Route</span>
-                <span className="text-xs font-mono font-bold text-emerald-300">+5 Roll / 2x Time</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-4 pt-2 border-t border-bridge-border/40 text-[10px] text-muted-foreground font-mono">
-            Calculation: Base Skill ({astrogationSkillMod >= 0 ? `+${astrogationSkillMod}` : astrogationSkillMod}){" "}
-            {modifierChoice !== 0 && (
-              <span className={modifierChoice > 0 ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
-                {modifierChoice > 0 ? `+ Safe Route (${modifierChoice})` : `- Fast Travel (${Math.abs(modifierChoice)})`}
-              </span>
-            )}{" "}
-            = <strong className="text-cyan-neon font-bold text-xs">{totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod}</strong>
-          </div>
-        </div>
-
-        <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-bridge-border/60 pb-1 mb-2">
-              <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
-                Astrogation Calculator
-              </h3>
-              <span
-                className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded border uppercase ${
-                  astrogationAdvantage === "advantage"
-                    ? "border-emerald-500/60 bg-emerald-500/20 text-emerald-300"
-                    : astrogationAdvantage === "disadvantage"
-                    ? "border-red-500/60 bg-red-500/20 text-red-300 animate-pulse"
-                    : "border-cyan-neon/40 bg-cyan-neon/10 text-cyan-neon"
-                }`}
-              >
-                {astrogationAdvantage === "advantage"
-                  ? "Data: Advantage"
-                  : astrogationAdvantage === "disadvantage"
-                  ? "Data: Disadvantage"
-                  : "Data: Current"}
-              </span>
-            </div>
-            <p className="text-[10px] text-muted-foreground mb-3">
-              Chart sync state applies <strong>{astrogationAdvantage.toUpperCase()}</strong>. Total modifier: {totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod}.
-            </p>
-
-            <div className="flex gap-2 mb-3">
-              <button
-                type="button"
-                onClick={handlePerformCheck}
-                disabled={equationsCompleted >= targetEquations || !selectedOrigin || !selectedDest}
-                className="flex-1 rounded border border-cyan-neon/60 bg-cyan-neon/20 py-2.5 text-xs font-bold text-cyan-neon hover:bg-cyan-neon/30 disabled:opacity-40 tracking-wider shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
-              >
-                {!selectedOrigin || !selectedDest
-                  ? "SET DESTINATION TO PLOT EQUATIONS"
-                  : `ROLL ASTROGATION CHECK (${
-                      astrogationAdvantage === "advantage"
-                        ? "ADVANTAGE"
-                        : astrogationAdvantage === "disadvantage"
-                        ? "DISADVANTAGE"
-                        : "NORMAL"
-                    } ${totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod})`}
-              </button>
-            </div>
-
-            <form onSubmit={handleManualSubmit} className="flex gap-2">
-              <input
-                type="number"
-                placeholder={!selectedOrigin || !selectedDest ? "Select destination first..." : "Enter manual total..."}
-                value={customRollInput}
-                disabled={!selectedOrigin || !selectedDest}
-                onChange={(e) => setCustomRollInput(e.target.value)}
-                className="flex-1 rounded border border-bridge-border bg-black/50 px-3 py-1.5 text-xs text-cyan-neon font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:border-cyan-neon disabled:opacity-40"
-              />
-              <button
-                type="submit"
-                disabled={equationsCompleted >= targetEquations || !selectedOrigin || !selectedDest}
-                className="rounded border border-bridge-border bg-slate-900 px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-cyan-neon hover:border-cyan-neon/40 disabled:opacity-40 cursor-pointer"
-              >
-                SUBMIT TOTAL
-              </button>
-            </form>
-
-            {(!selectedOrigin || !selectedDest) && (
-              <p className="mt-2 text-[10px] font-mono text-amber-300/80">
-                ⚠️ Select a Destination Planet in the route planner above before plotting astrogation equations.
-              </p>
             )}
           </div>
-
-          {lastRollResult && (
-            <div className="mt-4 p-2.5 rounded bg-black/70 border border-cyan-neon/40 text-[11px] flex flex-col md:flex-row justify-between items-start md:items-center gap-2 font-mono">
-              <div>
-                {lastRollResult.d20 !== null ? (
-                  <span className="text-slate-300">
-                    d20 (
-                    {lastRollResult.d20_rolls ? (
-                      <span className="text-white">
-                        [{lastRollResult.d20_rolls[0]}, {lastRollResult.d20_rolls[1]}] &rarr; Kept{" "}
-                        <strong className="text-cyan-300">{lastRollResult.d20}</strong>
-                        <span className="text-[9px] text-muted-foreground ml-1">
-                          ({lastRollResult.rollType})
-                        </span>
-                      </span>
-                    ) : (
-                      <strong className="text-white">{lastRollResult.d20}</strong>
-                    )}
-                    ) + Skill (<strong className="text-cyan-300">+{lastRollResult.skillMod}</strong>)
-                    {lastRollResult.parameterMod > 0 && (
-                      <span className="text-emerald-400 font-bold"> + Safe Route (+{lastRollResult.parameterMod})</span>
-                    )}
-                    {lastRollResult.parameterMod < 0 && (
-                      <span className="text-amber-400 font-bold"> - Fast Travel ({Math.abs(lastRollResult.parameterMod)})</span>
-                    )}
-                    {" = "}
-                    <strong className="text-cyan-neon text-sm font-bold">{lastRollResult.total}</strong>
-                  </span>
-                ) : (
-                  <span className="text-slate-300">
-                    Manual Total Entered: <strong className="text-cyan-neon text-sm font-bold">{lastRollResult.total}</strong>
-                  </span>
-                )}
-              </div>
-              <span className="rounded bg-amber-500/20 border border-amber-400/50 px-2 py-0.5 text-xs font-bold text-amber-300">
-                {lastRollResult.tierLabel}
-              </span>
-            </div>
-          )}
         </div>
-      </div>
+      )}
 
       {/* SYSTEM / SECTOR DIRECTORY MODAL OVERLAY */}
       {directoryModal.open && (

@@ -1,5 +1,35 @@
 [
   {
+    "hash": "24c82af",
+    "date": "2026-10-25",
+    "message": "Fix: Citation errors"
+  },
+  {
+    "hash": "649461c",
+    "date": "2026-10-25",
+    "message": "feat: implement suites station, centralized combat roller, and brutal criticals"
+  },
+  {
+    "hash": "4521964",
+    "date": "2026-10-25",
+    "message": "fix(combat) added weapons control for bow at engines station"
+  },
+  {
+    "hash": "63f39ab",
+    "date": "2026-10-24",
+    "message": "fix(combat): enforce round-1 reactor cycle lock and fix uncycled state fallback"
+  },
+  {
+    "hash": "90e24c4",
+    "date": "2026-10-24",
+    "message": "feat(combat): add in-modal save rolls, inline action shortcuts, and reactor cycle lock"
+  },
+  {
+    "hash": "cd32363",
+    "date": "2026-10-24",
+    "message": "feat(combat): add persistent initiative tracker, NPC dice roller, and combat HUD"
+  },
+  {
     "hash": "88b40da",
     "date": "2026-10-23",
     "message": "docs(codex): add creator philosophy and imagination augmentation design note"

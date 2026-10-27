@@ -89,6 +89,8 @@ interface WeaponsStationProps {
   manifest?: ManifestMember[]
   onAssignCrew?: (memberId: string, targetLocation: ShipCompartmentId) => void
   onToggleTurn?: (memberId: string) => void
+  isWeaponsBoosted?: boolean
+  onConsumeWeaponBoost?: () => void
 }
 
 function getLauncherFamily(weaponName: string): LauncherFamily | null {
@@ -144,6 +146,8 @@ export function WeaponsStation({
   manifest = [],
   onAssignCrew,
   onToggleTurn,
+  isWeaponsBoosted = false,
+  onConsumeWeaponBoost,
 }: WeaponsStationProps) {
   const [isArmed, setIsArmed] = useState<boolean>(false)
 
@@ -523,6 +527,10 @@ export function WeaponsStation({
     const key = activeWizardWeapon.instanceId || activeWizardWeapon.id
     const isOrdnance = !!activeWizardWeapon.isOrdnanceLauncher
 
+    if (isWeaponsBoosted && onConsumeWeaponBoost) {
+      onConsumeWeaponBoost()
+    }
+
     if (isOrdnance) {
       setLauncherStates((prev) => {
         const state = prev[key]
@@ -581,6 +589,13 @@ export function WeaponsStation({
             <span className="rounded-sm border border-amber-500/80 bg-amber-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-amber-300 flex items-center gap-1">
               <Flame className="w-3 h-3 text-amber-400" />
               BRUTAL CRITICALS ACTIVE
+            </span>
+          )}
+
+          {isWeaponsBoosted && (
+            <span className="rounded-sm border border-cyan-400/80 bg-cyan-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-cyan-300 flex items-center gap-1 animate-pulse shadow-[0_0_8px_rgba(0,255,255,0.4)]">
+              <Sparkles className="w-3 h-3 text-cyan-neon" />
+              WEAPONS BOOSTED (+ADVANTAGE)
             </span>
           )}
 
@@ -869,8 +884,9 @@ export function WeaponsStation({
         </div>
 
         {/* Status Alerts Summary Line */}
-        {(isAttackFighter || isBomber || hasBomberRoleMastery || hasSFoils || isGunshipSpec || isMissileBoatSpec || hasSystemDamageAtkDisadv || isBlinded || isIonized || isInvisible) && (
+        {(isAttackFighter || isBomber || hasBomberRoleMastery || hasSFoils || isGunshipSpec || isMissileBoatSpec || hasSystemDamageAtkDisadv || isBlinded || isIonized || isInvisible || isWeaponsBoosted) && (
           <div className="text-[10px] font-mono text-cyan-300 mb-3 bg-black/40 p-2 rounded border border-bridge-border/40">
+            {isWeaponsBoosted && <strong className="text-cyan-neon">Engineering Weapon Boost Active (+Advantage) | </strong>}
             {isBlinded && <strong className="text-red-400">Blinded (Disadv) | </strong>}
             {isIonized && <strong className="text-red-400">Ionized (Disadv) | </strong>}
             {isInvisible && <strong className="text-purple-300">Invisible (Adv) | </strong>}
@@ -1506,8 +1522,8 @@ export function WeaponsStation({
 
         const saveDC = 8 + attackMod
 
-        // Advantage/Disadvantage net calculation via combat-roller
-        const hasAdvantage = isInvisible
+        // Advantage/Disadvantage net calculation via combat-roller including Engineering Weapons Boost
+        const hasAdvantage = isInvisible || isWeaponsBoosted
         const hasDisadvantage = rangeBracket === "long" || failsCon || hasSystemDamageAtkDisadv || isBlinded || isIonized || (!isManned && isTurret)
         const netRollMode = resolveAdvantageMode(hasAdvantage, hasDisadvantage)
 
@@ -1557,7 +1573,6 @@ export function WeaponsStation({
 
           if (res.isCrit) {
             setAttackOutcome("crit")
-            // Auto calculate critical damage
             const dmgRes = rollDamage({
               formula: diceString,
               isCrit: true,
@@ -1624,6 +1639,18 @@ export function WeaponsStation({
               </div>
 
               {/* Status Alert Banners */}
+              {isWeaponsBoosted && (
+                <div className="p-2.5 rounded border border-cyan-400 bg-cyan-950/60 text-xs flex items-center justify-between font-mono animate-pulse shadow-[0_0_10px_rgba(0,255,255,0.3)]">
+                  <span className="flex items-center gap-2 text-cyan-300 font-bold">
+                    <Sparkles className="w-4 h-4 text-cyan-neon" />
+                    ENGINEERING WEAPON BOOST ACTIVE
+                  </span>
+                  <span className="text-[10px] font-bold text-cyan-neon uppercase">
+                    +ADVANTAGE ON NEXT ATTACK ROLL
+                  </span>
+                </div>
+              )}
+
               {!isManned && isTurret && (
                 <div className="p-2.5 rounded border border-amber-500/80 bg-amber-950/60 text-xs flex items-center justify-between font-mono animate-pulse shadow-[0_0_10px_rgba(245,158,11,0.3)]">
                   <span className="flex items-center gap-2 text-amber-300 font-bold">
@@ -1649,7 +1676,7 @@ export function WeaponsStation({
               )}
 
               {isIonized && (
-                <div className="p-2.5 rounded border border-red-500/80 bg-red-950/60 text-xs flex items-center justify-between font-mono animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.3)]">
+                <div className="p-2.5 rounded border border-red-500/80 bg-red-950/60 text-xs flex items-center justify-between font-mono animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.4)]">
                   <span className="flex items-center gap-2 text-red-300 font-bold">
                     <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
                     IONIZED CONDITION ACTIVE
@@ -1900,6 +1927,18 @@ export function WeaponsStation({
                     Review automated conditions and configure optional firing property stances:
                   </p>
 
+                  {isWeaponsBoosted && (
+                    <div className="p-2.5 rounded bg-cyan-950/60 border border-cyan-400 text-[10px] text-cyan-200 flex items-center justify-between shadow-[0_0_10px_rgba(0,255,255,0.2)] animate-pulse">
+                      <span className="flex items-center gap-1.5 font-bold">
+                        <Sparkles className="w-4 h-4 text-cyan-neon" />
+                        Engineering Weapon Boost Active:
+                      </span>
+                      <span className="font-mono uppercase font-bold text-cyan-neon">
+                        +ADVANTAGE APPLIED
+                      </span>
+                    </div>
+                  )}
+
                   {!isManned && isTurret && (
                     <div className="p-2.5 rounded bg-amber-950/50 border border-amber-500 text-[10px] text-amber-300 flex items-center gap-2">
                       <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -2002,7 +2041,10 @@ export function WeaponsStation({
                             failsCon ? "Constitution Penalty" : null,
                           ].filter(Boolean).join(", ")}`
                         : netRollMode === "advantage" 
-                        ? "ADVANTAGE (Roll 2d20, Take Higher) — Source: Invisibility"
+                        ? `ADVANTAGE (Roll 2d20, Take Higher) — Source: ${[
+                            isWeaponsBoosted ? "Engineering Weapons Boost" : null,
+                            isInvisible ? "Invisibility" : null,
+                          ].filter(Boolean).join(", ")}`
                         : hasAdvantage && hasDisadvantage 
                         ? "STRAIGHT ROLL (Advantage & Disadvantage Cancel Out)" 
                         : "NORMAL ATTACK ROLL (1d20)"}

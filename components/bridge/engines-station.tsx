@@ -215,6 +215,8 @@ interface EnginesStationProps {
   tacticalMovement?: TacticalMovementState
   onSpendMovement?: (feet: number) => void
   onResetMovement?: () => void
+  isWeaponsBoosted?: boolean
+  onConsumeWeaponBoost?: () => void
 }
 
 export function EnginesStation({
@@ -285,6 +287,8 @@ export function EnginesStation({
   tacticalMovement = { spentFeet: 0 },
   onSpendMovement,
   onResetMovement,
+  isWeaponsBoosted = false,
+  onConsumeWeaponBoost,
 }: EnginesStationProps) {
   const [showStartupModal, setShowStartupModal] = useState(false)
   const [showActionModal, setShowActionModal] = useState(false)
@@ -603,6 +607,10 @@ export function EnginesStation({
     if (!activeWizardWeapon) return
     const key = activeWizardWeapon.instanceId || activeWizardWeapon.id
     const isOrdnance = !!activeWizardWeapon.isOrdnanceLauncher
+
+    if (isWeaponsBoosted && onConsumeWeaponBoost) {
+      onConsumeWeaponBoost()
+    }
 
     if (isOrdnance) {
       setLocalLauncherStates((prev) => {
@@ -1207,6 +1215,13 @@ export function EnginesStation({
           {isEngineBoosted && (
             <span className="rounded border border-amber-400 bg-amber-500/20 px-2 py-0.5 text-[9px] font-bold text-amber-300 animate-pulse">
               ⚡ BOOST (+50 FT)
+            </span>
+          )}
+
+          {isWeaponsBoosted && (
+            <span className="rounded border border-cyan-400 bg-cyan-950/60 px-2 py-0.5 text-[9px] font-bold text-cyan-300 animate-pulse flex items-center gap-1 shadow-[0_0_8px_rgba(0,255,255,0.4)]">
+              <Sparkles className="w-3 h-3 text-cyan-neon" />
+              WEAPONS BOOSTED
             </span>
           )}
 
@@ -2320,7 +2335,7 @@ export function EnginesStation({
         // Disadvantage evaluation: Helm Standard Fire imposes disadvantage unless Attack Run or Dogfight is selected
         const isHelmDisadvantage = helmAttackType === "standard"
         const hasDisadvantage = rangeBracket === "long" || failsCon || (effectiveSlowedLevel >= 3) || isHelmDisadvantage
-        const hasAdvantage = false // Forward arc defaults to false unless external advantage applies
+        const hasAdvantage = isWeaponsBoosted
         const netRollMode = resolveAdvantageMode(hasAdvantage, hasDisadvantage)
 
         const currentHeatCost = firingMode === "rapid" ? rapidRating : firingMode === "burst" ? burstRating : 1
@@ -2419,7 +2434,19 @@ export function EnginesStation({
                 </button>
               </div>
 
-              {/* Tactical Mode Context Alert Banner */}
+              {/* Status Alert Banners */}
+              {isWeaponsBoosted && (
+                <div className="p-2.5 rounded bg-cyan-950/60 border border-cyan-400 text-xs flex items-center justify-between shadow-[0_0_10px_rgba(0,255,255,0.2)] animate-pulse">
+                  <span className="flex items-center gap-1.5 font-bold text-cyan-300">
+                    <Sparkles className="w-4 h-4 text-cyan-neon" />
+                    ENGINEERING WEAPON BOOST ACTIVE:
+                  </span>
+                  <span className="font-mono uppercase font-bold text-cyan-neon text-[10px]">
+                    +ADVANTAGE APPLIED
+                  </span>
+                </div>
+              )}
+
               {isHelmDisadvantage && (
                 <div className="p-2 rounded bg-amber-950/40 border border-amber-500/50 text-[10px] text-amber-300">
                   ⚠️ Firing from the Helm without an Attack Run or Dogfight imposes disadvantage on the attack roll[cite: 9].

@@ -25,10 +25,6 @@ import { AlertOctagon, RefreshCw, Radio, PowerOff } from "lucide-react"
 import { useRoomSync } from "@/hooks/use-room-sync"
 import { RoomSelector } from "./room-selector"
 
-// ==========================================
-// CREW MANIFEST & TACTICAL MOVEMENT SCHEMAS
-// ==========================================
-
 export type ShipStationId =
   | "helm"
   | "engineering"
@@ -145,10 +141,6 @@ function getRawModifier(score: number): number {
   return Math.floor((score - 10) / 2)
 }
 
-// ==========================================
-// SHARED MULTIPLAYER ROOM STATE SCHEMA
-// ==========================================
-
 export interface SyncedCombatState {
   isInCombat: boolean
   round: number
@@ -188,6 +180,7 @@ export interface SyncedBridgeState {
   sFoilsMode: "locked" | "unlocked"
   engineSpeedBoostTurns: number
   shieldBoostTurns: number
+  isWeaponsBoosted: boolean
   boostActionUsed: boolean
   selectedBoostType: "engines" | "shields" | "weapons" | null
   boostFeedback: string | null
@@ -268,6 +261,7 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
   sFoilsMode: "unlocked",
   engineSpeedBoostTurns: 0,
   shieldBoostTurns: 0,
+  isWeaponsBoosted: false,
   boostActionUsed: false,
   selectedBoostType: null,
   boostFeedback: null,
@@ -300,6 +294,7 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
     roleSpecialization: null,
     roleMastery: null,
     extraSuiteCapacity: 0,
+    useBrutalCriticals: false,
     stats: {
       strength: 10,
       dexterity: 14,
@@ -435,7 +430,6 @@ export default function BridgeDashboard() {
   const [creationKeyInput, setCreationKeyInput] = useState<string>("")
   const [isMounted, setIsMounted] = useState<boolean>(false)
 
-  // Read ?room= and ?pin= from URL or localStorage on startup, then flag as mounted
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search)
@@ -460,7 +454,6 @@ export default function BridgeDashboard() {
     }
   }, [])
 
-  // Hook handles authentication, creation key, and sync
   const {
     data: roomState,
     updateRoomData,
@@ -488,7 +481,6 @@ export default function BridgeDashboard() {
     }
   }
 
-  // Unpack synced state
   const {
     isPoweredOn = true,
     maxFuel,
@@ -516,6 +508,7 @@ export default function BridgeDashboard() {
     sFoilsMode,
     engineSpeedBoostTurns,
     shieldBoostTurns,
+    isWeaponsBoosted = false,
     boostActionUsed,
     selectedBoostType,
     boostFeedback,
@@ -543,7 +536,6 @@ export default function BridgeDashboard() {
     },
   } = roomState
 
-  // Self-healing sanitizer: cleans up any duplicate IDs that were previously stored in cloud state
   const sanitizedSensorContacts = useMemo(() => {
     const seen = new Set<string>()
     return rawSensorContacts.map((c, index) => {
@@ -569,7 +561,6 @@ export default function BridgeDashboard() {
 
   const externalPendingCharts = currentDay > lastAstrogationDay ? 150 : 0
 
-  // Power state handler
   const handleSetPoweredOn = (powered: boolean) => {
     updateRoomData((prev) => {
       let nextStatuses = prev.shipStatuses
@@ -597,7 +588,6 @@ export default function BridgeDashboard() {
     })
   }
 
-  // --- PERSISTENT COMBAT STATE HANDLER (MEMOIZED TO PREVENT RENDER LOOPS) ---
   const handleUpdateCombatState = useCallback((
     updater:
       | Partial<SyncedCombatState>
@@ -616,7 +606,6 @@ export default function BridgeDashboard() {
       const nextCombat =
         typeof updater === "function" ? updater(current) : { ...current, ...updater }
 
-      // Shallow check to bail out if no actual state changed
       if (
         current.isInCombat === nextCombat.isInCombat &&
         current.round === nextCombat.round &&
@@ -638,7 +627,6 @@ export default function BridgeDashboard() {
     })
   }, [updateRoomData])
 
-  // --- CREW MANIFEST & TACTICAL ACTIONS ---
   const handleAddMember = (
     newMember: Omit<ManifestMember, "id" | "assignedOrder" | "hasTakenTurnThisRound">
   ) => {
@@ -731,7 +719,6 @@ export default function BridgeDashboard() {
     }))
   }
 
-  // --- DAY ADVANCE & RATION DEPLETION ---
   const handleAdvanceCampaignDay = (newDay?: number | ((prev: number) => number)) => {
     updateRoomData((prev) => {
       let resolvedTarget: number
@@ -755,7 +742,6 @@ export default function BridgeDashboard() {
     })
   }
 
-  // --- DYNAMIC ASTROGATION CHART SYNC STATUS ---
   const astrogationAdvantage: "advantage" | "disadvantage" | "normal" = useMemo(() => {
     const daysSinceSync = Math.max(0, currentDay - lastAstrogationDay)
     if (daysSinceSync < 1) return "advantage"
@@ -763,7 +749,6 @@ export default function BridgeDashboard() {
     return "normal"
   }, [currentDay, lastAstrogationDay])
 
-  // Status handlers
   const handleAddStatus = (newStatus: ActiveStatus) => {
     updateRoomData((prev) => ({
       ...prev,
@@ -831,7 +816,6 @@ export default function BridgeDashboard() {
     })
   }
 
-  // Compound Slowed Calculation
   const effectiveSlowedLevel = useMemo(() => {
     let baseSlow = 0
     if (isDisabled || isStunned || isTractored || isStalled || !isPoweredOn) {
@@ -1267,6 +1251,7 @@ export default function BridgeDashboard() {
       bestShipInVerseUsed: false,
       engineSpeedBoostTurns: 0,
       shieldBoostTurns: 0,
+      isWeaponsBoosted: false,
       boostActionUsed: false,
       selectedBoostType: null,
       boostFeedback: null,
@@ -1283,11 +1268,7 @@ export default function BridgeDashboard() {
         id: ammo.id,
         name: ammo.name,
         category: ammo.launcherFamily,
-        currentReserve: ammo.name.toLowerCase().includes("concussion missile")
-          ? 0
-          : ammo.name.toLowerCase().includes("proton torpedo")
-          ? 0
-          : 0,
+        currentReserve: 0,
         costPerUnit: ammo.cost,
         damage: ammo.standardDamage,
         damageType: ammo.damageType,
@@ -1369,6 +1350,16 @@ export default function BridgeDashboard() {
 
   const handleRemoveMod = (instanceId: string) => {
     const targetMod = installedMods.find((m) => m.instanceId === instanceId)
+    const modName = targetMod?.name || "this modification"
+    const refundAmount = targetMod ? Math.round(targetMod.cost * 0.5) : 0
+
+    const confirmed = window.confirm(
+      `CONFIRM UNINSTALL:\n\nAre you sure you want to uninstall "${modName}"?\n` +
+      `Refund: +${refundAmount.toLocaleString()} cr (50% value).\n` +
+      `Any weapons or hardware mounted to this modification will also be detached.`
+    )
+    if (!confirmed) return
+
     updateRoomData((prev) => {
       const toRemove = new Set<string>([instanceId])
       let changed = true
@@ -1397,7 +1388,7 @@ export default function BridgeDashboard() {
               date: `Day ${prev.currentDay}`,
               description: `Refund / Uninstalled Modification: ${targetMod.name}`,
               category: "Refit",
-              amount: Math.round(targetMod.cost * 0.5),
+              amount: refundAmount,
               type: "credit" as const,
             },
             ...prev.transactions,
@@ -1412,7 +1403,6 @@ export default function BridgeDashboard() {
     })
   }
 
-  // Handler to update modification properties with dual ID support (instanceId or id)
   const handleUpdateMod = useCallback(
     (idOrInstanceId: string, updates: Partial<Modification>) => {
       updateRoomData((prev) => ({
@@ -1428,6 +1418,17 @@ export default function BridgeDashboard() {
   )
 
   const handleUpdateSuites = (newSuites: InstalledSuite[]) => {
+    // If a suite is being removed, prompt for confirmation
+    if (newSuites.length < installedSuites.length) {
+      const removedSuite = installedSuites.find((s) => !newSuites.some((n) => n.id === s.id))
+      const suiteName = removedSuite?.name || "this suite"
+      const confirmed = window.confirm(
+        `CONFIRM SUITE DECOMMISSION:\n\nAre you sure you want to uninstall "${suiteName}"?\n` +
+        `Any stationed personnel will be relocated to Crew Quarters.`
+      )
+      if (!confirmed) return
+    }
+
     updateRoomData((prev) => {
       let newTransactions = prev.transactions
       if (newSuites.length > prev.installedSuites.length) {
@@ -1485,7 +1486,6 @@ export default function BridgeDashboard() {
     }))
   }
 
-  // Collision-proof contact ID generation
   const handleAddContact = (newContact: Omit<SensorContact, "id">) => {
     const uniqueId = `contact-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
     const contactWithId = { ...newContact, id: uniqueId }
@@ -1495,7 +1495,6 @@ export default function BridgeDashboard() {
     }))
   }
 
-  // Atomic batch spawner for squadrons
   const handleAddContacts = (newContacts: Omit<SensorContact, "id">[]) => {
     const contactsWithIds = newContacts.map((c, idx) => ({
       ...c,
@@ -1514,7 +1513,6 @@ export default function BridgeDashboard() {
     }))
   }
 
-  // Clear all sensor contacts from sector
   const handleClearContacts = () => {
     updateRoomData((prev) => ({
       ...prev,
@@ -1540,7 +1538,6 @@ export default function BridgeDashboard() {
     }))
   }
 
-  // --- CYCLE REACTOR (ROUND RESET + MOVEMENT/TURN RESETS + UNLOCKS COMBAT ROUND LOCK + CLEARS FIRED WEAPONS) ---
   const handleCycleReactor = (generatedAmount?: number) => {
     updateRoomData((prev) => {
       const amountToAdd =
@@ -1564,13 +1561,12 @@ export default function BridgeDashboard() {
         boostFeedback: null,
         engineSpeedBoostTurns: Math.max(0, prev.engineSpeedBoostTurns - 1),
         shieldBoostTurns: nextShieldTurns,
+        isWeaponsBoosted: false,
         shieldState: {
           ...prev.shieldState,
           temp: nextTempShields,
         },
-        // Unlocks all installed weapons to fire again in the new round
         installedMods: prev.installedMods.map((m) => ({ ...m, firedThisRound: false })),
-        // Unlocks next combat round if in combat
         combatState: {
           ...prev.combatState,
           hasCycledReactorThisRound: true,
@@ -1640,6 +1636,7 @@ export default function BridgeDashboard() {
       pinpointStrikesUsed: 0,
       engineSpeedBoostTurns: 0,
       shieldBoostTurns: 0,
+      isWeaponsBoosted: false,
       boostActionUsed: false,
       selectedBoostType: null,
       boostFeedback: null,
@@ -1683,7 +1680,6 @@ export default function BridgeDashboard() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-3 sm:p-4 lg:p-6">
-      {/* Top Bar with Live Room Code Linker */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-neutral-950/80 border border-neutral-800 p-2.5 rounded-lg shadow-sm">
         <div className="flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_#06b6d4] animate-pulse" />
@@ -1701,7 +1697,6 @@ export default function BridgeDashboard() {
         />
       </div>
 
-      {/* 0. UNLINKED GATE */}
       {!roomCode ? (
         <div className="flex min-h-[480px] flex-col items-center justify-center gap-4 rounded-md border border-neutral-800 bg-neutral-950/90 p-8 text-center font-mono shadow-2xl">
           <div className="relative flex items-center justify-center">
@@ -1930,6 +1925,10 @@ export default function BridgeDashboard() {
                   manifest={manifest}
                   onAssignCrew={handleAssignLocation}
                   onToggleTurn={handleToggleTurnTaken}
+                  isWeaponsBoosted={isWeaponsBoosted}
+                  onConsumeWeaponBoost={() =>
+                    updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: false }))
+                  }
                 />
               ) : active === "Sensors" ? (
                 <SensorsStation
@@ -2074,6 +2073,9 @@ export default function BridgeDashboard() {
                       },
                     }))
                   }}
+                  onBoostWeapons={() =>
+                    updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: true }))
+                  }
                   boostActionUsed={boostActionUsed}
                   onBoostActionUsedChange={(val) =>
                     updateRoomData((prev) => ({ ...prev, boostActionUsed: val }))
@@ -2429,6 +2431,10 @@ export default function BridgeDashboard() {
                   tacticalMovement={tacticalMovement}
                   onSpendMovement={handleSpendMovement}
                   onResetMovement={handleResetMovement}
+                  isWeaponsBoosted={isWeaponsBoosted}
+                  onConsumeWeaponBoost={() =>
+                    updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: false }))
+                  }
                 />
               ) : active === "Navcomputer" ? (
                 <NavcomputerStation
@@ -2497,6 +2503,7 @@ export default function BridgeDashboard() {
                   }
                   availablePowerDice={availablePowerDice}
                   maxPowerDice={shipConfig.maxPowerDice}
+                  shipConfig={effectiveShipConfig}
                   combatState={combatState}
                   onUpdateCombatState={handleUpdateCombatState}
                 />

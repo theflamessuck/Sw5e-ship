@@ -253,9 +253,32 @@ export function ShipModifications({
   }
 
   const handleRemoveSuite = (id: string) => {
+    const targetSuite = installedSuites.find((s) => s.id === id)
+    const suiteName = targetSuite?.name || "this suite"
+
+    const confirmed = window.confirm(
+      `CONFIRM SUITE DECOMMISSION:\n\nAre you sure you want to uninstall "${suiteName}"?\n` +
+      `Any stationed crew will be relocated to Crew Quarters.`
+    )
+    if (!confirmed) return
+
     const updated = installedSuites.filter((s) => s.id !== id)
     if (onUpdateSuites) onUpdateSuites(updated)
     else setInternalSuites(updated)
+  }
+
+  const handleConfirmRemoveMod = (mod: Modification) => {
+    if (!mod.instanceId) return
+    const refund = Math.round(mod.cost * 0.5)
+
+    const confirmed = window.confirm(
+      `CONFIRM UNINSTALL:\n\nAre you sure you want to uninstall "${mod.name}"?\n` +
+      `Refund: +${refund.toLocaleString()} cr (50% value).\n` +
+      `Any weapons or hardware mounted to this modification will also be detached.`
+    )
+    if (!confirmed) return
+
+    onRemoveMod(mod.instanceId)
   }
 
   const totalInstalled = installedMods.length
@@ -866,7 +889,7 @@ export function ShipModifications({
                           <div className="flex justify-between items-start">
                             <span className="font-bold text-slate-200">{mod.name}</span>
                             <button
-                              onClick={() => mod.instanceId && onRemoveMod(mod.instanceId)}
+                              onClick={() => handleConfirmRemoveMod(mod)}
                               className="text-[9px] text-red-400 hover:text-red-300 font-mono cursor-pointer"
                             >
                               [UNINSTALL]
@@ -920,6 +943,20 @@ export function StationModifications({
 }: StationModificationsProps) {
   const stationMods = installedMods.filter((m) => m.station === station)
 
+  const handleConfirmRemoveStationMod = (mod: Modification) => {
+    if (!mod.instanceId) return
+    const refund = Math.round(mod.cost * 0.5)
+
+    const confirmed = window.confirm(
+      `CONFIRM UNINSTALL:\n\nAre you sure you want to uninstall "${mod.name}"?\n` +
+      `Refund: +${refund.toLocaleString()} cr (50% value).\n` +
+      `Any weapons or hardware mounted to this modification will also be detached.`
+    )
+    if (!confirmed) return
+
+    onRemoveMod?.(mod.instanceId)
+  }
+
   return (
     <div className="flex flex-col gap-3">
       {stationMods.length === 0 ? (
@@ -961,7 +998,7 @@ export function StationModifications({
               {allowRemoval && (
                 <div className="mt-3 pt-2 border-t border-bridge-border/40 flex justify-end">
                   <button
-                    onClick={() => mod.instanceId && onRemoveMod?.(mod.instanceId)}
+                    onClick={() => handleConfirmRemoveStationMod(mod)}
                     className="text-[9px] font-mono text-red-400 hover:text-red-300 tracking-wider uppercase cursor-pointer"
                   >
                     [UNINSTALL]
