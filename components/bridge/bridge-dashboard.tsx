@@ -494,7 +494,7 @@ export default function BridgeDashboard() {
     currentLocationPlanet,
     targetDestinationPlanet,
     systemDamageLevel,
-    shipStatuses,
+    shipStatuses = [],
     isUsedCondition,
     spentHullDice,
     spentShieldDice,
@@ -778,6 +778,7 @@ export default function BridgeDashboard() {
   const isTractored = hasStatus("tractored")
   const isStalled = hasStatus("stalled")
   const isUsedStatus = hasStatus("used")
+  const hasGravityWarpACPenalty = hasStatus("gravity warp")
 
   const effectiveIsUsed = isUsedCondition || isUsedStatus || systemDamageLevel >= 5
 
@@ -1002,6 +1003,11 @@ export default function BridgeDashboard() {
     }
     calculatedAC += shipModifiers.armorClassBonus
 
+    // Mechanical Astrogation Mishap (6-8): Gravity Warp reduces AC by 2 until refitted
+    if (hasGravityWarpACPenalty) {
+      calculatedAC = Math.max(1, calculatedAC - 2)
+    }
+
     const baseModCapacity = 30
     const finalModCapacity = baseModCapacity + shipModifiers.maxModSlotsBonus
     const calculatedMaxFuel = Math.round(30 * shipModifiers.baseFuelMultiplier)
@@ -1033,6 +1039,7 @@ export default function BridgeDashboard() {
     effectiveSavingThrows,
     effectiveSkills,
     shipModifiers,
+    hasGravityWarpACPenalty,
     systemDamageLevel,
     effectiveSlowedLevel,
     isIonized,
@@ -1418,7 +1425,6 @@ export default function BridgeDashboard() {
   )
 
   const handleUpdateSuites = (newSuites: InstalledSuite[]) => {
-    // If a suite is being removed, prompt for confirmation
     if (newSuites.length < installedSuites.length) {
       const removedSuite = installedSuites.find((s) => !newSuites.some((n) => n.id === s.id))
       const suiteName = removedSuite?.name || "this suite"
@@ -2028,7 +2034,10 @@ export default function BridgeDashboard() {
                   }
                   systemDamageLevel={systemDamageLevel}
                   onUpdateSystemDamageLevel={(lvl) =>
-                    updateRoomData((prev) => ({ ...prev, systemDamageLevel: lvl }))
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
+                    }))
                   }
                   statuses={shipStatuses}
                   onAddStatus={handleAddStatus}
@@ -2139,6 +2148,13 @@ export default function BridgeDashboard() {
                   manifest={manifest}
                   onAssignCrew={handleAssignLocation}
                   onToggleTurn={handleToggleTurnTaken}
+                  onAddStatus={handleAddStatus}
+                  onUpdateSystemDamageLevel={(lvl) =>
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
+                    }))
+                  }
                 />
               ) : active === "Suites" ? (
                 <SuitesStation
@@ -2280,6 +2296,13 @@ export default function BridgeDashboard() {
                           ? prev.currentDay
                           : prev.lastAstrogationDay
 
+                      // Clear any status tagged with 'Until Refit' (such as Astrogation mishap penalties)
+                      const clearedStatuses = prev.shipStatuses.filter(
+                        (s) =>
+                          !s.duration?.toLowerCase().includes("refit") &&
+                          !s.id?.toLowerCase().includes("mishap")
+                      )
+
                       return {
                         ...prev,
                         spentHullDice: 0,
@@ -2290,6 +2313,7 @@ export default function BridgeDashboard() {
                         adaptiveArmorUsed: 0,
                         lastAstrogationDay: nextLastAstrogation,
                         ordnanceList: updatedOrdnance,
+                        shipStatuses: clearedStatuses,
                       }
                     })
                   }}
@@ -2422,7 +2446,10 @@ export default function BridgeDashboard() {
                   maxShields={totalShields.max}
                   systemDamageLevel={systemDamageLevel}
                   onUpdateSystemDamageLevel={(lvl) =>
-                    updateRoomData((prev) => ({ ...prev, systemDamageLevel: lvl }))
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
+                    }))
                   }
                   effectiveSlowedLevel={effectiveSlowedLevel}
                   manifest={manifest}
@@ -2435,6 +2462,7 @@ export default function BridgeDashboard() {
                   onConsumeWeaponBoost={() =>
                     updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: false }))
                   }
+                  onAddStatus={handleAddStatus}
                 />
               ) : active === "Navcomputer" ? (
                 <NavcomputerStation
@@ -2472,6 +2500,13 @@ export default function BridgeDashboard() {
                   onBackToEngines={() => setActive("Engines")}
                   installedMods={installedMods}
                   onRemoveMod={handleRemoveMod}
+                  onAddStatus={handleAddStatus}
+                  onApplyDirectHullDamage={(amt) => {
+                    setTotalHull((prev) => ({
+                      current: Math.max(0, prev.current - amt),
+                      max: totalHull.max,
+                    }))
+                  }}
                 />
               ) : active === "GM Station" ? (
                 <GmStation
@@ -2498,7 +2533,7 @@ export default function BridgeDashboard() {
                   onUpdateSystemDamageLevel={(lvl) =>
                     updateRoomData((prev) => ({
                       ...prev,
-                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel) : lvl,
+                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
                     }))
                   }
                   availablePowerDice={availablePowerDice}

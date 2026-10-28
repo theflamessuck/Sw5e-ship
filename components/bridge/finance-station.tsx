@@ -159,12 +159,14 @@ export function FinanceStation({
   const sizeModifier = SIZE_MODIFIERS[normalizedSize] ?? 2
   const requiredDowntime = SIZE_DOWNTIME[normalizedSize] ?? "1 Day (24 Hours)"
 
+  // Baseline port refit service charge (100 cr * sizeModifier: 200 cr for Medium)
+  const baseRefitFee = 100 * sizeModifier
   const effectiveSpentDice = spentHullDice !== undefined ? spentHullDice : Math.max(0, maxHullDice - currentHullDice)
   const calculatedHullRefit = 100 * effectiveSpentDice * sizeModifier
   const systemRepairCost = repairSystemFailure ? 10 * maxHullPoints * sizeModifier : 0
   const overhaulCost = (isUsedCondition && attemptOverhaul) ? 10 * maxHullPoints * sizeModifier : 0
 
-  const calculatedTotalRefit = calculatedHullRefit + systemRepairCost + overhaulCost
+  const calculatedTotalRefit = baseRefitFee + calculatedHullRefit + systemRepairCost + overhaulCost
 
   const pendingRefit = externalPendingRefit !== undefined && externalPendingRefit > 0 ? externalPendingRefit : calculatedTotalRefit
   
@@ -727,9 +729,15 @@ export function FinanceStation({
                     <span className="text-purple-300 font-bold uppercase">{requiredDowntime}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Hull Refit ({effectiveSpentDice} spent/missing dice):</span>
-                    <span className="text-slate-200">{calculatedHullRefit.toLocaleString()} CR</span>
+                    <span>Base Port Refit Fee ({sizeModifier}x Size Mod):</span>
+                    <span className="text-slate-200">{baseRefitFee.toLocaleString()} CR</span>
                   </div>
+                  {effectiveSpentDice > 0 && (
+                    <div className="flex justify-between">
+                      <span>Hull Dice Repairs ({effectiveSpentDice} spent/missing dice):</span>
+                      <span className="text-slate-200">{calculatedHullRefit.toLocaleString()} CR</span>
+                    </div>
+                  )}
                   {repairSystemFailure && (
                     <div className="flex justify-between">
                       <span>Primary System Repair:</span>
@@ -830,7 +838,7 @@ export function FinanceStation({
                       min="0"
                       value={dockDays}
                       onChange={(e) => setDockDays(Math.max(0, parseInt(e.target.value) || 0))}
-                      className="w-12 bg-black border border-bridge-border text-[11px] text-center text-slate-200 rounded px-1 py-0.5"
+                      className="w-12 bg-black border border-bridge-border text-[11px] text-center text-slate-200 rounded px-1.5 py-0.5"
                     />
                     <span className="text-[10px] text-muted-foreground">days</span>
                   </div>

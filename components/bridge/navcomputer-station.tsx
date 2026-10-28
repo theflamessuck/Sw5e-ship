@@ -11,7 +11,21 @@ import {
   type PlanetRecord,
   type GalacticRegion,
 } from "@/lib/travel-matrix"
-import { Rocket, Clock, CheckCircle2, Navigation, Compass } from "lucide-react"
+import type { ActiveStatus } from "./defense-station"
+import { 
+  Rocket, 
+  Clock, 
+  CheckCircle2, 
+  Navigation, 
+  Compass, 
+  AlertTriangle, 
+  Dices, 
+  Coins, 
+  Package, 
+  X,
+  ShieldCheck,
+  ShieldAlert
+} from "lucide-react"
 
 export interface JourneyData {
   origin: string
@@ -41,6 +55,8 @@ interface NavcomputerStationProps {
   onUpdateTargetDestinationPlanet?: (planetName: string) => void
   installedMods?: Modification[]
   onRemoveMod?: (instanceId: string) => void
+  onAddStatus?: (status: ActiveStatus) => void
+  onApplyDirectHullDamage?: (amount: number) => void
 }
 
 const ALL_REGIONS: GalacticRegion[] = [
@@ -55,6 +71,17 @@ const ALL_REGIONS: GalacticRegion[] = [
   "Unknown Regions",
   "Extragalactic",
 ]
+
+function rollDiceFormula(count: number, sides: number): { rolls: number[]; total: number } {
+  const rolls: number[] = []
+  let total = 0
+  for (let i = 0; i < count; i++) {
+    const roll = Math.floor(Math.random() * sides) + 1
+    rolls.push(roll)
+    total += roll
+  }
+  return { rolls, total }
+}
 
 export function NavcomputerStation({
   astrogationAdvantage = "normal",
@@ -73,6 +100,8 @@ export function NavcomputerStation({
   onUpdateTargetDestinationPlanet,
   installedMods = [],
   onRemoveMod,
+  onAddStatus,
+  onApplyDirectHullDamage,
 }: NavcomputerStationProps) {
   // -------------------------------------------------------------
   // 1. HYPERDRIVE DETECTION & CLASS EXTRACTION
@@ -200,7 +229,6 @@ export function NavcomputerStation({
   // -------------------------------------------------------------
   // 3. INTRA-SYSTEM SUBLIGHT FLIGHT (1d12 HOURS REALSPACE)
   // -------------------------------------------------------------
-  // Cache stores bidirectional planetary leg durations: e.g. "Corellia:Selonia" -> 5
   const [systemTransitCache, setSystemTransitCache] = useState<Record<string, number>>({})
   const [sublightArrivalLog, setSublightArrivalLog] = useState<string | null>(null)
 
@@ -214,7 +242,6 @@ export function NavcomputerStation({
     )
   }, [selectedOrigin, selectedDest])
 
-  // Get or roll the 1d12 sublight hours for this route
   const sublightDurationHours = useMemo(() => {
     if (!isIntraSystemFlight || !selectedOrigin || !selectedDest) return null
 
@@ -226,7 +253,6 @@ export function NavcomputerStation({
       return systemTransitCache[legKey]
     }
 
-    // Roll fresh 1d12
     const rolledHours = Math.floor(Math.random() * 12) + 1
     setSystemTransitCache((prev) => ({
       ...prev,
@@ -241,7 +267,6 @@ export function NavcomputerStation({
     const destName = selectedDest.name
     const hours = sublightDurationHours
 
-    // Update location directly
     onUpdateCurrentLocationPlanet?.(destName)
     onUpdateTargetDestinationPlanet?.("")
     setSelectedDest(null)
@@ -366,6 +391,20 @@ export function NavcomputerStation({
     message: string
   } | null>(null)
 
+  // Interactive Dumped Cargo Encounter Modal State (18-19 Mishap)
+  const [cargoMishapModal, setCargoMishapModal] = useState<{
+    open: boolean
+    hitDieType: number
+    cargoTons: number
+    valuePerTon: number
+    totalCargoValue: number
+    fullDamageRoll: { rolls: number[]; total: number }
+    halfDamage: number
+    resolved: boolean
+    saveOutcome?: "pass" | "fail"
+    appliedDamage?: number
+  } | null>(null)
+
   const totalAstrogationMod = astrogationSkillMod + modifierChoice
 
   const travelDuration = useMemo(() => {
@@ -405,9 +444,6 @@ export function NavcomputerStation({
     }
   }, [selectedOrigin, selectedDest, isIntraSystemFlight, activeHyperdriveClass, modifierChoice])
 
-  // -------------------------------------------------------------
-  // 7. ASTROGATION ROLL RESOLUTION
-  // -------------------------------------------------------------
   const evaluateRoll = (total: number) => {
     if (total >= 30) return { successes: 5, label: "PERFECT (+5 Equations)" }
     if (total >= 26) return { successes: 4, label: "MASTERFUL (+4 Equations)" }
@@ -483,7 +519,7 @@ export function NavcomputerStation({
   }
 
   // -------------------------------------------------------------
-  // 8. ENGAGE HYPERDRIVE & ARRIVAL DROP-OUT
+  // 7. ENGAGE HYPERDRIVE & MISHAP EXECUTION
   // -------------------------------------------------------------
   const handleEngageHyperdrive = () => {
     if (!hasHyperdrive) {
@@ -502,6 +538,7 @@ export function NavcomputerStation({
       return
     }
 
+    // 1. Clean jump if calculations are complete
     if (equationsCompleted >= targetEquations) {
       setJumpResult({
         type: "success",
@@ -520,37 +557,126 @@ export function NavcomputerStation({
           totalDays: totalDays,
         })
       }
-    } else {
-      const d20 = Math.floor(Math.random() * 20) + 1
-      const total = d20 + equationsCompleted
-      let message = ""
+      return
+    }
 
-      if (total <= 2) {
-        message = "Catastrophic failure: Hyperdrive rendered unusable until refitted."
-      } else if (total <= 5) {
-        message = "Debris collision: Hull takes 1/10 max HP damage; shields regenerate at half rate."
-      } else if (total <= 8) {
-        message = "Gravity warp: Ship's structural integrity strained. AC reduced by 2."
-      } else if (total <= 11) {
-        message = "Gravity field: Unexpected stress. Maneuver checks made with disadvantage."
-      } else if (total <= 14) {
-        message = "Supernova radiation: Computer systems overloaded. Intelligence checks have disadvantage."
-      } else if (total <= 17) {
-        message = "Dust cloud: Sensors clogged. Scan and Probe checks made with disadvantage."
-      } else if (total <= 19) {
-        message = "Dumped cargo alarm: DC 15 Constitution save required."
-      } else {
-        message = "Narrow escape! The ship suffers no adverse consequences despite incomplete calculations."
-      }
+    // 2. Incomplete Calculations / Blind Jump Mishap Roll
+    const d20 = Math.floor(Math.random() * 20) + 1
+    const total = d20 + equationsCompleted
+    let message = ""
 
+    // Check for blind jump natural 20
+    if (d20 === 20 && equationsCompleted === 0) {
+      const unknownRegion = "Unknown Regions"
+      const destName = `Deep Space (${unknownRegion})`
+      onUpdateCurrentLocationPlanet?.(destName)
       setJumpResult({
-        type: "mishap",
+        type: "success",
         roll: d20,
         mod: equationsCompleted,
         total,
-        message,
+        message: `Natural 20 on a Blind Jump! The starship drops out of hyperspace completely unscathed, but in a completely unknown and uncharted location: ${destName}.`,
       })
+      return
     }
+
+    if (total <= 2) {
+      message = "Catastrophic failure: Hyperdrive rendered unusable until refitted by pressing the Execute Payment Settlement button at a repair facility."
+      onAddStatus?.({
+        id: `mishap-hyperdrive-${Date.now()}`,
+        title: "HYPERDRIVE CATASTROPHIC FAILURE // UNUSABLE",
+        effect: "Hyperdrive motivator fractured. All hyperspace jumps locked until refitted at a shipyard.",
+        duration: "Until Refit (Payment Settlement)",
+      })
+    } else if (total <= 5) {
+      message = "Debris collision: Hull takes 1/10th max Hull Points damage and shields regenerate at half rate until refitted by pressing the Execute Payment Settlement button at a repair facility."
+      const baseHull = 40
+      const collisionDmg = Math.max(1, Math.ceil(baseHull / 10))
+      onApplyDirectHullDamage?.(collisionDmg)
+      onAddStatus?.({
+        id: `mishap-debris-${Date.now()}`,
+        title: "SHIELD REGEN HALVED // DEBRIS COLLISION",
+        effect: `Hull took -${collisionDmg} direct HP damage. Shield regeneration rate is halved until refitted at a shipyard.`,
+        duration: "Until Refit (Payment Settlement)",
+      })
+    } else if (total <= 8) {
+      message = "Gravity warp: Structural integrity warped (Armor Class reduced by 2 until refitted by pressing the Execute Payment Settlement button at a repair facility)."
+      onAddStatus?.({
+        id: `mishap-warp-${Date.now()}`,
+        title: "GRAVITY WARP // AC -2",
+        effect: "Vessel armor class reduced by 2 due to hyperspace shear until refitted at a shipyard.",
+        duration: "Until Refit (Payment Settlement)",
+      })
+    } else if (total <= 11) {
+      message = "Gravity field: Unexpected gravitational turbulence. Maneuver checks suffer disadvantage until refitted by pressing the Execute Payment Settlement button at a repair facility."
+      onAddStatus?.({
+        id: `mishap-field-${Date.now()}`,
+        title: "GRAVITY FIELD // MANEUVER DISADVANTAGE",
+        effect: "Disadvantage on all Dexterity (Maneuvering) checks until refitted at a shipyard.",
+        duration: "Until Refit (Payment Settlement)",
+      })
+    } else if (total <= 14) {
+      message = "Supernova radiation: Computer sub-processors scorched. Intelligence checks have disadvantage until refitted by pressing the Execute Payment Settlement button at a repair facility."
+      onAddStatus?.({
+        id: `mishap-radiation-${Date.now()}`,
+        title: "SUPERNOVA RADIATION // INT DISADVANTAGE",
+        effect: "Disadvantage on all Intelligence checks until refitted at a shipyard.",
+        duration: "Until Refit (Payment Settlement)",
+      })
+    } else if (total <= 17) {
+      message = "Dust cloud: Sensors clogged. Scan and Probe checks suffer disadvantage until refitted by pressing the Execute Payment Settlement button at a repair facility."
+      onAddStatus?.({
+        id: `mishap-dust-${Date.now()}`,
+        title: "DUST CLOUD // SENSORS CLOGGED",
+        effect: "Disadvantage on Wisdom (Scan) and Intelligence (Probe) checks until refitted at a shipyard.",
+        duration: "Until Refit (Payment Settlement)",
+      })
+    } else if (total <= 19) {
+      message = "The ship encounters dumped cargo, setting off a collision alarm! A DC 15 Constitution saving throw is required."
+      // Trigger interactive dumped cargo modal
+      const shipHitDieSides = 8
+      const dmgRoll = rollDiceFormula(3, shipHitDieSides)
+      const halfDmg = Math.max(1, Math.floor(dmgRoll.total / 2))
+
+      const tonsRoll = rollDiceFormula(10, 10).total
+      const valueMultiplierRoll = rollDiceFormula(10, 10).total * 10
+      const totalCargoValue = tonsRoll * valueMultiplierRoll
+
+      setCargoMishapModal({
+        open: true,
+        hitDieType: shipHitDieSides,
+        cargoTons: tonsRoll,
+        valuePerTon: valueMultiplierRoll,
+        totalCargoValue,
+        fullDamageRoll: dmgRoll,
+        halfDamage: halfDmg,
+        resolved: false,
+      })
+    } else {
+      message = "Narrow escape! The starship suffers no adverse consequences despite incomplete calculations."
+    }
+
+    setJumpResult({
+      type: "mishap",
+      roll: d20,
+      mod: equationsCompleted,
+      total,
+      message,
+    })
+  }
+
+  const handleResolveCargoSave = (passed: boolean) => {
+    if (!cargoMishapModal) return
+    const damageToTake = passed ? cargoMishapModal.halfDamage : cargoMishapModal.fullDamageRoll.total
+
+    onApplyDirectHullDamage?.(damageToTake)
+
+    setCargoMishapModal((prev) => (prev ? {
+      ...prev,
+      resolved: true,
+      saveOutcome: passed ? "pass" : "fail",
+      appliedDamage: damageToTake,
+    } : null))
   }
 
   const handleArriveAndDropOut = () => {
@@ -1396,6 +1522,99 @@ export function NavcomputerStation({
                 CONFIRM DROP-OUT
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* DUMPED CARGO COLLISION ALARM MODAL (18-19 MISHAP) */}
+      {cargoMishapModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 font-mono">
+          <div className="w-full max-w-lg rounded-lg border-2 border-amber-500 bg-slate-950 p-5 shadow-[0_0_35px_rgba(245,158,11,0.35)] flex flex-col gap-4 text-xs">
+            <div className="flex items-center justify-between border-b border-amber-500/60 pb-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-400 animate-pulse" />
+                <h3 className="text-sm font-bold text-amber-300 uppercase tracking-widest">
+                  Collision Warning: Dumped Cargo Container
+                </h3>
+              </div>
+              {cargoMishapModal.resolved && (
+                <button
+                  type="button"
+                  onClick={() => setCargoMishapModal(null)}
+                  className="text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            <p className="text-slate-300 leading-relaxed text-xs">
+              While in transit, the ship encounters dumped cargo containers adrift in the vector, triggering an emergency collision alarm! A <strong className="text-amber-400">DC 15 Constitution Saving Throw</strong> is required to brace hull integrity.
+            </p>
+
+            <div className="grid grid-cols-2 gap-2 bg-black/60 p-2.5 rounded border border-bridge-border/60">
+              <div>
+                <span className="text-[10px] text-muted-foreground uppercase block">Potential Damage</span>
+                <span className="text-xs font-bold text-rose-400">
+                  3d{cargoMishapModal.hitDieType} ({cargoMishapModal.fullDamageRoll.rolls.join(" + ")} = {cargoMishapModal.fullDamageRoll.total} HP)
+                </span>
+                <span className="text-[9px] text-muted-foreground block mt-0.5">
+                  Half on save ({cargoMishapModal.halfDamage} HP)
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-muted-foreground uppercase block">Salvage Cargo Detected</span>
+                <span className="text-xs font-bold text-emerald-400">
+                  {cargoMishapModal.cargoTons} Tons Adrift
+                </span>
+                <span className="text-[9px] text-amber-300 font-bold block mt-0.5">
+                  Value: {cargoMishapModal.totalCargoValue.toLocaleString()} cr ({cargoMishapModal.valuePerTon.toLocaleString()} cr/ton)
+                </span>
+              </div>
+            </div>
+
+            {!cargoMishapModal.resolved ? (
+              <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/40">
+                <span className="text-[10px] text-muted-foreground uppercase text-center block">
+                  Resolve DC 15 Constitution Saving Throw:
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleResolveCargoSave(true)}
+                    className="py-2.5 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 font-bold uppercase tracking-wider text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <ShieldCheck className="h-4 w-4" />
+                    Passed Save (-{cargoMishapModal.halfDamage} HP)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleResolveCargoSave(false)}
+                    className="py-2.5 rounded border border-rose-500/60 bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 font-bold uppercase tracking-wider text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <ShieldAlert className="h-4 w-4" />
+                    Failed Save (-{cargoMishapModal.fullDamageRoll.total} HP)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 rounded bg-black/80 border border-emerald-500/50 flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs uppercase">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Collision Resolved: Applied -{cargoMishapModal.appliedDamage} HP to Hull Integrity
+                </div>
+                <div className="text-[11px] text-slate-300 font-mono leading-relaxed bg-black/50 p-2 rounded border border-bridge-border/40">
+                  Salvage Manifest: <strong className="text-white">{cargoMishapModal.cargoTons} Tons</strong> of containerized cargo floating in space (Estimated value: <strong className="text-amber-300">{cargoMishapModal.totalCargoValue.toLocaleString()} credits</strong>). Notify your Cargo Officer or GM to log salvage.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCargoMishapModal(null)}
+                  className="mt-1 w-full py-2 rounded bg-amber-500/20 border border-amber-500/60 text-amber-300 font-bold uppercase text-xs hover:bg-amber-500/30 cursor-pointer"
+                >
+                  Dismiss Encounter Log
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

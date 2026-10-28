@@ -42,6 +42,7 @@ import {
 import { ShipStats } from "./ship-stats"
 import { StationModifications, Modification } from "./ship-modifications"
 import { type ShipConfig } from "./ship-setup"
+import type { ActiveStatus } from "./defense-station"
 import type { ManifestMember, ShipCompartmentId } from "./bridge-dashboard"
 import { getCrewRole } from "./bridge-dashboard"
 
@@ -104,7 +105,9 @@ interface EngineeringStationProps {
   onUpdateVersatileTransportUsed?: (count: number | ((prev: number) => number)) => void
   bestShipInVerseUsed?: boolean
   onUpdateBestShipInVerseUsed?: (used: boolean | ((prev: boolean) => boolean)) => void
-  // Manifest & Turn Integration
+  onAddStatus?: (status: ActiveStatus) => void
+  systemDamageLevel?: number
+  onUpdateSystemDamageLevel?: (level: number | ((prev: number) => number)) => void
   manifest?: ManifestMember[]
   onAssignCrew?: (memberId: string, targetLocation: ShipCompartmentId) => void
   onToggleTurn?: (memberId: string) => void
@@ -136,7 +139,7 @@ export function EngineeringStation({
   isPoweredOn = true,
   onSetPoweredOn,
   maxPowerDice,
-  availablePowerDice,
+  availablePowerDice = 4,
   powerDieType,
   recoveryRate,
   onCycleReactor,
@@ -190,6 +193,9 @@ export function EngineeringStation({
   onUpdateVersatileTransportUsed,
   bestShipInVerseUsed = false,
   onUpdateBestShipInVerseUsed,
+  onAddStatus,
+  systemDamageLevel = 0,
+  onUpdateSystemDamageLevel,
   manifest = [],
   onAssignCrew,
   onToggleTurn,
@@ -197,7 +203,6 @@ export function EngineeringStation({
   const getModFromScore = (score?: number) => (score !== undefined ? Math.floor((score - 10) / 2) : 0)
   const formatMod = (mod: number) => (mod >= 0 ? `+${mod}` : `${mod}`)
 
-  // --- CREW ASSIGNMENT EXTRACTION ---
   const assignedCrew = useMemo(() => {
     return manifest
       .filter((m) => m.location === "engineering" && !m.isPassenger)
@@ -361,22 +366,49 @@ export function EngineeringStation({
 
     if (dieRoll === 20 && bonus === 0) {
       description = "Natural 20 with 0 procedures! Ship is unscathed, but starts with 0 power dice available."
+      if (onUpdateSharedPool) onUpdateSharedPool(0)
+      if (onUpdateStationPools) {
+        onUpdateStationPools({ engines: 0, communications: 0, weapons: 0, sensors: 0, defense: 0 })
+      }
     } else if (total >= 20) {
-      description = `Total ${total} (20+): The ship suffers no adverse consequences.`
+      description = `Total ${total} (20+): Clean takeoff! The ship suffers no adverse consequences.`
     } else if (total >= 18) {
       description = `Total ${total} (18-19): Navcomputer is disabled until ship recharges.`
+      onAddStatus?.({
+        id: `navcomputer-disabled-${Date.now()}`,
+        title: "NAVCOMPUTER DISABLED // OFFLINE",
+        effect: "Hyperspace calculations offline. Blind jumps without calculations risk catastrophic drift unless a Nat 20 is rolled.",
+        duration: "Until Ship Recharges",
+      })
     } else if (total >= 15) {
       description = `Total ${total} (15-17): Ship gains 1 level of slowed until ship recharges.`
+      onAddStatus?.({
+        id: `slowed-mishap-${Date.now()}`,
+        title: "SLOWED (LVL 1)",
+        effect: "Speed reduced by 150 feet due to thermal engine strain.",
+        duration: "Until Ship Recharges",
+        level: 1,
+      })
     } else if (total >= 12) {
-      description = `Total ${total} (12-14): Ship is blinded until ship recharges.`
+      description = `Total ${total} (12-14): Sensor overload! Ship is blinded until ship recharges.`
+      onAddStatus?.({
+        id: `blinded-mishap-${Date.now()}`,
+        title: "BLINDED",
+        effect: "Sensors overloaded by core discharge. Attacks against ship have advantage; ship attacks suffer disadvantage.",
+        duration: "Until Ship Recharges",
+      })
     } else if (total >= 9) {
-      description = `Total ${total} (9-11): Ship gains 1 level of system damage.`
+      description = `Total ${total} (9-11): Structural stress. Ship suffers 1 level of system damage.`
+      onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 1))
     } else if (total >= 6) {
-      description = `Total ${total} (6-8): Ship gains 2 levels of system damage.`
+      description = `Total ${total} (6-8): Severe surge! Ship suffers 2 levels of system damage.`
+      onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 2))
     } else if (total >= 3) {
-      description = `Total ${total} (3-5): Ship gains 3 levels of system damage.`
+      description = `Total ${total} (3-5): Critical burnout! Ship suffers 3 levels of system damage.`
+      onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 3))
     } else {
-      description = `Total ${total} (1-2): Ship gains 4 levels of system damage.`
+      description = `Total ${total} (1-2): Catastrophic ignition breach! Ship suffers 4 levels of system damage.`
+      onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 4))
     }
 
     if (dieRoll === 1 && !isRecursiveSecondRoll) {
@@ -413,7 +445,6 @@ export function EngineeringStation({
   const versatileMax = 2 * shipTier
   const hasBestShip = isMedium && shipTier >= 5
 
-  // --- LOCAL TACTICAL STATE TRACKERS ---
   const [powerBackupUsed, setPowerBackupUsed] = useState<boolean>(false)
   const [emergencyGenUsed, setEmergencyGenUsed] = useState<boolean>(false)
   const [quickPatchUses, setQuickPatchUses] = useState<number>(0)
@@ -421,7 +452,6 @@ export function EngineeringStation({
   const [altFuelUses, setAltFuelUses] = useState<number>(0)
   const [tacticalFeedback, setTacticalFeedback] = useState<string | null>(null)
 
-  // Power Prioritization Bonus Action Lock State
   const [isPowerRoutingUnlocked, setIsPowerRoutingUnlocked] = useState<boolean>(false)
 
   const [priorityOrder, setPriorityOrder] = useState<StationKey[]>([
@@ -435,7 +465,6 @@ export function EngineeringStation({
   const [reactorLog, setReactorLog] = useState<string | null>(null)
   const [isCycling, setIsCycling] = useState<boolean>(false)
 
-  // Elevated Boost Action States
   const [localSelectedBoost, setLocalSelectedBoost] = useState<"engines" | "shields" | "weapons" | null>(null)
   const selectedBoostType = externalSelectedBoostType !== undefined ? externalSelectedBoostType : localSelectedBoost
   const setSelectedBoostType = (val: "engines" | "shields" | "weapons" | null) => {
@@ -485,8 +514,6 @@ export function EngineeringStation({
 
     setIsCycling(true)
     setReactorLog("Initiating reactor spool-up and power cycle sequence...")
-
-    // Automatically relock power routing at end of round
     setIsPowerRoutingUnlocked(false)
 
     setTimeout(() => {
@@ -616,7 +643,7 @@ export function EngineeringStation({
         onBoostShields(shieldRoll)
       }
     } else if (selectedBoostType === "weapons") {
-      setBoostFeedback("SUCCESS! Next damage roll this turn has ADVANTAGE.")
+      setBoostFeedback("SUCCESS! Next weapon attack roll has ADVANTAGE.")
       if (onBoostWeapons) onBoostWeapons()
     }
   }
@@ -717,7 +744,6 @@ export function EngineeringStation({
     setPatchFeedback(null)
   }
 
-  // Tactical Actions Handlers
   const handleTriggerPowerBackup = () => {
     if (powerBackupUsed) return
     setPowerBackupUsed(true)
@@ -815,7 +841,6 @@ export function EngineeringStation({
         </div>
         
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          {/* Main Power Controls */}
           <button
             type="button"
             onClick={() => setShowStartupModal(true)}
@@ -857,12 +882,9 @@ export function EngineeringStation({
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* STATION CREW ASSIGNMENT & COMBAT TURN HUD (DIRECTLY UNDER HEADER) */}
-      {/* ========================================================================= */}
+      {/* STATION CREW ASSIGNMENT & COMBAT TURN HUD */}
       <div className="rounded-md border border-cyan-neon/40 bg-black/40 p-3 shadow-[0_0_15px_rgba(0,255,255,0.05)]">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Assigned Personnel Cards */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-neon uppercase tracking-wider">
               <Users className="h-4 w-4 text-cyan-neon" />
@@ -897,7 +919,6 @@ export function EngineeringStation({
 
                     <span className="font-bold text-xs">{member.name}</span>
 
-                    {/* Turn Toggle */}
                     <button
                       type="button"
                       onClick={() => onToggleTurn && onToggleTurn(member.id)}
@@ -915,7 +936,6 @@ export function EngineeringStation({
                       )}
                     </button>
 
-                    {/* Vacate / Return to Quarters */}
                     <button
                       type="button"
                       onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
@@ -930,7 +950,6 @@ export function EngineeringStation({
             )}
           </div>
 
-          {/* Quick Pull Selector: Bring Crew to Engineering */}
           {availablePersonnel.length > 0 && onAssignCrew && (
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">
@@ -959,10 +978,8 @@ export function EngineeringStation({
         </div>
       </div>
 
-      {/* Core Ship Attributes & Skills Window */}
       <ShipStats shipConfig={shipConfig} />
 
-      {/* Dedicated Chassis Surges & Paragon Reactions Panel (Tier 4 & Tier 5) */}
       {(shipTier >= 3) && (
         <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between border-b border-bridge-border pb-2">
@@ -976,7 +993,6 @@ export function EngineeringStation({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {/* Standing By Surge */}
             {shipTier >= 4 && (
               <div className="flex flex-col justify-between gap-2 rounded border border-bridge-border/60 bg-black/40 p-3">
                 <div className="flex items-center justify-between">
@@ -1009,7 +1025,6 @@ export function EngineeringStation({
               </div>
             )}
 
-            {/* A Leaf on the Wind */}
             {shipTier >= 5 && !isMedium && (
               <div className="flex flex-col justify-between gap-2 rounded border border-bridge-border/60 bg-black/40 p-3">
                 <div className="flex items-center justify-between">
@@ -1042,7 +1057,6 @@ export function EngineeringStation({
               </div>
             )}
 
-            {/* Versatile Transport */}
             {hasVersatileTransport && (
               <div className="flex flex-col justify-between gap-2 rounded border border-bridge-border/60 bg-black/40 p-3">
                 <div className="flex items-center justify-between mb-1">
@@ -1084,7 +1098,6 @@ export function EngineeringStation({
               </div>
             )}
 
-            {/* Best Ship in the Verse */}
             {hasBestShip && (
               <div className="flex flex-col justify-between gap-2 rounded border border-bridge-border/60 bg-black/40 p-3">
                 <div className="flex items-center justify-between mb-1">
@@ -1120,7 +1133,6 @@ export function EngineeringStation({
         </div>
       )}
 
-      {/* ACTIVE TACTICAL MODIFICATIONS PANEL */}
       {(hasPowerBackup || hasEmergencyGenerator || hasElectronicBaffle || hasAltFuelConverter) && (
         <div className="rounded-md border border-cyan-neon/50 bg-bridge-panel p-4 flex flex-col gap-3 shadow-[0_0_15px_rgba(0,255,255,0.06)]">
           <div className="flex items-center justify-between border-b border-bridge-border pb-2">
@@ -1134,7 +1146,6 @@ export function EngineeringStation({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* Power Backup */}
             {hasPowerBackup && (
               <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
                 <div>
@@ -1164,7 +1175,6 @@ export function EngineeringStation({
               </div>
             )}
 
-            {/* Emergency Generator */}
             {hasEmergencyGenerator && (
               <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
                 <div>
@@ -1207,7 +1217,6 @@ export function EngineeringStation({
               </div>
             )}
 
-            {/* Electronic Baffle */}
             {hasElectronicBaffle && (
               <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
                 <div>
@@ -1235,7 +1244,6 @@ export function EngineeringStation({
               </div>
             )}
 
-            {/* Alternative Fuel Converter */}
             {hasAltFuelConverter && (
               <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
                 <div>
@@ -1349,7 +1357,6 @@ export function EngineeringStation({
                     </span>
                   </div>
 
-                  {/* Bonus Action Unlock / Lock Button */}
                   <button
                     type="button"
                     onClick={() => setIsPowerRoutingUnlocked((prev) => !prev)}
@@ -1509,7 +1516,7 @@ export function EngineeringStation({
                 <span>Boost Weapons</span>
                 <Crosshair className="h-3.5 w-3.5 text-cyan-neon" />
               </div>
-              <span className="text-[10px] text-muted-foreground">DC 10 Str Check: Advantage on next damage roll this turn.</span>
+              <span className="text-[10px] text-muted-foreground">DC 10 Str Check: Advantage on next weapon attack roll.</span>
             </button>
           </div>
 
@@ -1554,7 +1561,7 @@ export function EngineeringStation({
           )}
         </div>
 
-        {/* SHIP RECHARGE PROTOCOL (1-HOUR MAINTENANCE CYCLE) */}
+        {/* SHIP RECHARGE PROTOCOL */}
         <div className="rounded-md border border-cyan-neon/50 bg-bridge-panel p-4 flex flex-col gap-4 shadow-[0_0_15px_rgba(0,240,255,0.06)]">
           <div className="flex items-center justify-between border-b border-bridge-border pb-3">
             <div className="flex items-center gap-2.5">
@@ -1966,9 +1973,7 @@ export function EngineeringStation({
         </div>
       </div>
 
-      {/* ========================================================================= */}
       {/* START-UP & DURESS INITIATION PROTOCOL MODAL */}
-      {/* ========================================================================= */}
       {showStartupModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
           <div className="bg-bridge-panel border border-cyan-neon/70 rounded-md p-5 max-w-xl w-full flex flex-col gap-4 shadow-[0_0_25px_rgba(0,255,255,0.15)] max-h-[90vh] overflow-y-auto">
@@ -2002,7 +2007,6 @@ export function EngineeringStation({
               </span>
             </div>
 
-            {/* Stepper Display */}
             <div className="bg-black/60 p-3 rounded border border-bridge-border/60 flex flex-col gap-2">
               <div className="flex justify-between text-xs">
                 <span className="font-bold text-slate-200">
@@ -2036,7 +2040,6 @@ export function EngineeringStation({
               </div>
             </div>
 
-            {/* Duress Engineering Check */}
             <div className="bg-black/50 p-3 rounded border border-bridge-border/60 flex flex-col gap-2.5">
               <div className="flex justify-between items-center text-xs">
                 <span className="font-bold text-cyan-neon uppercase">Duress Regulation Check</span>
@@ -2084,7 +2087,6 @@ export function EngineeringStation({
               )}
             </div>
 
-            {/* Forced Ignition Interlock Trigger */}
             <div className="border-t border-bridge-border/60 pt-3 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
                 {initiationProcedures < targetProcedures ? (

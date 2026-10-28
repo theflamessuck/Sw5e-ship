@@ -7,6 +7,7 @@ import { ShipStats } from "./ship-stats"
 import type { JourneyData } from "./navcomputer-station"
 import type { ShipConfig } from "./ship-setup"
 import type { OrdnanceItem } from "./weapons-station"
+import type { ActiveStatus } from "./defense-station"
 import type {
   ManifestMember,
   ShipCompartmentId,
@@ -45,7 +46,8 @@ import {
   ShieldCheck,
   Swords,
   Target,
-  Sparkles
+  Sparkles,
+  Radio
 } from "lucide-react"
 import {
   rollAttackD20,
@@ -85,6 +87,18 @@ function findArmedAmmoCatalog(launcherState: LauncherLoadState | null) {
     STARSHIP_AMMUNITION.find((a) => a.name.toLowerCase() === (launcherState.ordnanceName || "").toLowerCase()) ||
     null
   )
+}
+
+function generateTransponderCode(modelName?: string): string {
+  const clean = (modelName || "VESSEL").replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
+  const prefix = (clean.slice(0, 4) || "STAR").padEnd(4, "X")
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+  let randomPart = ""
+  for (let i = 0; i < 4; i++) {
+    randomPart += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  const serial = Math.floor(1000 + Math.random() * 9000)
+  return `${prefix}-${randomPart}-${serial}`
 }
 
 interface PilotAction {
@@ -208,6 +222,7 @@ interface EnginesStationProps {
   maxShields?: number
   systemDamageLevel?: number
   onUpdateSystemDamageLevel?: (level: number | ((prev: number) => number)) => void
+  onAddStatus?: (status: ActiveStatus) => void
   effectiveSlowedLevel?: number
   manifest?: ManifestMember[]
   onAssignCrew?: (memberId: string, targetLocation: ShipCompartmentId) => void
@@ -217,6 +232,8 @@ interface EnginesStationProps {
   onResetMovement?: () => void
   isWeaponsBoosted?: boolean
   onConsumeWeaponBoost?: () => void
+  transponderCode?: string
+  onUpdateTransponderCode?: (code: string) => void
 }
 
 export function EnginesStation({
@@ -280,6 +297,7 @@ export function EnginesStation({
   maxShields = 24,
   systemDamageLevel = 0,
   onUpdateSystemDamageLevel,
+  onAddStatus,
   effectiveSlowedLevel = 0,
   manifest = [],
   onAssignCrew,
@@ -289,6 +307,8 @@ export function EnginesStation({
   onResetMovement,
   isWeaponsBoosted = false,
   onConsumeWeaponBoost,
+  transponderCode: externalTransponderCode,
+  onUpdateTransponderCode,
 }: EnginesStationProps) {
   const [showStartupModal, setShowStartupModal] = useState(false)
   const [showActionModal, setShowActionModal] = useState(false)
@@ -296,6 +316,60 @@ export function EnginesStation({
   const [awayMissionDaysInput, setAwayMissionDaysInput] = useState<string>("7")
 
   const [helmAttackType, setHelmAttackType] = useState<HelmAttackType>("standard")
+
+  // --- SECONDARY TRANSPONDER MODIFICATION DETECTION ---
+  const hasSecondaryTransponderMod = useMemo(() => {
+    return installedMods.some((mod) => {
+      const name = (mod.name || "").toLowerCase()
+      return (
+        name.includes("secondary transponder") ||
+        name.includes("alternate transponder") ||
+        (name.includes("transponder") && name.includes("code"))
+      )
+    })
+  }, [installedMods])
+
+  // --- MODEL-DRIVEN TRANSPONDER GENERATION & SYNC ---
+  const currentModel = shipConfig?.model || ""
+  const [lastTrackedModel, setLastTrackedModel] = useState<string>(currentModel)
+  const [localTransponderCode, setLocalTransponderCode] = useState<string>(() =>
+    generateTransponderCode(currentModel)
+  )
+
+  const primaryTransponder = externalTransponderCode || localTransponderCode
+
+  // Regenerate when a new model is selected and saved
+  useEffect(() => {
+    if (currentModel && currentModel !== lastTrackedModel) {
+      const newCode = generateTransponderCode(currentModel)
+      setLastTrackedModel(currentModel)
+      if (onUpdateTransponderCode) {
+        onUpdateTransponderCode(newCode)
+      } else {
+        setLocalTransponderCode(newCode)
+      }
+    }
+  }, [currentModel, lastTrackedModel, onUpdateTransponderCode])
+
+  const [backupTransponder] = useState<string>(() => "CIV-FREIGHTER-9021X")
+  const [transponderMode, setTransponderMode] = useState<TransponderMode>("PRIMARY")
+
+  // Force reset back to PRIMARY if the secondary modification is uninstalled
+  useEffect(() => {
+    if (!hasSecondaryTransponderMod && transponderMode !== "PRIMARY") {
+      setTransponderMode("PRIMARY")
+    }
+  }, [hasSecondaryTransponderMod, transponderMode])
+
+  const handleToggleTransponder = () => {
+    if (!hasSecondaryTransponderMod) {
+      alert(
+        "Feature Locked: Switching to an alternate transponder requires the 'Secondary Transponder Code' modification installed at the Communications station."
+      )
+      return
+    }
+    setTransponderMode((prev) => (prev === "PRIMARY" ? "SECURE_BACKUP" : "PRIMARY"))
+  }
 
   const assignedCrew = useMemo(() => {
     return manifest
@@ -745,10 +819,6 @@ export function EnginesStation({
   const syncDay = lastAstrogationSyncDay ?? currentDay
   const daysElapsedSinceSync = Math.max(0, currentDay - syncDay)
 
-  const [transponderMode, setTransponderMode] = useState<TransponderMode>("PRIMARY")
-  const primaryCode = "ZETA-CRUCIBLE-7749"
-  const backupCode = "CIV-FREIGHTER-9021X"
-
   const [selectedPilotAction, setSelectedPilotAction] = useState<PilotAction>(PILOT_ACTIONS[0])
   const [lastBurnedDay, setLastBurnedDay] = useState<number | null>(null)
   const [hasBurnedInitialJump, setHasBurnedInitialJump] = useState<boolean>(false)
@@ -896,26 +966,49 @@ export function EnginesStation({
 
     if (dieRoll === 20 && bonus === 0) {
       description = "Natural 20 with 0 procedures! Ship is unscathed, but starts with 0 power dice available."
+      if (onUpdateSharedPool) onUpdateSharedPool(0)
+      if (onUpdateStationPools) {
+        onUpdateStationPools({ engines: 0, communications: 0, weapons: 0, sensors: 0, defense: 0 })
+      }
     } else if (total >= 20) {
-      description = `Total ${total} (20+): The ship suffers no adverse consequences.`
+      description = `Total ${total} (20+): Clean takeoff! The ship suffers no adverse consequences.`
     } else if (total >= 18) {
       description = `Total ${total} (18-19): Navcomputer is disabled until ship recharges.`
+      onAddStatus?.({
+        id: `navcomputer-disabled-${Date.now()}`,
+        title: "NAVCOMPUTER DISABLED // OFFLINE",
+        effect: "Hyperspace calculations offline. Blind jumps without calculations risk catastrophic drift unless a Nat 20 is rolled.",
+        duration: "Until Ship Recharges",
+      })
     } else if (total >= 15) {
       description = `Total ${total} (15-17): Ship gains 1 level of slowed until ship recharges.`
+      onAddStatus?.({
+        id: `slowed-mishap-${Date.now()}`,
+        title: "SLOWED (LVL 1)",
+        effect: "Speed reduced by 150 feet due to thermal engine strain.",
+        duration: "Until Ship Recharges",
+        level: 1,
+      })
     } else if (total >= 12) {
-      description = `Total ${total} (12-14): Ship is blinded until ship recharges.`
+      description = `Total ${total} (12-14): Sensor overload! Ship is blinded until ship recharges.`
+      onAddStatus?.({
+        id: `blinded-mishap-${Date.now()}`,
+        title: "BLINDED",
+        effect: "Sensors overloaded by core discharge. Attacks against ship have advantage; ship attacks suffer disadvantage.",
+        duration: "Until Ship Recharges",
+      })
     } else if (total >= 9) {
-      description = `Total ${total} (9-11): Ship gains 1 level of system damage.`
-      onUpdateSystemDamageLevel?.((prev) => Math.min(6, prev + 1))
+      description = `Total ${total} (9-11): Structural stress. Ship suffers 1 level of system damage.`
+      onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 1))
     } else if (total >= 6) {
-      description = `Total ${total} (6-8): Ship gains 2 levels of system damage.`
-      onUpdateSystemDamageLevel?.((prev) => Math.min(6, prev + 2))
+      description = `Total ${total} (6-8): Severe surge! Ship suffers 2 levels of system damage.`
+      onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 2))
     } else if (total >= 3) {
-      description = `Total ${total} (3-5): Ship gains 3 levels of system damage.`
-      onUpdateSystemDamageLevel?.((prev) => Math.min(6, prev + 3))
+      description = `Total ${total} (3-5): Critical burnout! Ship suffers 3 levels of system damage.`
+      onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 3))
     } else {
-      description = `Total ${total} (1-2): Ship gains 4 levels of system damage.`
-      onUpdateSystemDamageLevel?.((prev) => Math.min(6, prev + 4))
+      description = `Total ${total} (1-2): Catastrophic ignition breach! Ship suffers 4 levels of system damage.`
+      onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 4))
     }
 
     if (dieRoll === 1 && !isRecursiveSecondRoll) {
@@ -1225,21 +1318,42 @@ export function EnginesStation({
             </span>
           )}
 
-          <div className="flex items-center gap-2 rounded border border-bridge-border bg-black/50 px-2 py-0.5">
-            <span className="text-[8px] text-muted-foreground uppercase">IFF:</span>
-            <span className="text-[10px] font-bold text-amber-300">
-              {transponderMode === "PRIMARY" ? primaryCode : backupCode}
+          <div
+            className="flex items-center gap-2 rounded border border-bridge-border bg-black/50 px-2 py-0.5"
+            title={
+              hasSecondaryTransponderMod
+                ? `Transponder system operational. Current broadcast: ${transponderMode === "PRIMARY" ? primaryTransponder : backupTransponder}`
+                : "Secondary Transponder Code modification not installed at Communications Station"
+            }
+          >
+            <span className="text-[8px] text-muted-foreground uppercase flex items-center gap-1">
+              <Radio className="w-2.5 h-2.5 text-cyan-neon" /> IFF:
             </span>
-            <button
-              onClick={() => setTransponderMode((prev) => (prev === "PRIMARY" ? "SECURE_BACKUP" : "PRIMARY"))}
-              className={`rounded px-1.5 py-0.2 text-[8px] font-bold uppercase transition-all cursor-pointer ${
-                transponderMode === "PRIMARY"
-                  ? "border border-cyan-neon/40 bg-cyan-neon/10 text-cyan-neon"
-                  : "border border-red-500/50 bg-red-500/20 text-red-400 animate-pulse"
-              }`}
-            >
-              {transponderMode === "PRIMARY" ? "BACKUP" : "ACTIVE"}
-            </button>
+            <span className="text-[10px] font-bold font-mono text-amber-300">
+              {transponderMode === "PRIMARY" ? primaryTransponder : backupTransponder}
+            </span>
+
+            {hasSecondaryTransponderMod ? (
+              <button
+                type="button"
+                onClick={handleToggleTransponder}
+                className={`rounded px-1.5 py-0.2 text-[8px] font-bold uppercase transition-all cursor-pointer ${
+                  transponderMode === "PRIMARY"
+                    ? "border border-cyan-neon/40 bg-cyan-neon/10 text-cyan-neon hover:bg-cyan-neon/20"
+                    : "border border-red-500/50 bg-red-500/20 text-red-400 animate-pulse"
+                }`}
+                title="Toggle between primary and secondary spoofed transponder"
+              >
+                {transponderMode === "PRIMARY" ? "BACKUP" : "ACTIVE"}
+              </button>
+            ) : (
+              <span
+                className="text-[7px] uppercase font-bold text-slate-500 border border-slate-800 bg-slate-900/50 px-1 py-0.2 rounded"
+                title="Secondary Transponder Code modification required to broadcast alternate IFF signal"
+              >
+                LOCKED
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -2332,7 +2446,6 @@ export function EnginesStation({
 
         const saveDC = 8 + attackMod
 
-        // Disadvantage evaluation: Helm Standard Fire imposes disadvantage unless Attack Run or Dogfight is selected
         const isHelmDisadvantage = helmAttackType === "standard"
         const hasDisadvantage = rangeBracket === "long" || failsCon || (effectiveSlowedLevel >= 3) || isHelmDisadvantage
         const hasAdvantage = isWeaponsBoosted
@@ -2370,7 +2483,6 @@ export function EnginesStation({
         if (dynamicFlat > 0) finalDmgFormula = `${diceString} + ${dynamicFlat}`
         else if (dynamicFlat < 0) finalDmgFormula = `${diceString} - ${Math.abs(dynamicFlat)}`
 
-        // Centralized Digital Attack Roll
         const handleRollDigitalAttack = () => {
           const res = rollAttackD20({
             modifier: attackMod,
@@ -2395,7 +2507,6 @@ export function EnginesStation({
           }
         }
 
-        // Centralized Digital Damage Roll
         const handleRollDigitalDamage = (forceCrit?: boolean) => {
           const isCrit = forceCrit !== undefined ? forceCrit : (attackOutcome === "crit" || attackRollData?.isCrit === true)
           const dmgRes = rollDamage({

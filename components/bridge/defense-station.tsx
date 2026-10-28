@@ -197,7 +197,7 @@ export function DefenseStation({
   tempShields,
   standingByUsed = false,
   onUseStandingBy,
-  systemDamageLevel = 0,
+  systemDamageLevel: rawSystemDamageLevel = 0,
   onUpdateSystemDamageLevel,
   statuses = [],
   onAddStatus,
@@ -207,6 +207,16 @@ export function DefenseStation({
   onToggleTurn,
 }: DefenseStationProps) {
   const isInitialMount = useRef(true)
+
+  // Ensure systemDamageLevel is strictly a valid integer number
+  const numericSystemDamageLevel = useMemo(() => {
+    if (typeof rawSystemDamageLevel === "number") return rawSystemDamageLevel
+    if (typeof rawSystemDamageLevel === "string") {
+      const parsed = parseInt(rawSystemDamageLevel, 10)
+      return isNaN(parsed) ? 0 : parsed
+    }
+    return 0
+  }, [rawSystemDamageLevel])
 
   // --- CREW ASSIGNMENT EXTRACTION ---
   const assignedCrew = useMemo(() => {
@@ -226,7 +236,7 @@ export function DefenseStation({
   const shipTier = typeof shipConfig?.tier === "number" ? shipConfig.tier : 0
   const hasHoldTogether = isMedium && shipTier >= 3
 
-  const isLevel4Damage = systemDamageLevel >= 4
+  const isLevel4Damage = numericSystemDamageLevel >= 4
 
   const hasFeedbackShield = installedMods.some((m) => m.name.toUpperCase().includes("FEEDBACK SHIELD"))
   const hasInvulnerabilityDrive = installedMods.some((m) => m.name.toUpperCase().includes("INVULNERABILITY DRIVE"))
@@ -335,9 +345,20 @@ export function DefenseStation({
     dexLimitLabel = "Max +2 DEX (Deflection)"
   }
 
+  // Astrogation Mishap (6-8): Gravity Warp reduces AC by 2 until refitted
+  const hasGravityWarpMishap = statuses.some((s) => 
+    s.id?.toLowerCase().includes("gravity warp") || 
+    s.title?.toLowerCase().includes("gravity warp")
+  )
+  const gravityWarpACPenalty = hasGravityWarpMishap ? -2 : 0
+
   const tierACBonus = SHIP_TIER_PROGRESSION[sizeKey]?.[shipTier]?.acUpgrade ?? (shipTier >= 2 ? shipTier - 1 : 0)
   const modsACBonus = installedMods.reduce((sum, mod) => sum + ((mod as any).acBonus || 0), 0)
-  const dynamicAC = (shipConfig as any)?.armorClass ?? (10 + appliedDexMod + tierACBonus + modsACBonus)
+  
+  // Base AC before mishap status adjustment
+  const unpenalizedAC = (shipConfig as any)?.baseArmorClass ?? (10 + appliedDexMod + tierACBonus + modsACBonus)
+  // Ensure the Gravity Warp status penalty is explicitly applied
+  const dynamicAC = Math.max(1, unpenalizedAC + gravityWarpACPenalty)
 
   const baseDiceCount = getBaseDiceBySize(shipConfig?.size)
   const tierDiceBonus = shipConfig?.tier ?? 0
@@ -392,7 +413,7 @@ export function DefenseStation({
         onShieldChange?.(effectiveMaxShields, baseMaxShields, shipShields.temp)
       }
     }
-  }, [isLevel4Damage, effectiveMaxHull, effectiveMaxShields])
+  }, [isLevel4Damage, effectiveMaxHull, effectiveMaxShields, dynamicAC, baseMaxHull, baseMaxShields, onHullChange, onShieldChange, shipShields.temp, hull.current, shipShields.current])
 
   useEffect(() => {
     if (currentShields !== undefined || maxShields !== undefined || tempShields !== undefined) {
@@ -418,7 +439,7 @@ export function DefenseStation({
       onHullChange?.(prev.current, prev.max, dynamicAC)
       return { ...prev, ac: dynamicAC }
     })
-  }, [dynamicAC])
+  }, [dynamicAC, onHullChange])
 
   const [isAutoRegenActive, setIsAutoRegenActive] = useState<boolean>(false)
   const [regenThresholdPct, setRegenThresholdPct] = useState<number>(75)
@@ -690,16 +711,13 @@ export function DefenseStation({
   }
 
   const currentSelectedStatusMeta = SHIP_STATUS_OPTIONS.find((s) => s.id === selectedStatusId)
-  const currentDamageDefinition = SYSTEM_DAMAGE_LEVEL_DEFINITIONS[systemDamageLevel] || SYSTEM_DAMAGE_LEVEL_DEFINITIONS[0]
+  const currentDamageDefinition = SYSTEM_DAMAGE_LEVEL_DEFINITIONS[numericSystemDamageLevel] || SYSTEM_DAMAGE_LEVEL_DEFINITIONS[0]
 
   return (
     <div className="flex flex-col gap-6 font-mono">
-      {/* ========================================================================= */}
       {/* STATION CREW ASSIGNMENT & COMBAT TURN HUD */}
-      {/* ========================================================================= */}
       <div className="rounded-md border border-cyan-neon/40 bg-black/40 p-3 shadow-[0_0_15px_rgba(0,255,255,0.05)]">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Assigned Defense Personnel Cards */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-neon uppercase tracking-wider">
               <Users className="h-4 w-4 text-cyan-neon" />
@@ -734,7 +752,6 @@ export function DefenseStation({
 
                     <span className="font-bold text-xs">{member.name}</span>
 
-                    {/* Turn Toggle */}
                     <button
                       type="button"
                       onClick={() => onToggleTurn && onToggleTurn(member.id)}
@@ -752,7 +769,6 @@ export function DefenseStation({
                       )}
                     </button>
 
-                    {/* Vacate / Return to Quarters */}
                     <button
                       type="button"
                       onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
@@ -767,7 +783,6 @@ export function DefenseStation({
             )}
           </div>
 
-          {/* Quick Pull Selector: Bring Crew to Defense */}
           {availablePersonnel.length > 0 && onAssignCrew && (
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">
@@ -800,7 +815,7 @@ export function DefenseStation({
       <div className="grid gap-4 grid-cols-1 w-full">
         <ShipStats 
           shipConfig={shipConfig} 
-          systemDamageLevel={systemDamageLevel} 
+          systemDamageLevel={numericSystemDamageLevel} 
           statuses={statuses}
         />
         <div className="flex flex-col rounded-md border border-bridge-border bg-bridge-panel p-4 gap-4 w-full">
@@ -1005,28 +1020,38 @@ export function DefenseStation({
               <span className="text-xs font-mono font-bold text-cyan-neon tracking-[0.2em] uppercase">
                 Armor: {armorType.toUpperCase()}
               </span>
-              <span className="text-[9px] font-mono text-emerald-400 font-bold uppercase">Hull Plating Intact</span>
+              <span className={`text-[9px] font-mono font-bold uppercase ${hasGravityWarpMishap ? "text-red-400 animate-pulse" : "text-emerald-400"}`}>
+                {hasGravityWarpMishap ? "⚠️ GRAVITY WARP ACTIVE (-2 AC)" : "Hull Plating Intact"}
+              </span>
             </div>
 
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div 
                 className="bg-black/60 p-2 rounded border border-cyan-neon/40 flex items-center gap-3"
-                title={`AC Breakdown: Base 10 + ${dexLimitLabel} (${appliedDexMod >= 0 ? `+${appliedDexMod}` : appliedDexMod}) + Tier ${shipTier} (+${tierACBonus}) + Mods (+${modsACBonus}) = ${dynamicAC}`}
+                title={`AC Breakdown: Base 10 + ${dexLimitLabel} (${appliedDexMod >= 0 ? `+${appliedDexMod}` : appliedDexMod}) + Tier ${shipTier} (+${tierACBonus}) + Mods (+${modsACBonus})${hasGravityWarpMishap ? " - 2 (Gravity Warp Mishap)" : ""} = ${dynamicAC}`}
               >
-                <div className="w-9 h-9 rounded bg-cyan-neon/20 border border-cyan-neon flex items-center justify-center text-cyan-neon font-mono font-black text-base shadow-[0_0_8px_rgba(0,255,255,0.4)]">
+                <div className={`w-9 h-9 rounded border flex items-center justify-center font-mono font-black text-base shadow-[0_0_8px_rgba(0,255,255,0.4)] ${
+                  hasGravityWarpMishap
+                    ? "bg-red-950/60 border-red-500 text-red-300 animate-pulse"
+                    : "bg-cyan-neon/20 border-cyan-neon text-cyan-neon"
+                }`}>
                   {dynamicAC}
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-bold font-mono text-slate-100">AC</span>
-                    {tierACBonus > 0 && (
+                    {hasGravityWarpMishap ? (
+                      <span className="text-[8px] font-mono font-bold text-red-300 bg-red-950/60 px-1 py-0.2 rounded border border-red-500/60">
+                        -2 WARP
+                      </span>
+                    ) : tierACBonus > 0 ? (
                       <span className="text-[8px] font-mono font-bold text-amber-300 bg-amber-500/20 px-1 py-0.2 rounded border border-amber-500/40">
                         +T{shipTier}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                   <span className="text-[9px] font-mono text-muted-foreground uppercase block mt-0.5">
-                    Base 10 + Dex + Tier
+                    {hasGravityWarpMishap ? "Warped (-2 Applied)" : "Base 10 + Dex + Tier"}
                   </span>
                 </div>
               </div>
@@ -1046,8 +1071,11 @@ export function DefenseStation({
 
             <div className="text-[9px] font-mono text-cyan-300/90 space-y-0.5 bg-black/40 p-1.5 rounded border border-bridge-border/40">
               <p>
-                • <strong>AC Formula:</strong> Base 10 + {appliedDexMod >= 0 ? `+${appliedDexMod}` : appliedDexMod} ({dexLimitLabel}) + {tierACBonus} (Tier {shipTier}) {modsACBonus > 0 ? `+ ${modsACBonus} (Mods)` : ""} = <strong>{dynamicAC}</strong>
+                • <strong>AC Formula:</strong> Base 10 + {appliedDexMod >= 0 ? `+${appliedDexMod}` : appliedDexMod} ({dexLimitLabel}) + {tierACBonus} (Tier {shipTier}) {modsACBonus > 0 ? `+ ${modsACBonus} (Mods)` : ""}{hasGravityWarpMishap ? " - 2 (Gravity Warp)" : ""} = <strong>{dynamicAC}</strong>
               </p>
+              {hasGravityWarpMishap && (
+                <p className="text-red-400 font-bold">• ⚠️ Structural gravity warp active (-2 AC). Complete refit at a repair facility to restore Armor Class.</p>
+              )}
               <p>• If DR reduces incoming damage to 0, you take 1 damage instead.</p>
               {normalizedArmor.includes("reinforced") && (
                 <p className="text-amber-400 font-bold">• ⚠️ Reinforced Armor: Stealth checks are made with disadvantage.</p>
@@ -1665,13 +1693,13 @@ export function DefenseStation({
                 System Damage
               </h3>
               <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border uppercase ${
-                systemDamageLevel === 0
+                numericSystemDamageLevel === 0
                   ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
-                  : systemDamageLevel <= 2
+                  : numericSystemDamageLevel <= 2
                   ? "border-amber-400 bg-amber-500/20 text-amber-300"
                   : "border-red-500 bg-red-500/20 text-red-300 animate-pulse"
               }`}>
-                LEVEL {systemDamageLevel} / 6
+                LEVEL {numericSystemDamageLevel} / 6
               </span>
             </div>
 
@@ -1688,19 +1716,19 @@ export function DefenseStation({
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => onUpdateSystemDamageLevel?.((prev) => Math.max(0, prev - 1))}
-                    disabled={systemDamageLevel <= 0}
+                    onClick={() => onUpdateSystemDamageLevel?.((prev) => Math.max(0, (Number(prev) || 0) - 1))}
+                    disabled={numericSystemDamageLevel <= 0}
                     className="w-9 h-9 rounded bg-black/60 border border-bridge-border text-base font-bold font-mono text-slate-200 hover:text-cyan-neon hover:border-cyan-neon disabled:opacity-30 cursor-pointer flex items-center justify-center"
                     title="Repair / Decrease system damage level"
                   >
                     -1
                   </button>
                   <div className="w-10 h-9 rounded bg-black border border-cyan-neon/40 flex items-center justify-center font-mono font-black text-lg text-cyan-neon">
-                    {systemDamageLevel}
+                    {numericSystemDamageLevel}
                   </div>
                   <button
-                    onClick={() => onUpdateSystemDamageLevel?.((prev) => Math.min(6, prev + 1))}
-                    disabled={systemDamageLevel >= 6}
+                    onClick={() => onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 1))}
+                    disabled={numericSystemDamageLevel >= 6}
                     className="w-9 h-9 rounded bg-black/60 border border-bridge-border text-base font-bold font-mono text-slate-200 hover:text-red-400 hover:border-red-500 disabled:opacity-30 cursor-pointer flex items-center justify-center"
                     title="Incur / Increase system damage level"
                   >
@@ -1710,9 +1738,9 @@ export function DefenseStation({
               </div>
 
               <div className={`p-3 rounded border text-[11px] font-mono leading-relaxed ${
-                systemDamageLevel === 0
+                numericSystemDamageLevel === 0
                   ? "bg-black/40 border-bridge-border/40 text-slate-300"
-                  : systemDamageLevel <= 2
+                  : numericSystemDamageLevel <= 2
                   ? "bg-amber-950/30 border-amber-500/40 text-amber-200"
                   : "bg-red-950/40 border-red-500/60 text-red-200"
               }`}>
@@ -1729,10 +1757,10 @@ export function DefenseStation({
                   {[1, 2, 3, 4, 5, 6].map((lvl) => (
                     <span
                       key={lvl}
-                      onClick={() => onUpdateSystemDamageLevel?.(lvl === systemDamageLevel ? lvl - 1 : lvl)}
+                      onClick={() => onUpdateSystemDamageLevel?.(lvl === numericSystemDamageLevel ? lvl - 1 : lvl)}
                       title={`Click to set Level ${lvl}`}
                       className={`h-2.5 rounded-sm cursor-pointer transition-all ${
-                        lvl <= systemDamageLevel
+                        lvl <= numericSystemDamageLevel
                           ? lvl <= 2
                             ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]"
                             : "bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]"
