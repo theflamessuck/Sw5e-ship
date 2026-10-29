@@ -37,7 +37,13 @@ import {
   UserMinus,
   Flame,
   PowerOff,
-  X
+  X,
+  Maximize2,
+  Minimize2,
+  Layers,
+  Bookmark,
+  Volume2,
+  VolumeX
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { StationModifications, Modification } from "./ship-modifications"
@@ -45,6 +51,101 @@ import { type ShipConfig } from "./ship-setup"
 import type { ActiveStatus } from "./defense-station"
 import type { ManifestMember, ShipCompartmentId } from "./bridge-dashboard"
 import { getCrewRole } from "./bridge-dashboard"
+
+// --- FLAT AVIONICS SOUND SYNTHESIZER & HAPTICS (NO ASSETS REQUIRED) ---
+let audioCtx: AudioContext | null = null
+
+function getAudioContext(): AudioContext | null {
+  if (!audioCtx && typeof window !== "undefined") {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+    if (AudioContextClass) {
+      audioCtx = new AudioContextClass()
+    }
+  }
+  return audioCtx
+}
+
+function playFlatGlassClick() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") ctx.resume()
+
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(1800, now)
+    osc.frequency.exponentialRampToValueAtTime(1400, now + 0.012)
+
+    gain.gain.setValueAtTime(0.035, now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.012)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start(now)
+    osc.stop(now + 0.012)
+  } catch {}
+}
+
+function playSubtleEngage() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") ctx.resume()
+
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = "triangle"
+    osc.frequency.setValueAtTime(520, now)
+    osc.frequency.exponentialRampToValueAtTime(740, now + 0.04)
+
+    gain.gain.setValueAtTime(0.04, now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start(now)
+    osc.stop(now + 0.04)
+  } catch {}
+}
+
+function triggerTactilePulse(type: "tap" | "heavy" = "tap") {
+  if (typeof window !== "undefined" && "vibrate" in navigator) {
+    try {
+      if (type === "tap") navigator.vibrate(10)
+      else navigator.vibrate([15, 20, 15])
+    } catch {}
+  }
+}
+
+export type EngineeringCardId =
+  | "reactor"
+  | "powerDice"
+  | "boosts"
+  | "patch"
+  | "recharge"
+  | "tacticalAux"
+  | "mods"
+  | "telemetry"
+
+interface CustomPreset {
+  id: string
+  name: string
+  activeCards: EngineeringCardId[]
+}
+
+const DEFAULT_PRESETS: CustomPreset[] = [
+  { id: "power", name: "Power Routing", activeCards: ["reactor", "powerDice"] },
+  { id: "combat", name: "Combat Maintenance", activeCards: ["boosts", "patch", "tacticalAux"] },
+  { id: "repair", name: "Damage Control", activeCards: ["patch", "recharge", "telemetry"] },
+  { id: "all", name: "All Systems", activeCards: ["reactor", "powerDice", "boosts", "patch", "recharge", "tacticalAux", "mods", "telemetry"] }
+]
 
 export interface RechargeResultPayload {
   newHull: number
@@ -200,6 +301,59 @@ export function EngineeringStation({
   onAssignCrew,
   onToggleTurn,
 }: EngineeringStationProps) {
+  // --- MFD MODULAR DECK STATE (PER-CLIENT PERSISTENCE) ---
+  const [openCards, setOpenCards] = useState<EngineeringCardId[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("sw5e_eng_open_cards")
+        if (saved) return JSON.parse(saved)
+      } catch {}
+    }
+    return ["reactor", "boosts", "patch"]
+  })
+
+  const [maximizedCard, setMaximizedCard] = useState<EngineeringCardId | null>(null)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true)
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("sw5e_eng_open_cards", JSON.stringify(openCards))
+      } catch {}
+    }
+  }, [openCards])
+
+  const toggleCard = (id: EngineeringCardId) => {
+    if (soundEnabled) {
+      playFlatGlassClick()
+      triggerTactilePulse("tap")
+    }
+    setOpenCards((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    )
+  }
+
+  const applyPreset = (cards: EngineeringCardId[]) => {
+    if (soundEnabled) {
+      playSubtleEngage()
+      triggerTactilePulse("heavy")
+    }
+    setOpenCards(cards)
+    setMaximizedCard(null)
+  }
+
+  const handleSaveCustomPreset = () => {
+    const name = window.prompt("Enter name for this custom engineering layout:", "Custom Engineering Setup")
+    if (!name) return
+    if (typeof window !== "undefined") {
+      try {
+        const key = `sw5e_eng_preset_${Date.now()}`
+        localStorage.setItem(key, JSON.stringify({ id: key, name, activeCards: openCards }))
+        alert(`Preset '${name}' saved to this device!`)
+      } catch {}
+    }
+  }
+
   const getModFromScore = (score?: number) => (score !== undefined ? Math.floor((score - 10) / 2) : 0)
   const formatMod = (mod: number) => (mod >= 0 ? `+${mod}` : `${mod}`)
 
@@ -212,9 +366,6 @@ export function EngineeringStation({
   const availablePersonnel = useMemo(() => {
     return manifest.filter((m) => m.location !== "engineering" && !m.isPassenger)
   }, [manifest])
-
-  const chiefEngineer = assignedCrew[0] || null
-  const engineeringSupport = assignedCrew.slice(1)
 
   const effectiveMaxPowerDice = shipConfig?.maxPowerDice ?? maxPowerDice ?? 0
   const effectivePowerDieType = shipConfig?.powerDieType ?? powerDieType ?? "d6"
@@ -812,889 +963,749 @@ export function EngineeringStation({
 
   const getShortReactorDisplayName = (type: string) => {
     const lower = type.toLowerCase()
-    if (lower.includes("ionization")) return "Ionization Reactor (1d2-1)"
-    if (lower.includes("power core")) return "Power Core Reactor (1d2)"
-    return "Fuel Cell Reactor (+1)"
+    if (lower.includes("ionization")) return "Ionization (1d2-1)"
+    if (lower.includes("power core")) return "Power Core (1d2)"
+    return "Fuel Cell (+1)"
+  }
+
+  // RENDER DOCKED SNAPSHOT CARD TILE
+  const renderSnapshotCard = (
+    id: EngineeringCardId,
+    title: string,
+    value: string,
+    statusText: string,
+    icon: React.ReactNode,
+    accentColor: string
+  ) => {
+    const isOpen = openCards.includes(id)
+    return (
+      <button
+        key={id}
+        type="button"
+        onClick={() => toggleCard(id)}
+        className={`flex flex-col justify-between p-2.5 rounded border transition-all text-left relative overflow-hidden group cursor-pointer ${
+          isOpen
+            ? "bg-slate-950 border-cyan-neon shadow-[0_0_15px_rgba(0,255,255,0.18)]"
+            : "bg-black/60 border-bridge-border/80 hover:border-cyan-neon/50 hover:bg-slate-950/80"
+        }`}
+      >
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 group-hover:text-cyan-neon flex items-center gap-1.5 truncate">
+            {icon}
+            {title}
+          </span>
+          <span
+            className={`w-2 h-2 rounded-full transition-all shrink-0 ${
+              isOpen
+                ? "bg-cyan-neon shadow-[0_0_8px_#06b6d4] scale-125"
+                : "bg-slate-700 group-hover:bg-cyan-neon/50"
+            }`}
+          />
+        </div>
+
+        <div className="my-1.5">
+          <span className={`text-sm md:text-base font-bold font-mono tracking-tight block truncate ${accentColor}`}>
+            {value}
+          </span>
+          <span className="text-[9px] text-muted-foreground uppercase tracking-widest block truncate">
+            {statusText}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
+          <span>CONSOLE</span>
+          <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
+            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+          </span>
+        </div>
+      </button>
+    )
   }
 
   return (
-    <div className="flex flex-col gap-4 font-mono w-full max-w-7xl mx-auto">
-      {/* Top Header Banner */}
-      <div className="flex flex-col justify-between gap-4 rounded-md border border-bridge-border bg-bridge-panel p-4 sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-3.5 w-full font-mono">
+      {/* 1. MASTER HEADER & INTEGRATED QUICK-ACTION ACCESS BAR */}
+      <header className="flex flex-col xl:flex-row items-start xl:items-center justify-between border-b border-bridge-border pb-2.5 gap-2.5">
         <div>
-          <div className="flex items-center gap-2">
-            <Cpu className="h-5 w-5 text-cyan-neon" />
-            <h2 className="text-glow-cyan text-sm font-bold tracking-[0.25em] text-cyan-neon">
+          <div className="flex items-center gap-3">
+            <h2 className="text-glow-cyan text-base md:text-lg font-bold tracking-[0.15em] text-cyan-neon flex items-center gap-2">
+              <Cpu className="h-5 w-5 text-cyan-neon" />
               ENGINEERING &amp; REACTOR CORE CONSOLE
             </h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowStartupModal(true)}
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border transition cursor-pointer ${
+                  isPoweredOn
+                    ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                    : "border-amber-400/60 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(251,191,36,0.2)] animate-pulse"
+                }`}
+              >
+                <Flame className="h-3 w-3" />
+                <span>{isPoweredOn ? "Core: Online" : `Cold Start (${initiationProcedures}/10)`}</span>
+              </button>
+
+              {isPoweredOn && (
+                <button
+                  type="button"
+                  onClick={handleShutdownShip}
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border border-rose-500/50 bg-rose-950/30 text-rose-300 hover:bg-rose-900/50 transition cursor-pointer"
+                  title="Emergency SCRAM / Shutdown Ship"
+                >
+                  <PowerOff className="h-3 w-3" />
+                  <span>SCRAM</span>
+                </button>
+              )}
+            </div>
           </div>
-          <p className="text-xs tracking-wider text-muted-foreground/70 mt-1">
-            COUPLING MODE: <span className="text-amber-400 font-bold">{powerCoupling}</span>
-            <span className="mx-2 text-muted-foreground">|</span>
-            REACTOR: <span className="text-cyan-neon font-bold">{getFullReactorDisplayName(rawReactorType)}</span>
-            <span className="mx-2 text-muted-foreground">|</span>
-            STATE:{" "}
+          <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
+            {shipConfig?.name?.toUpperCase() || "VESSEL"} // {powerCoupling.toUpperCase()} //{" "}
             <span className={isPoweredOn ? "text-emerald-400 font-bold" : "text-amber-400 font-bold animate-pulse"}>
-              {isPoweredOn ? "ONLINE" : "COLD & DARK"}
+              {isPoweredOn ? "REACTOR BUS ENERGIZED" : "COLD & DARK (AUX BATTERY)"}
             </span>
           </p>
         </div>
-        
-        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          <button
-            type="button"
-            onClick={() => setShowStartupModal(true)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border transition cursor-pointer ${
-              isPoweredOn
-                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                : "border-amber-400/60 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 shadow-[0_0_8px_rgba(251,191,36,0.2)] animate-pulse"
-            }`}
-          >
-            <Flame className="h-3.5 w-3.5" />
-            <span>{isPoweredOn ? "Core: Online" : `Cold Start (${initiationProcedures}/10)`}</span>
-          </button>
 
-          {isPoweredOn && (
-            <button
-              type="button"
-              onClick={handleShutdownShip}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border border-rose-500/50 bg-rose-950/30 text-rose-300 hover:bg-rose-900/50 transition cursor-pointer"
-              title="Emergency SCRAM / Shutdown Ship"
-            >
-              <PowerOff className="h-3.5 w-3.5" />
-              <span>SCRAM</span>
-            </button>
-          )}
-
+        {/* Telemetry Status Badges */}
+        <div className="flex items-center gap-2 flex-wrap text-xs">
           {autoShieldRegen && (
-            <div className="rounded border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1.5 text-xs text-emerald-400 flex items-center gap-1.5">
-              <Shield className="h-3.5 w-3.5 text-emerald-400" />
-              <span className="text-[10px]">AUTO-REGEN</span>
-            </div>
+            <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold text-emerald-400 flex items-center gap-1">
+              <Shield className="h-3 w-3 text-emerald-400" /> AUTO-REGEN ACTIVE
+            </span>
           )}
 
-          <div className="rounded border border-cyan-neon/30 bg-cyan-neon/5 px-2.5 py-1.5 text-xs text-cyan-neon flex items-center gap-1.5">
-            <Zap className="h-3.5 w-3.5 text-amber-400" />
-            <span className="text-[10px]">
-              {isDirect ? `POOL: ${sharedPoolDice}/${maxSharedPool}` : isHubAndSpoke ? `SHARED: ${sharedPoolDice}/${maxSharedPool}` : "DISTRIBUTED"}
-            </span>
-          </div>
+          <span className="rounded border border-cyan-neon/30 bg-cyan-neon/10 px-2 py-0.5 text-[9px] font-bold text-cyan-neon flex items-center gap-1">
+            <Zap className="h-3 w-3 text-amber-400" />
+            {isDirect ? `CENTRAL: ${sharedPoolDice}/${maxSharedPool}` : isHubAndSpoke ? `SHARED: ${sharedPoolDice}/${maxSharedPool}` : "DISTRIBUTED MATRIX"}
+          </span>
         </div>
-      </div>
+      </header>
 
-      {/* STATION CREW ASSIGNMENT & COMBAT TURN HUD */}
-      <div className="rounded-md border border-cyan-neon/40 bg-black/40 p-3 shadow-[0_0_15px_rgba(0,255,255,0.05)]">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-neon uppercase tracking-wider">
-              <Users className="h-4 w-4 text-cyan-neon" />
-              <span>Assigned Personnel:</span>
-            </div>
-
-            {assignedCrew.length === 0 ? (
-              <span className="text-xs text-slate-500 italic bg-slate-900/60 border border-slate-800 px-3 py-1 rounded">
-                Console Uncrewed — Select personnel to assign
-              </span>
-            ) : (
-              assignedCrew.map((member, idx) => {
-                const isChief = idx === 0
-                return (
-                  <div
-                    key={member.id}
-                    className={`flex items-center gap-2 px-2.5 py-1 rounded border text-xs transition ${
-                      member.hasTakenTurnThisRound
-                        ? "bg-slate-900/60 border-slate-800 text-slate-400"
-                        : "bg-slate-950 border-cyan-500/40 text-slate-100"
-                    }`}
-                  >
-                    <span
-                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase ${
-                        isChief
-                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                          : "bg-sky-500/20 text-sky-400 border-sky-500/40"
-                      }`}
-                    >
-                      {isChief ? "Chief Engineer" : "Support"}
-                    </span>
-
-                    <span className="font-bold text-xs">{member.name}</span>
-
-                    <button
-                      type="button"
-                      onClick={() => onToggleTurn && onToggleTurn(member.id)}
-                      className={`p-0.5 rounded transition ${
-                        member.hasTakenTurnThisRound
-                          ? "text-emerald-400 hover:text-emerald-300"
-                          : "text-amber-400 hover:text-amber-300"
-                      }`}
-                      title={member.hasTakenTurnThisRound ? "Turn Taken" : "Turn Pending"}
-                    >
-                      {member.hasTakenTurnThisRound ? (
-                        <CheckCircle2 className="h-4 w-4" />
-                      ) : (
-                        <Clock className="h-4 w-4" />
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
-                      className="text-slate-500 hover:text-rose-400 transition ml-1"
-                      title="Vacate Station (Return to Quarters)"
-                    >
-                      <UserMinus className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )
-              })
-            )}
-          </div>
-
-          {availablePersonnel.length > 0 && onAssignCrew && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">
-                Deploy to Console:
-              </span>
-              <select
-                value=""
-                onChange={(e) => {
-                  if (e.target.value) {
-                    onAssignCrew(e.target.value, "engineering")
-                  }
-                }}
-                className="rounded bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon"
-              >
-                <option value="" disabled>
-                  + Assign Crew Member...
-                </option>
-                {availablePersonnel.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({getCrewRole(p, manifest)})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <ShipStats shipConfig={shipConfig} />
-
-      {(shipTier >= 3) && (
-        <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between border-b border-bridge-border pb-2">
-            <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon flex items-center gap-2 uppercase">
-              <Sparkles className="h-4 w-4 text-cyan-neon" />
-              Chassis Tactical Surges &amp; Reactions (Tier {shipTier})
-            </h3>
-            <span className="text-[10px] text-muted-foreground font-mono">
-              COMBAT ACTIONS
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {shipTier >= 4 && (
-              <div className="flex flex-col justify-between gap-2 rounded border border-bridge-border/60 bg-black/40 p-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold tracking-wider text-cyan-neon uppercase flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-cyan-300" /> Standing By
-                  </span>
-                  <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border uppercase ${
-                    standingByUsed ? "bg-red-500/20 text-red-400 border-red-500/40" : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                  }`}>
-                    {standingByUsed ? "EXPENDED" : "READY"}
-                  </span>
-                </div>
-                <p className="text-[9px] text-muted-foreground leading-relaxed">
-                  Push ship limits: crewmember takes 1 extra action on their turn (resets on recharge).
-                </p>
-                <div className="flex-1" />
-                <button
-                  type="button"
-                  disabled={standingByUsed}
-                  onClick={onUseStandingBy}
-                  className={`py-2 px-3 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all flex items-center justify-center gap-1.5 ${
-                    standingByUsed
-                      ? "border-slate-800 bg-slate-900/60 text-slate-500 cursor-not-allowed"
-                      : "border-cyan-neon/60 bg-cyan-neon/20 text-cyan-neon hover:bg-cyan-neon/30 shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
-                  }`}
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  {standingByUsed ? "USED (SHORT REST)" : "SURGE: EXTRA ACTION"}
-                </button>
-              </div>
-            )}
-
-            {shipTier >= 5 && !isMedium && (
-              <div className="flex flex-col justify-between gap-2 rounded border border-bridge-border/60 bg-black/40 p-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold tracking-wider text-emerald-400 uppercase flex items-center gap-1.5">
-                    <Wind className="w-3.5 h-3.5 text-emerald-400" /> A Leaf on the Wind
-                  </span>
-                  <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border uppercase ${
-                    leafOnTheWindUsed ? "bg-red-500/20 text-red-400 border-red-500/40" : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                  }`}>
-                    {leafOnTheWindUsed ? "EXPENDED" : "READY"}
-                  </span>
-                </div>
-                <p className="text-[9px] text-muted-foreground leading-relaxed">
-                  Reaction: Treat amount rolled on d20 as a natural 20 for an ability check, attack roll, or save (resets on recharge).
-                </p>
-                <div className="flex-1" />
-                <button
-                  type="button"
-                  disabled={leafOnTheWindUsed}
-                  onClick={onUseLeafOnTheWind}
-                  className={`py-2 px-3 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all flex items-center justify-center gap-1.5 ${
-                    leafOnTheWindUsed
-                      ? "border-slate-800 bg-slate-900/60 text-slate-500 cursor-not-allowed"
-                      : "border-emerald-500/60 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)] cursor-pointer"
-                  }`}
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  {leafOnTheWindUsed ? "USED (SHORT REST)" : "TRIGGER NATURAL 20"}
-                </button>
-              </div>
-            )}
-
-            {hasVersatileTransport && (
-              <div className="flex flex-col justify-between gap-2 rounded border border-bridge-border/60 bg-black/40 p-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-bold tracking-wider text-cyan-300 uppercase flex items-center gap-1.5">
-                    <Hexagon className="w-3.5 h-3.5" /> Versatile Transport
-                  </span>
-                  <span className="text-[9px] font-mono text-cyan-400 font-bold border border-cyan-400/40 bg-cyan-900/40 px-1.5 py-0.5 rounded">
-                    {versatileMax - versatileTransportUsed} / {versatileMax} Uses (Refit)
-                  </span>
-                </div>
-                <p className="text-[9px] text-muted-foreground leading-snug">
-                  Reaction: When a crewmember makes an ability check, attack roll, or save with the ship, gain advantage before the GM declares success/failure.
-                </p>
-                <div className="flex-1" />
-                <div className="flex items-center gap-1 mt-1 mb-2">
-                  {Array.from({ length: versatileMax }).map((_, i) => (
-                    <span
-                      key={i}
-                      className={`h-2 flex-1 rounded-sm transition-all ${
-                        i < versatileMax - versatileTransportUsed
-                          ? "bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.6)]"
-                          : "bg-slate-800 border border-bridge-border/50"
-                      }`}
-                    />
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  disabled={versatileTransportUsed >= versatileMax}
-                  onClick={handleUseVersatileTransport}
-                  className={`py-2 rounded text-[9px] font-bold uppercase tracking-wider font-mono border transition-all ${
-                    versatileTransportUsed >= versatileMax
-                      ? "border-slate-800 bg-slate-900/60 text-slate-500 cursor-not-allowed"
-                      : "border-cyan-500/60 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30 cursor-pointer shadow-[0_0_8px_rgba(34,211,238,0.2)]"
-                  }`}
-                >
-                  Trigger Reaction (Advantage)
-                </button>
-              </div>
-            )}
-
-            {hasBestShip && (
-              <div className="flex flex-col justify-between gap-2 rounded border border-bridge-border/60 bg-black/40 p-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-bold tracking-wider text-amber-300 uppercase flex items-center gap-1.5">
-                    <ShieldAlert className="w-3.5 h-3.5" /> Best Ship in the 'Verse
-                  </span>
-                  <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border uppercase ${
-                    bestShipInVerseUsed ? "bg-red-500/20 text-red-400 border-red-500/40" : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                  }`}>
-                    {bestShipInVerseUsed ? "EXPENDED" : "READY (RECHARGE)"}
-                  </span>
-                </div>
-                <p className="text-[9px] text-muted-foreground leading-snug">
-                  Action: Give the ship resistance to un-enhanced damage from ship weapons for 1 minute (ends early if disabled).
-                </p>
-                <div className="flex-1" />
-                <button
-                  type="button"
-                  disabled={bestShipInVerseUsed}
-                  onClick={handleUseBestShip}
-                  className={`mt-1 py-2 rounded text-[9px] font-bold uppercase tracking-wider font-mono border transition-all flex items-center justify-center gap-1.5 ${
-                    bestShipInVerseUsed
-                      ? "border-slate-800 bg-slate-900/60 text-slate-500 cursor-not-allowed"
-                      : "border-amber-500/60 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 cursor-pointer shadow-[0_0_8px_rgba(251,191,36,0.2)]"
-                  }`}
-                >
-                  <CheckCircle2 className="h-3 w-3" />
-                  {bestShipInVerseUsed ? "ACTIVE / EXPENDED" : "TRIGGER RESISTANCE"}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {(hasPowerBackup || hasEmergencyGenerator || hasElectronicBaffle || hasAltFuelConverter) && (
-        <div className="rounded-md border border-cyan-neon/50 bg-bridge-panel p-4 flex flex-col gap-3 shadow-[0_0_15px_rgba(0,255,255,0.06)]">
-          <div className="flex items-center justify-between border-b border-bridge-border pb-2">
-            <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon flex items-center gap-2 uppercase">
-              <Zap className="h-4 w-4 text-cyan-neon animate-pulse" />
-              Active Tactical Engineering Systems
-            </h3>
-            <span className="text-[10px] text-muted-foreground font-mono">
-              EMERGENCY CIRCUITS &amp; AUXILIARIES
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {hasPowerBackup && (
-              <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-amber-300 uppercase">Power Backup</span>
-                    <span className={`text-[8px] font-mono px-1.5 py-0.2 rounded border font-bold ${
-                      powerBackupUsed ? "bg-red-500/20 text-red-400 border-red-500/40" : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                    }`}>
-                      {powerBackupUsed ? "EXPENDED" : "READY (1/RECHARGE)"}
-                    </span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-relaxed">
-                    Reaction: Drop to 1 HP instead of 0, or auto-succeed on a Destruction save.
-                  </p>
-                </div>
-                <button
-                  disabled={powerBackupUsed}
-                  onClick={handleTriggerPowerBackup}
-                  className={`w-full py-1.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer ${
-                    powerBackupUsed
-                      ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                      : "bg-amber-500/20 border-amber-400 text-amber-300 hover:bg-amber-500/30"
-                  }`}
-                >
-                  ⚡ Trigger Backup Surge
-                </button>
-              </div>
-            )}
-
-            {hasEmergencyGenerator && (
-              <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-cyan-neon uppercase">Emergency Generator</span>
-                    <span className={`text-[8px] font-mono px-1.5 py-0.2 rounded border font-bold ${
-                      emergencyGenUsed ? "bg-red-500/20 text-red-400 border-red-500/40" : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                    }`}>
-                      {emergencyGenUsed ? "EXPENDED" : "READY (1/RECHARGE)"}
-                    </span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-relaxed">
-                    Reaction: Drop to 1 SP instead of 0, or restore SP equal to 2x Strength modifier (+{Math.max(2, effectiveStrengthMod * 2)} SP).
-                  </p>
-                </div>
-                <div className="flex gap-1.5">
-                  <button
-                    disabled={emergencyGenUsed}
-                    onClick={() => handleTriggerEmergencyGenerator("drop1")}
-                    className={`flex-1 py-1.5 rounded text-[9px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer ${
-                      emergencyGenUsed
-                        ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                        : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
-                    }`}
-                  >
-                    Drop to 1 SP
-                  </button>
-                  <button
-                    disabled={emergencyGenUsed}
-                    onClick={() => handleTriggerEmergencyGenerator("restore")}
-                    className={`flex-1 py-1.5 rounded text-[9px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer ${
-                      emergencyGenUsed
-                        ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                        : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
-                    }`}
-                  >
-                    +{Math.max(2, effectiveStrengthMod * 2)} SP
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {hasElectronicBaffle && (
-              <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-rose-300 uppercase">Electronic Baffle</span>
-                    <span className="text-[8px] font-mono px-1.5 py-0.2 rounded border bg-rose-950/40 text-rose-300 border-rose-500/40 font-bold">
-                      {tierUses - baffleUses} / {tierUses} (REFIT)
-                    </span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-relaxed">
-                    Reaction: Roll 1 Hull Die of direct self-damage to ignore Ionized, Shocked, or Stunned.
-                  </p>
-                </div>
-                <button
-                  disabled={baffleUses >= tierUses}
-                  onClick={handleTriggerElectronicBaffle}
-                  className={`w-full py-1.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer ${
-                    baffleUses >= tierUses
-                      ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                      : "bg-rose-500/20 border-rose-400 text-rose-300 hover:bg-rose-500/30"
-                  }`}
-                >
-                  ⚡ Flush Condition (Roll {effectiveHullDieType})
-                </button>
-              </div>
-            )}
-
-            {hasAltFuelConverter && (
-              <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-emerald-300 uppercase">Alt Fuel Converter</span>
-                    <span className="text-[8px] font-mono px-1.5 py-0.2 rounded border bg-emerald-950/40 text-emerald-300 border-emerald-500/40 font-bold">
-                      {tierUses - altFuelUses} / {tierUses} (REFIT)
-                    </span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-relaxed">
-                    10-min downtime: Con (Regulation) check vs DC 10 to convert materials into 1 day of fuel.
-                  </p>
-                </div>
-                <button
-                  disabled={altFuelUses >= tierUses}
-                  onClick={handleTriggerAltFuel}
-                  className={`w-full py-1.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer ${
-                    altFuelUses >= tierUses
-                      ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                      : "bg-emerald-500/20 border-emerald-400 text-emerald-300 hover:bg-emerald-500/30"
-                  }`}
-                >
-                  🎲 Convert Fuel (d20 {formatMod(effectiveRegulationSkillMod)})
-                </button>
-              </div>
-            )}
-          </div>
-
-          {tacticalFeedback && (
-            <div className="p-2 rounded bg-black/60 border border-bridge-border/60 text-xs font-mono text-cyan-neon">
-              {tacticalFeedback}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-4">
-        {/* Reactor Core Management Panel */}
-        <div className="rounded-md border border-bridge-border bg-bridge-panel p-4">
-          <div className="flex items-center justify-between pb-3 border-b border-bridge-border mb-4">
-            <h3 className="text-xs font-bold tracking-[0.2em] text-muted-foreground flex items-center gap-2">
-              <Zap className="h-4 w-4 text-amber-400" />
-              REACTOR CORE &amp; POWER DIE MATRIX
-            </h3>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-amber-400 font-bold uppercase">{powerCoupling}</span>
-              <span className="text-muted-foreground">|</span>
-              <span className="text-cyan-neon font-bold uppercase">{getShortReactorDisplayName(rawReactorType)}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-            <div className="rounded border border-bridge-border p-2.5 bg-black/20">
-              <span className="text-[10px] text-muted-foreground block mb-0.5">ARCHITECTURE</span>
-              <span className="text-xs font-bold text-amber-400 truncate block">{powerCoupling}</span>
-            </div>
-            <div className="rounded border border-bridge-border p-2.5 bg-black/20">
-              <span className="text-[10px] text-muted-foreground block mb-0.5">
-                {isDirect ? "CENTRAL POOL" : isHubAndSpoke ? "SHARED POOL" : "LOCAL POOLS"}
-              </span>
-              <span className="text-sm font-bold text-amber-400">
-                {isDistributed ? "N/A (0)" : `${sharedPoolDice} / ${maxSharedPool}`}
-              </span>
-            </div>
-            <div className="rounded border border-bridge-border p-2.5 bg-black/20">
-              <span className="text-[10px] text-muted-foreground block mb-0.5">DIE TYPE</span>
-              <span className="text-sm font-bold text-cyan-neon uppercase">{effectivePowerDieType}</span>
-            </div>
-            <div className="rounded border border-bridge-border p-2.5 bg-black/20">
-              <span className="text-[10px] text-muted-foreground block mb-0.5">CYCLE LOGIC</span>
-              <span className="text-xs font-bold text-amber-400 uppercase">
-                {reactorType.includes("ionization") ? "1d2 - 1" : reactorType.includes("power core") ? "1d2" : "+1 Fixed"}
-              </span>
-            </div>
-          </div>
-
-          <div className={`grid grid-cols-1 ${(isDistributed || isHubAndSpoke) ? "lg:grid-cols-2" : ""} gap-4 mb-4`}>
-            {/* Left Box: Cycle Reactor Control */}
-            <div className="flex flex-col justify-between p-4 rounded border border-amber-500/30 bg-amber-500/5 gap-3">
-              <div>
-                <span className="text-xs font-bold text-amber-400 block uppercase tracking-wider mb-1">
-                  Combat Round Management
-                </span>
-                <span className="text-[10px] text-muted-foreground leading-relaxed">
-                  Cycle the reactor at round end to replenish power dice, reset split ship movement, clear turn completed flags, and advance round boost durations.
-                </span>
-              </div>
-              
+      {/* 2. PRESET WORKSPACE SELECTOR & AUDIO/HAPTIC MUTE BAR */}
+      <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded bg-black/60 border border-bridge-border text-xs">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[9px] uppercase tracking-wider text-slate-400 flex items-center gap-1">
+            <Layers className="w-3.5 h-3.5 text-cyan-neon" /> Presets:
+          </span>
+          {DEFAULT_PRESETS.map((p) => {
+            const isMatch =
+              p.activeCards.length === openCards.length &&
+              p.activeCards.every((c) => openCards.includes(c))
+            return (
               <button
-                onClick={handleCycleReactor}
-                disabled={isCycling}
-                className={`w-full py-2.5 rounded border text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75 ${
-                  isCycling 
-                    ? "border-cyan-neon/60 bg-cyan-neon/20 text-cyan-neon shadow-[0_0_12px_rgba(0,240,255,0.3)] animate-pulse" 
-                    : "border-amber-500/60 bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                key={p.id}
+                type="button"
+                onClick={() => applyPreset(p.activeCards)}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition border cursor-pointer ${
+                  isMatch
+                    ? "bg-cyan-neon/20 border-cyan-neon text-cyan-neon shadow-[0_0_8px_rgba(0,255,255,0.3)]"
+                    : "bg-black/40 border-bridge-border/60 text-slate-400 hover:text-white"
                 }`}
               >
-                <RotateCw className={`h-4 w-4 ${isCycling ? "animate-spin" : ""}`} />
-                {isCycling ? "Spooling & Cycling..." : "Cycle Reactor (End of Round)"}
+                {p.name}
               </button>
-            </div>
+            )
+          })}
+          <button
+            type="button"
+            onClick={handleSaveCustomPreset}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
+            title="Save current layout to local browser"
+          >
+            <Bookmark className="w-3 h-3" /> Save View
+          </button>
+        </div>
 
-            {/* Right Box: System Prioritization Framework with Bonus Action Lock */}
-            {(isDistributed || isHubAndSpoke) && (
-              <div className="p-4 rounded border border-cyan-neon/30 bg-black/30 flex flex-col justify-between gap-3">
-                <div className="flex items-center justify-between border-b border-bridge-border pb-2">
-                  <div className="flex items-center gap-2">
-                    <Sliders className="h-3.5 w-3.5 text-cyan-neon" />
-                    <span className="text-xs font-bold text-cyan-neon uppercase tracking-wider">
-                      System Prioritization
-                    </span>
-                  </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSoundEnabled((prev) => !prev)
+              triggerTactilePulse("tap")
+            }}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-bold uppercase cursor-pointer transition ${
+              soundEnabled
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : "border-slate-800 bg-slate-900 text-slate-500"
+            }`}
+          >
+            {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{soundEnabled ? "Audio & Haptics ON" : "Muted"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 3. COMPACT CREW ROSTER HUD */}
+      <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
+            <Users className="h-3.5 w-3.5" />
+            <span>Manned Engineering:</span>
+          </div>
+
+          {assignedCrew.length === 0 ? (
+            <span className="text-xs text-amber-300 italic px-2 py-0.5 border border-amber-500/30 bg-amber-950/20 rounded">
+              Console Uncrewed — Assign Engineer for checks
+            </span>
+          ) : (
+            assignedCrew.map((member, idx) => {
+              const isChief = idx === 0
+              return (
+                <div
+                  key={member.id}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs ${
+                    member.hasTakenTurnThisRound
+                      ? "bg-slate-900/60 border-slate-800 text-slate-400"
+                      : "bg-slate-950 border-cyan-500/40 text-slate-100"
+                  }`}
+                >
+                  <span
+                    className={`text-[8px] font-bold px-1 rounded border uppercase ${
+                      isChief
+                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                        : "bg-sky-500/20 text-sky-400 border-sky-500/40"
+                    }`}
+                  >
+                    {isChief ? "Chief Engineer" : "Support"}
+                  </span>
+                  <span className="font-bold text-xs">{member.name}</span>
 
                   <button
                     type="button"
-                    onClick={() => setIsPowerRoutingUnlocked((prev) => !prev)}
-                    className={`px-2.5 py-1 rounded border text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition cursor-pointer ${
-                      isPowerRoutingUnlocked
-                        ? "bg-amber-500/20 border-amber-400 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.3)] animate-pulse"
-                        : "bg-slate-900 border-slate-700 text-slate-300 hover:border-cyan-neon"
-                    }`}
+                    onClick={() => onToggleTurn && onToggleTurn(member.id)}
+                    className="cursor-pointer ml-0.5"
+                    title={member.hasTakenTurnThisRound ? "Action Taken" : "Action Pending"}
                   >
-                    {isPowerRoutingUnlocked ? (
-                      <>
-                        <Unlock className="h-3 w-3 text-amber-400" />
-                        <span>Lock Configuration</span>
-                      </>
+                    {member.hasTakenTurnThisRound ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
                     ) : (
-                      <>
-                        <Lock className="h-3 w-3 text-slate-400" />
-                        <span>Route Power (Bonus Action)</span>
-                      </>
+                      <Clock className="h-3.5 w-3.5 text-amber-400" />
                     )}
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
+                    className="text-slate-500 hover:text-rose-400 transition ml-0.5 cursor-pointer"
+                    title="Relieve from Station"
+                  >
+                    <UserMinus className="h-3 w-3" />
+                  </button>
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        {availablePersonnel.length > 0 && onAssignCrew && (
+          <div className="flex items-center gap-1.5 self-end md:self-auto">
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Deploy:</span>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onAssignCrew(e.target.value, "engineering")
+              }}
+              className="rounded bg-slate-950 border border-slate-700 px-2 py-0.5 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon cursor-pointer"
+            >
+              <option value="" disabled>+ Assign Crew...</option>
+              {availablePersonnel.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({getCrewRole(p, manifest)})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* 4. TOP-DECK MODULAR SNAPSHOT TILES (8 UNIFORM TILES) */}
+      <section className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 w-full">
+        {renderSnapshotCard(
+          "reactor",
+          "Reactor Core",
+          getShortReactorDisplayName(rawReactorType),
+          isCycling ? "Cycling..." : "Spool Ready",
+          <Zap className="w-3 h-3 text-amber-400" />,
+          "text-amber-300"
+        )}
+
+        {renderSnapshotCard(
+          "powerDice",
+          "Power Matrix",
+          isDistributed ? "Local Pools" : `${sharedPoolDice}/${maxSharedPool} Dice`,
+          powerCoupling.replace(" Power Coupling", ""),
+          <Gauge className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
+
+        {renderSnapshotCard(
+          "boosts",
+          "Boost System",
+          boostActionUsed ? "Used (Round)" : "Ready (1/Rnd)",
+          engineBoostTurnsRemaining > 0 ? "Speed +50 Active" : shieldBoostTurnsRemaining > 0 ? `+${shieldTemp} Temp SP` : "No Boost Active",
+          <Sliders className="w-3 h-3 text-cyan-neon" />,
+          boostActionUsed ? "text-amber-400" : "text-emerald-400"
+        )}
+
+        {renderSnapshotCard(
+          "patch",
+          "Field Patch",
+          `DC ${patchDC}`,
+          missingHull > 0 ? `${missingHull} HP Damage` : "Hull Optimal",
+          <Wrench className="w-3 h-3 text-emerald-400" />,
+          missingHull > 0 ? "text-amber-400" : "text-emerald-400"
+        )}
+
+        {renderSnapshotCard(
+          "recharge",
+          "Ship Recharge",
+          `${availableHullDice}/${maxHullDice} Dice`,
+          "1-Hr Maintenance",
+          <RefreshCw className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
+
+        {renderSnapshotCard(
+          "tacticalAux",
+          "Aux Circuits",
+          hasPowerBackup || hasEmergencyGenerator ? "Active Gear" : "Standard",
+          powerBackupUsed ? "Backup Expended" : emergencyGenUsed ? "Gen Expended" : "Circuits Ready",
+          <BatteryCharging className="w-3 h-3 text-amber-400" />,
+          powerBackupUsed || emergencyGenUsed ? "text-amber-400" : "text-emerald-400"
+        )}
+
+        {renderSnapshotCard(
+          "mods",
+          "Hardware",
+          `${installedMods.length} Mods`,
+          "Station Systems",
+          <Cpu className="w-3 h-3 text-purple-400" />,
+          "text-purple-300"
+        )}
+
+        {renderSnapshotCard(
+          "telemetry",
+          "Telemetry",
+          `${currentActualHull}/${effectiveHullMax} HP`,
+          `${currentActualShields}/${effectiveShieldMax} SP`,
+          <Activity className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
+      </section>
+
+      {/* 5. EXPANDABLE DYNAMIC WORKSPACE GRID (RESPONSIVE 2-COLUMN) */}
+      {openCards.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
+          <Cpu className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL ENGINEERING DRAWERS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any of the status cards above or choose an operational preset.</p>
+        </div>
+      ) : (
+        <div
+          className={`grid gap-3.5 transition-all duration-300 ${
+            maximizedCard
+              ? "grid-cols-1"
+              : openCards.length === 1
+              ? "grid-cols-1"
+              : "grid-cols-1 lg:grid-cols-2"
+          }`}
+        >
+          {openCards.map((cardId) => {
+            if (maximizedCard && maximizedCard !== cardId) return null
+            const isMax = maximizedCard === cardId
+
+            return (
+              <div
+                key={cardId}
+                className="flex flex-col rounded-lg border border-cyan-neon/50 bg-bridge-panel p-3.5 shadow-[0_0_20px_rgba(0,255,255,0.06)] relative overflow-hidden transition-all duration-200"
+              >
+                {/* SUB-PANEL DRAWER HEADER */}
+                <div className="flex items-center justify-between border-b border-bridge-border pb-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-xs bg-cyan-neon shadow-[0_0_6px_#06b6d4]" />
+                    <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
+                      {cardId === "reactor" && "Reactor Core & Round Cycle"}
+                      {cardId === "powerDice" && "Power Coupling & Station Routing"}
+                      {cardId === "boosts" && "Engineering Boost Actions"}
+                      {cardId === "patch" && "Emergency Patch Protocol"}
+                      {cardId === "recharge" && "Ship Recharge & Maintenance"}
+                      {cardId === "tacticalAux" && "Auxiliary Tactical Systems"}
+                      {cardId === "mods" && "Installed Engineering Hardware"}
+                      {cardId === "telemetry" && "Core Vessel Telemetry Snapshot"}
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setMaximizedCard((prev) => (prev === cardId ? null : cardId))}
+                      className="p-1 rounded text-slate-400 hover:text-cyan-neon hover:bg-black/40 cursor-pointer"
+                      title={isMax ? "Restore Multi-Window" : "Maximize to Full-Width"}
+                    >
+                      {isMax ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleCard(cardId)}
+                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
+                      title="Collapse Drawer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
-                {isPowerRoutingUnlocked && (
-                  <div className="p-1.5 rounded bg-amber-950/40 border border-amber-500/40 text-[10px] text-amber-300">
-                    ⚡ Power routing unlocked (Bonus Action active). Adjust hierarchy using arrows, then click "Lock Configuration".
+                {/* 1. REACTOR WORKSPACE */}
+                {cardId === "reactor" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="rounded border border-bridge-border p-2 bg-black/30">
+                        <span className="text-[9px] text-muted-foreground uppercase block">Reactor Model</span>
+                        <span className="font-bold text-amber-300 truncate block">{getFullReactorDisplayName(rawReactorType)}</span>
+                      </div>
+                      <div className="rounded border border-bridge-border p-2 bg-black/30">
+                        <span className="text-[9px] text-muted-foreground uppercase block">Recovery Logic</span>
+                        <span className="font-bold text-cyan-neon block">
+                          {reactorType.includes("ionization") ? "1d2 - 1" : reactorType.includes("power core") ? "1d2" : "+1 Fixed"}
+                        </span>
+                      </div>
+                      <div className="rounded border border-bridge-border p-2 bg-black/30">
+                        <span className="text-[9px] text-muted-foreground uppercase block">Coupling</span>
+                        <span className="font-bold text-slate-200 truncate block">{powerCoupling}</span>
+                      </div>
+                      <div className="rounded border border-bridge-border p-2 bg-black/30">
+                        <span className="text-[9px] text-muted-foreground uppercase block">Core State</span>
+                        <span className={`font-bold block ${isPoweredOn ? "text-emerald-400" : "text-amber-400 animate-pulse"}`}>
+                          {isPoweredOn ? "ONLINE" : "DARK"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded border border-amber-500/30 bg-amber-500/5 flex flex-col gap-2">
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">
+                        Spools up the main core, replenishing power dice according to reactor specifications, resetting movement budgets, clearing turn flags, and advancing boost durations.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleCycleReactor}
+                        disabled={isCycling}
+                        className={`w-full py-2.5 rounded border text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75 ${
+                          isCycling 
+                            ? "border-cyan-neon/60 bg-cyan-neon/20 text-cyan-neon shadow-[0_0_12px_rgba(0,240,255,0.3)] animate-pulse" 
+                            : "border-amber-500/60 bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                        }`}
+                      >
+                        <RotateCw className={`h-4 w-4 ${isCycling ? "animate-spin" : ""}`} />
+                        {isCycling ? "Spooling Core..." : "Cycle Reactor (End of Round)"}
+                      </button>
+                    </div>
+
+                    {reactorLog && (
+                      <div className="p-2 rounded border border-cyan-neon/30 bg-cyan-neon/5 text-[11px] text-cyan-neon flex items-center gap-2 animate-pulse">
+                        <Terminal className="h-3.5 w-3.5 shrink-0" />
+                        <span>{reactorLog}</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                <div className="flex flex-col gap-1.5">
-                  {priorityOrder.map((stationKey, index) => {
-                    const currentDice = stationPools[stationKey] ?? 0
-                    return (
-                      <div key={stationKey} className="flex items-center justify-between px-2 py-1.5 rounded bg-bridge-panel border border-bridge-border text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold text-amber-400 w-4">#{index + 1}</span>
-                          <span className="font-bold text-foreground w-28 uppercase truncate">{STATION_NAMES[stationKey]}</span>
-                        </div>
-                        
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-1.5 w-16 justify-end">
-                            {Array.from({ length: maxStationCapacity }).map((_, i) => (
-                              <span
-                                key={i}
-                                className={`h-2.5 w-5 rounded-sm inline-block ${
-                                  i < currentDice 
-                                    ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.5)]" 
-                                    : "bg-black/90 border border-bridge-border"
-                                }`}
-                                title={i < currentDice ? "Power Die Available" : "Empty Slot"}
-                              />
-                            ))}
-                          </div>
+                {/* 2. POWER DICE & ROUTING WORKSPACE */}
+                {cardId === "powerDice" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between border-b border-bridge-border/40 pb-2">
+                      <span className="text-xs text-muted-foreground">
+                        {isDirect ? "Central Power Pool" : isHubAndSpoke ? "Shared Pool & Local Nodes" : "Distributed Local Pools"}
+                      </span>
+                      {(isDistributed || isHubAndSpoke) && (
+                        <button
+                          type="button"
+                          onClick={() => setIsPowerRoutingUnlocked((prev) => !prev)}
+                          className={`px-2 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 transition cursor-pointer ${
+                            isPowerRoutingUnlocked
+                              ? "bg-amber-500/20 border-amber-400 text-amber-300 animate-pulse"
+                              : "bg-slate-900 border-slate-700 text-slate-300 hover:border-cyan-neon"
+                          }`}
+                        >
+                          {isPowerRoutingUnlocked ? <Unlock className="h-3 w-3 text-amber-400" /> : <Lock className="h-3 w-3 text-slate-400" />}
+                          <span>{isPowerRoutingUnlocked ? "Lock Prioritization" : "Route Power (Bonus Action)"}</span>
+                        </button>
+                      )}
+                    </div>
 
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => movePriority(index, "up")}
-                              disabled={index === 0 || !isPowerRoutingUnlocked}
-                              className="p-1 rounded bg-black/40 border border-bridge-border text-foreground hover:bg-cyan-neon/20 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
-                              title={isPowerRoutingUnlocked ? "Move Priority Up" : "Unlock Power Routing First"}
-                            >
-                              <ArrowUp className="h-3 w-3" />
-                            </button>
-                            <button
-                              onClick={() => movePriority(index, "down")}
-                              disabled={index === priorityOrder.length - 1 || !isPowerRoutingUnlocked}
-                              className="p-1 rounded bg-black/40 border border-bridge-border text-foreground hover:bg-cyan-neon/20 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
-                              title={isPowerRoutingUnlocked ? "Move Priority Down" : "Unlock Power Routing First"}
-                            >
-                              <ArrowDown className="h-3 w-3" />
-                            </button>
+                    {isPowerRoutingUnlocked && (
+                      <div className="p-1.5 rounded bg-amber-950/40 border border-amber-500/40 text-[10px] text-amber-300">
+                        ⚡ Power routing unlocked. Adjust priority hierarchy using the arrows, then click "Lock Prioritization".
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-1.5">
+                      {priorityOrder.map((stationKey, index) => {
+                        const currentDice = stationPools[stationKey] ?? 0
+                        return (
+                          <div key={stationKey} className="flex items-center justify-between px-2.5 py-1.5 rounded bg-black/40 border border-bridge-border text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold text-amber-400 w-4">#{index + 1}</span>
+                              <span className="font-bold text-slate-200 uppercase">{STATION_NAMES[stationKey]}</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-1">
+                                {Array.from({ length: maxStationCapacity }).map((_, i) => (
+                                  <span
+                                    key={i}
+                                    className={`h-2.5 w-5 rounded-sm inline-block ${
+                                      i < currentDice 
+                                        ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.5)]" 
+                                        : "bg-black/90 border border-bridge-border"
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+
+                              {(isDistributed || isHubAndSpoke) && (
+                                <div className="flex items-center gap-0.5">
+                                  <button
+                                    onClick={() => movePriority(index, "up")}
+                                    disabled={index === 0 || !isPowerRoutingUnlocked}
+                                    className="p-1 rounded bg-black/60 border border-bridge-border text-slate-300 hover:bg-cyan-neon/20 disabled:opacity-20 cursor-pointer"
+                                  >
+                                    <ArrowUp className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => movePriority(index, "down")}
+                                    disabled={index === priorityOrder.length - 1 || !isPowerRoutingUnlocked}
+                                    className="p-1 rounded bg-black/60 border border-bridge-border text-slate-300 hover:bg-cyan-neon/20 disabled:opacity-20 cursor-pointer"
+                                  >
+                                    <ArrowDown className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. BOOST ACTIONS WORKSPACE */}
+                {cardId === "boosts" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between border-b border-bridge-border/40 pb-2">
+                      <span className="text-xs text-muted-foreground">Engineering Boost Action (1 per Round)</span>
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${
+                        boostActionUsed ? "bg-amber-500/20 text-amber-300 border-amber-500/40" : "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                      }`}>
+                        {boostActionUsed ? "ACTION USED" : "READY"}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <button
+                        disabled={boostActionUsed}
+                        onClick={() => setSelectedBoostType("engines")}
+                        className={`p-2.5 rounded border text-left flex flex-col gap-1 transition-all cursor-pointer disabled:opacity-50 ${
+                          selectedBoostType === "engines" 
+                            ? "border-cyan-neon bg-cyan-neon/15 shadow-[0_0_10px_rgba(0,240,255,0.2)]" 
+                            : "border-bridge-border bg-black/40 hover:border-cyan-neon/50"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-100">
+                          <span>Boost Engines</span>
+                          <Gauge className="h-3.5 w-3.5 text-cyan-neon" />
+                        </div>
+                        <span className="text-[9px] text-muted-foreground">DC 10 Str: +50 ft Speed</span>
+                      </button>
+
+                      <button
+                        disabled={boostActionUsed}
+                        onClick={() => setSelectedBoostType("shields")}
+                        className={`p-2.5 rounded border text-left flex flex-col gap-1 transition-all cursor-pointer disabled:opacity-50 ${
+                          selectedBoostType === "shields" 
+                            ? "border-cyan-neon bg-cyan-neon/15 shadow-[0_0_10px_rgba(0,240,255,0.2)]" 
+                            : "border-bridge-border bg-black/40 hover:border-cyan-neon/50"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-100">
+                          <span>Boost Shields</span>
+                          <Shield className="h-3.5 w-3.5 text-cyan-neon" />
+                        </div>
+                        <span className="text-[9px] text-muted-foreground">DC 10 Str: +Shield Die Temp SP</span>
+                      </button>
+
+                      <button
+                        disabled={boostActionUsed}
+                        onClick={() => setSelectedBoostType("weapons")}
+                        className={`p-2.5 rounded border text-left flex flex-col gap-1 transition-all cursor-pointer disabled:opacity-50 ${
+                          selectedBoostType === "weapons" 
+                            ? "border-cyan-neon bg-cyan-neon/15 shadow-[0_0_10px_rgba(0,240,255,0.2)]" 
+                            : "border-bridge-border bg-black/40 hover:border-cyan-neon/50"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-100">
+                          <span>Boost Weapons</span>
+                          <Crosshair className="h-3.5 w-3.5 text-cyan-neon" />
+                        </div>
+                        <span className="text-[9px] text-muted-foreground">DC 10 Str: Next Atk Advantage</span>
+                      </button>
+                    </div>
+
+                    {selectedBoostType && !boostActionUsed && (
+                      <div className="p-2.5 rounded border border-cyan-neon/40 bg-cyan-neon/5 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                        <div className="text-xs">
+                          <span className="text-cyan-neon font-bold uppercase">Target: Boost {selectedBoostType}</span>
+                          <span className="text-[10px] text-muted-foreground block">Str Mod: {effectiveStrengthMod >= 0 ? `+${effectiveStrengthMod}` : effectiveStrengthMod} • DC 10</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                          <button
+                            onClick={handleSystemRollBoost}
+                            className="flex-1 sm:flex-none px-3 py-1 rounded bg-cyan-neon text-black font-bold text-xs hover:bg-cyan-neon/80 cursor-pointer"
+                          >
+                            Roll d20 ({formatMod(effectiveStrengthMod)})
+                          </button>
+                          <form onSubmit={handleManualRollBoost} className="flex gap-1">
+                            <input
+                              type="number"
+                              placeholder="Total"
+                              value={manualRollInput}
+                              onChange={(e) => setManualRollInput(e.target.value)}
+                              className="w-14 px-2 py-0.5 rounded bg-black border border-bridge-border text-xs text-foreground font-mono"
+                            />
+                            <button
+                              type="submit"
+                              className="px-2 py-0.5 rounded border border-cyan-neon/50 bg-cyan-neon/10 text-cyan-neon text-xs font-bold hover:bg-cyan-neon/20 cursor-pointer"
+                            >
+                              Submit
+                            </button>
+                          </form>
                         </div>
                       </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+                    )}
 
-          {reactorLog && (
-            <div className="p-2.5 rounded border border-cyan-neon/30 bg-cyan-neon/5 text-xs text-cyan-neon flex items-center gap-2 animate-pulse">
-              <Terminal className="h-4 w-4 shrink-0" />
-              <span>{reactorLog}</span>
-            </div>
-          )}
-        </div>
-
-        {/* ENGINEERING BOOST ACTIONS PANEL */}
-        <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col gap-4">
-          <div className="flex items-center justify-between border-b border-bridge-border pb-3">
-            <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon flex items-center gap-2">
-              <Gauge className="h-4 w-4 text-cyan-neon" />
-              ENGINEERING BOOST ACTIONS (1 PER ROUND)
-            </h3>
-            <div className="flex items-center gap-2 flex-wrap justify-end">
-              {engineBoostTurnsRemaining > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                  ENGINES: +50 SPEED ({engineBoostTurnsRemaining === 2 ? "ACTIVE" : "EXPIRES NEXT CYCLE"})
-                </span>
-              )}
-              {shieldBoostTurnsRemaining > 0 && shieldTemp > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-[#e0ffff] border border-cyan-400/50 shadow-[0_0_8px_rgba(0,255,255,0.3)]">
-                  SHIELDS: +{shieldTemp} TEMP ({shieldBoostTurnsRemaining === 2 ? "ACTIVE" : "EXPIRES NEXT CYCLE"})
-                </span>
-              )}
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${boostActionUsed ? "bg-amber-500/20 text-amber-300 border border-amber-500/40" : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"}`}>
-                {boostActionUsed ? "ACTION EXECUTED THIS ROUND" : "READY FOR DEPLOYMENT"}
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <button
-              disabled={boostActionUsed}
-              onClick={() => setSelectedBoostType("engines")}
-              className={`p-3 rounded border text-left flex flex-col gap-1 transition-all cursor-pointer disabled:opacity-50 ${
-                selectedBoostType === "engines" 
-                  ? "border-cyan-neon bg-cyan-neon/10 shadow-[0_0_10px_rgba(0,240,255,0.2)]" 
-                  : "border-bridge-border bg-black/30 hover:border-cyan-neon/50"
-              }`}
-            >
-              <div className="flex items-center justify-between text-xs font-bold text-foreground">
-                <span>Boost Engines</span>
-                <Gauge className="h-3.5 w-3.5 text-cyan-neon" />
-              </div>
-              <span className="text-[10px] text-muted-foreground">DC 10 Str Check: +50 Speed until end of next turn.</span>
-            </button>
-
-            <button
-              disabled={boostActionUsed}
-              onClick={() => setSelectedBoostType("shields")}
-              className={`p-3 rounded border text-left flex flex-col gap-1 transition-all cursor-pointer disabled:opacity-50 ${
-                selectedBoostType === "shields" 
-                  ? "border-cyan-neon bg-cyan-neon/10 shadow-[0_0_10px_rgba(0,240,255,0.2)]" 
-                  : "border-bridge-border bg-black/30 hover:border-cyan-neon/50"
-              }`}
-            >
-              <div className="flex items-center justify-between text-xs font-bold text-foreground">
-                <span>Boost Shields</span>
-                <Shield className="h-3.5 w-3.5 text-cyan-neon" />
-              </div>
-              <span className="text-[10px] text-muted-foreground">DC 10 Str Check: Roll shield die for temp shield points.</span>
-            </button>
-
-            <button
-              disabled={boostActionUsed}
-              onClick={() => setSelectedBoostType("weapons")}
-              className={`p-3 rounded border text-left flex flex-col gap-1 transition-all cursor-pointer disabled:opacity-50 ${
-                selectedBoostType === "weapons" 
-                  ? "border-cyan-neon bg-cyan-neon/10 shadow-[0_0_10px_rgba(0,240,255,0.2)]" 
-                  : "border-bridge-border bg-black/30 hover:border-cyan-neon/50"
-              }`}
-            >
-              <div className="flex items-center justify-between text-xs font-bold text-foreground">
-                <span>Boost Weapons</span>
-                <Crosshair className="h-3.5 w-3.5 text-cyan-neon" />
-              </div>
-              <span className="text-[10px] text-muted-foreground">DC 10 Str Check: Advantage on next weapon attack roll.</span>
-            </button>
-          </div>
-
-          {selectedBoostType && !boostActionUsed && (
-            <div className="p-3 rounded border border-cyan-neon/40 bg-cyan-neon/5 flex flex-col sm:flex-row items-center justify-between gap-3 mt-2">
-              <div className="text-xs">
-                <span className="text-cyan-neon font-bold uppercase">Selected: Boost {selectedBoostType}</span>
-                <div className="text-[10px] text-muted-foreground">Strength Modifier: {effectiveStrengthMod >= 0 ? `+${effectiveStrengthMod}` : effectiveStrengthMod} | DC: 10</div>
-              </div>
-              
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <button
-                  onClick={handleSystemRollBoost}
-                  className="flex-1 sm:flex-none px-4 py-1.5 rounded bg-cyan-neon text-black font-bold text-xs hover:bg-cyan-neon/80 transition-colors cursor-pointer"
-                >
-                  System Roll (d20 {effectiveStrengthMod >= 0 ? `+ ${effectiveStrengthMod}` : `- ${Math.abs(effectiveStrengthMod)}`})
-                </button>
-                
-                <form onSubmit={handleManualRollBoost} className="flex gap-1">
-                  <input
-                    type="number"
-                    placeholder="Total"
-                    value={manualRollInput}
-                    onChange={(e) => setManualRollInput(e.target.value)}
-                    className="w-16 px-2 py-1 rounded bg-black border border-bridge-border text-xs text-foreground"
-                  />
-                  <button
-                    type="submit"
-                    className="px-3 py-1.5 rounded border border-cyan-neon/50 bg-cyan-neon/10 text-cyan-neon text-xs font-bold hover:bg-cyan-neon/20 cursor-pointer"
-                  >
-                    Submit
-                  </button>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {boostFeedback && (
-            <div className="p-2.5 rounded border border-amber-500/40 bg-amber-500/10 text-xs text-amber-300 mt-1">
-              {boostFeedback}
-            </div>
-          )}
-        </div>
-
-        {/* SHIP RECHARGE PROTOCOL */}
-        <div className="rounded-md border border-cyan-neon/50 bg-bridge-panel p-4 flex flex-col gap-4 shadow-[0_0_15px_rgba(0,240,255,0.06)]">
-          <div className="flex items-center justify-between border-b border-bridge-border pb-3">
-            <div className="flex items-center gap-2.5">
-              <RefreshCw className={`h-4 w-4 text-cyan-neon ${rechargeStep === "spending" ? "animate-spin" : ""}`} />
-              <div>
-                <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
-                  Ship Recharge Protocol
-                </h3>
-                <span className="text-[10px] text-muted-foreground block">
-                  1-Hour Short Rest Maintenance Cycle &amp; Hull Field Repairs
-                </span>
-              </div>
-            </div>
-            <span className="px-2 py-0.5 text-[10px] font-mono tracking-widest uppercase bg-cyan-950/80 border border-cyan-neon/40 text-cyan-neon rounded">
-              Short Rest
-            </span>
-          </div>
-
-          {rechargeStep === "idle" ? (
-            <div className="flex flex-col lg:flex-row items-center justify-between gap-4 py-1">
-              <div className="text-xs text-muted-foreground space-y-1.5">
-                <p className="flex items-center gap-2">
-                  <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
-                  <span>
-                    Shield Points will restore to <strong className="text-foreground">100%</strong> ({effectiveShieldMax} SP) and recover{" "}
-                    <strong className="text-emerald-400">+{shieldDiceToRestore} Shield Dice</strong> (Half Max, min 1).
-                  </span>
-                </p>
-                <p className="flex items-center gap-2">
-                  <Wrench className="h-4 w-4 text-cyan-neon shrink-0" />
-                  <span>
-                    Hull Dice Pool: <strong className="text-foreground">{availableHullDice} / {maxHullDice} ({effectiveHullDieType})</strong> available to spend with Mechanic&apos;s Kit checks.
-                  </span>
-                </p>
-                <p className="flex items-center gap-2">
-                  <Zap className="h-4 w-4 text-amber-400 shrink-0" />
-                  <span>
-                    Resets engineering boost statuses and unlocks per-recharge ship systems.
-                  </span>
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleStartRechargeProcess}
-                className="w-full lg:w-auto px-6 py-3.5 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-cyan-neon border border-cyan-neon/60 rounded text-xs font-bold tracking-widest uppercase shadow-[0_0_15px_rgba(0,240,255,0.2)] transition-all flex items-center justify-center gap-2 cursor-pointer group"
-              >
-                <RefreshCw className="h-4 w-4 group-hover:rotate-180 transition-transform duration-500" />
-                <span>Initiate 1-Hour Recharge</span>
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4 pt-1">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="p-3 rounded border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-between">
-                  <span className="text-muted-foreground">Shield Systems (Auto):</span>
-                  <span className="text-emerald-400 font-bold">100% RESTORED ({effectiveShieldMax} SP)</span>
-                </div>
-                <div className="p-3 rounded border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-between">
-                  <span className="text-muted-foreground">Shield Dice Restored:</span>
-                  <span className="text-emerald-400 font-bold">+{shieldDiceToRestore} Dice (Total Available: {Math.min(maxShieldDice, availableShieldDice + shieldDiceToRestore)}/{maxShieldDice})</span>
-                </div>
-              </div>
-
-              <div className="rounded border border-bridge-border bg-black/40 p-4 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-2 border-b border-bridge-border">
-                  <div className="text-xs font-bold uppercase tracking-wider text-cyan-neon flex items-center gap-1.5">
-                    <Wrench className="h-4 w-4 text-cyan-neon" />
-                    Makeshift Hull Repairs (Hull Dice Spending)
+                    {boostFeedback && (
+                      <div className="p-2 rounded border border-amber-500/40 bg-amber-500/10 text-xs text-amber-300">
+                        {boostFeedback}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-xs">
-                    <span className="text-muted-foreground">Current Hull Dice: </span>
-                    <span className="text-cyan-neon font-bold">{availableHullDice} / {maxHullDice} ({effectiveHullDieType})</span>
-                  </div>
-                </div>
+                )}
 
-                {availableHullDice > 0 ? (
-                  <div className="space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-bridge-panel p-3 rounded border border-bridge-border">
+                {/* 4. PATCH WORKSPACE */}
+                {cardId === "patch" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex justify-between items-center border-b border-bridge-border/40 pb-2">
                       <div>
-                        <span className="text-xs font-bold text-foreground block">
-                          Select Number of Hull Dice to Spend:
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          Available: {availableHullDice} dice • Ship Constitution Mod per die: {formatMod(effectiveConstitutionMod)}
-                        </span>
+                        <span className="text-xs font-bold text-emerald-400 uppercase">Emergency Damage Control</span>
+                        <span className="text-[10px] text-muted-foreground block">Patch DC: {patchDC} (Missing Hull: {missingHull} HP)</span>
                       </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setDiceCountToSpend((prev) => Math.max(1, prev - 1))}
-                          disabled={diceCountToSpend <= 1}
-                          className="p-1.5 rounded bg-black/60 border border-bridge-border text-foreground hover:bg-cyan-neon/20 disabled:opacity-30 cursor-pointer"
-                        >
-                          <Minus className="h-3.5 w-3.5" />
-                        </button>
-                        <span className="w-10 text-center font-bold text-sm text-cyan-neon font-mono">
-                          {diceCountToSpend}
+                      {(hasDamageControl || hasAutomatedProtocols) && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border border-cyan-400/40 bg-cyan-950/40 text-cyan-300">
+                          {hasAutomatedProtocols ? "REACTION PATCH" : "BONUS PATCH"}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => setDiceCountToSpend((prev) => Math.min(availableHullDice, prev + 1))}
-                          disabled={diceCountToSpend >= availableHullDice}
-                          className="p-1.5 rounded bg-black/60 border border-bridge-border text-foreground hover:bg-cyan-neon/20 disabled:opacity-30 cursor-pointer"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
+                      )}
                     </div>
 
-                    <div className="p-3 rounded border border-amber-500/30 bg-amber-500/5 text-[11px] space-y-1">
-                      <div className="font-bold text-amber-300 uppercase tracking-wide">
-                        Engineer Check Prompt:
-                      </div>
-                      <p className="text-muted-foreground">
-                        Roll an <strong className="text-foreground">Intelligence (Mechanic&apos;s kit) check</strong> on your character sheet:
-                      </p>
-                      <ul className="list-disc list-inside text-muted-foreground pl-1 space-y-0.5">
-                        <li><strong className="text-rose-400">10 or less:</strong> Roll each Hull Die twice and take the lesser amount.</li>
-                        <li><strong className="text-cyan-300">11 to 20:</strong> Roll each Hull Die normally.</li>
-                        <li><strong className="text-emerald-400">21 or higher:</strong> Roll each Hull Die twice and take the greater amount.</li>
-                      </ul>
-                      <p className="text-amber-200/90 font-semibold pt-1">
-                        👉 Physically roll {diceCountToSpend} × {effectiveHullDieType} and sum the dice results.
-                      </p>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      Make a Constitution (Patch) check. Success: Roll Hull Die normally{hasAutomatedProtocols ? ` + ${Math.max(1, effectiveIntelligenceMod)} (Int Mod)` : ""}. Failure: Roll Hull Die twice, take lesser amount{hasAutomatedProtocols ? ` + ${Math.max(1, effectiveIntelligenceMod)} (Int Mod)` : ""}.
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        onClick={() => handlePatchCheck(true)}
+                        className="px-3 py-1.5 rounded border border-emerald-500/50 bg-emerald-500/20 text-emerald-300 text-xs font-bold hover:bg-emerald-500/30 cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Wrench className="h-3.5 w-3.5" />
+                        Standard Patch (d20 {formatMod(effectivePatchSkillMod)})
+                      </button>
+
+                      {(hasDamageControl || hasAutomatedProtocols) && (
+                        <button
+                          disabled={quickPatchUses >= tierUses}
+                          onClick={() => {
+                            setQuickPatchUses((prev) => prev + 1)
+                            handlePatchCheck(true)
+                          }}
+                          className={`px-3 py-1.5 rounded text-xs font-bold cursor-pointer flex items-center gap-1.5 border ${
+                            quickPatchUses >= tierUses
+                              ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
+                              : "border-cyan-neon/60 bg-cyan-neon/20 text-cyan-neon hover:bg-cyan-neon/30"
+                          }`}
+                        >
+                          <Zap className="h-3.5 w-3.5 text-cyan-neon" />
+                          {hasAutomatedProtocols ? "Reaction Patch" : "Bonus Action Patch"} ({tierUses - quickPatchUses} Left)
+                        </button>
+                      )}
+
+                      {patchFeedback && (
+                        <button
+                          onClick={handleResetPatch}
+                          className="px-2.5 py-1.5 rounded border border-bridge-border bg-black/40 text-slate-400 text-xs hover:text-white cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      )}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-center bg-black/50 p-3 rounded border border-bridge-border">
-                      <div className="space-y-1">
-                        <label className="text-[11px] text-muted-foreground block font-bold">
-                          Enter Total Value of All Rolled Dice:
-                        </label>
+                    {patchFeedback && (
+                      <div className="p-2.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-300 flex flex-col gap-1">
+                        <span>{patchFeedback}</span>
+                        <span className="text-[10px] text-amber-300 font-bold">
+                          📢 NOTIFY DEFENSE STATION: Manually update hull by this amount.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 5. RECHARGE WORKSPACE */}
+                {cardId === "recharge" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between border-b border-bridge-border/40 pb-2">
+                      <span className="text-xs font-bold text-cyan-neon uppercase">1-Hour Short Rest Maintenance</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">Hull Dice Pool: {availableHullDice}/{maxHullDice}</span>
+                    </div>
+
+                    {rechargeStep === "idle" ? (
+                      <div className="flex flex-col gap-2">
+                        <div className="text-[11px] text-muted-foreground space-y-1">
+                          <p>• Shields will auto-restore to 100% ({effectiveShieldMax} SP) and recover +{shieldDiceToRestore} Shield Dice.</p>
+                          <p>• Spend available Hull Dice with Mechanic's Kit checks for field repairs.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleStartRechargeProcess}
+                          className="w-full py-2 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-cyan-neon border border-cyan-neon/60 rounded text-xs font-bold uppercase tracking-wider cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          <span>Initiate 1-Hour Maintenance</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between bg-black/40 p-2 rounded border border-bridge-border text-xs">
+                          <span className="text-muted-foreground">Select Hull Dice to Spend:</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setDiceCountToSpend((prev) => Math.max(1, prev - 1))}
+                              disabled={diceCountToSpend <= 1}
+                              className="px-2 py-0.5 rounded bg-black border border-bridge-border text-foreground hover:bg-cyan-neon/20 disabled:opacity-30 cursor-pointer"
+                            >
+                              -
+                            </button>
+                            <span className="font-bold text-cyan-neon font-mono">{diceCountToSpend}</span>
+                            <button
+                              type="button"
+                              onClick={() => setDiceCountToSpend((prev) => Math.min(availableHullDice, prev + 1))}
+                              disabled={diceCountToSpend >= availableHullDice}
+                              className="px-2 py-0.5 rounded bg-black border border-bridge-border text-foreground hover:bg-cyan-neon/20 disabled:opacity-30 cursor-pointer"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
@@ -1702,278 +1713,241 @@ export function EngineeringStation({
                             placeholder={`Sum of ${diceCountToSpend} dice`}
                             value={rawRollTotalInput}
                             onChange={(e) => setRawRollTotalInput(e.target.value)}
-                            className="w-full px-3 py-2 bg-black border border-bridge-border rounded text-xs text-foreground font-mono focus:border-cyan-neon outline-none"
+                            className="flex-1 px-2.5 py-1.5 bg-black border border-bridge-border rounded text-xs text-foreground font-mono focus:border-cyan-neon outline-none"
                           />
+                          <span className="text-xs font-bold text-emerald-400 font-mono">
+                            Net: +{calculatedHullRegained} HP
+                          </span>
                         </div>
-                      </div>
 
-                      <div className="p-2.5 rounded bg-bridge-panel border border-bridge-border text-xs space-y-1 font-mono">
-                        <div className="flex justify-between text-muted-foreground">
-                          <span>Dice Sum:</span>
-                          <span className="text-foreground font-bold">{parsedRawRoll}</span>
-                        </div>
-                        <div className="flex justify-between text-muted-foreground">
-                          <span>Con Mod Bonus ({diceCountToSpend} × {formatMod(effectiveConstitutionMod)}):</span>
-                          <span className="text-amber-400 font-bold">{formatMod(totalConBonusForSelectedDice)}</span>
-                        </div>
-                        {intModBonus > 0 && (
-                          <div className="flex justify-between text-muted-foreground">
-                            <span>Automated Protocols (Int Mod):</span>
-                            <span className="text-cyan-300 font-bold">+{intModBonus}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between pt-1 border-t border-bridge-border font-bold">
-                          <span className="text-cyan-neon">Net HP Regained:</span>
-                          <span className="text-emerald-400">+{calculatedHullRegained} HP</span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleExecuteRecharge(false)}
+                            className="flex-1 py-1.5 bg-black/40 hover:bg-black/60 border border-bridge-border text-slate-300 rounded text-xs font-bold uppercase cursor-pointer"
+                          >
+                            Shields Only
+                          </button>
+                          <button
+                            type="button"
+                            disabled={parsedRawRoll <= 0}
+                            onClick={() => handleExecuteRecharge(true)}
+                            className="flex-1 py-1.5 bg-emerald-600/30 hover:bg-emerald-600/40 border border-emerald-500/60 text-emerald-300 disabled:opacity-40 rounded text-xs font-bold uppercase cursor-pointer"
+                          >
+                            Apply +{calculatedHullRegained} HP
+                          </button>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-3 rounded bg-black/60 border border-bridge-border text-xs text-muted-foreground flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 text-cyan-neon" />
-                    <span>No Hull Dice remaining. You can still recharge shields and reset system charges.</span>
+                    )}
+
+                    {rechargeFeedback && (
+                      <div className="p-2 rounded border border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-300">
+                        {rechargeFeedback}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2 border-t border-bridge-border">
-                  <button
-                    type="button"
-                    onClick={() => handleExecuteRecharge(false)}
-                    className="w-full sm:w-auto px-4 py-2 bg-secondary/50 hover:bg-secondary border border-bridge-border text-foreground rounded text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors"
-                  >
-                    Recharge Shields Only (Spend 0 Hull Dice)
-                  </button>
+                {/* 6. TACTICAL AUXILIARIES WORKSPACE */}
+                {cardId === "tacticalAux" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {hasPowerBackup && (
+                        <button
+                          disabled={powerBackupUsed}
+                          onClick={handleTriggerPowerBackup}
+                          className={`p-2.5 rounded border text-left flex flex-col gap-1 transition cursor-pointer ${
+                            powerBackupUsed
+                              ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                              : "bg-amber-500/10 border-amber-400 text-amber-300 hover:bg-amber-500/20"
+                          }`}
+                        >
+                          <div className="flex justify-between items-center font-bold">
+                            <span>Power Backup</span>
+                            <span>{powerBackupUsed ? "EXPENDED" : "READY"}</span>
+                          </div>
+                          <span className="text-[9px] text-muted-foreground">Drop to 1 HP instead of 0</span>
+                        </button>
+                      )}
 
-                  {availableHullDice > 0 && (
-                    <button
-                      type="button"
-                      disabled={parsedRawRoll <= 0}
-                      onClick={() => handleExecuteRecharge(true)}
-                      className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600/30 hover:bg-emerald-600/40 border border-emerald-500/60 text-emerald-300 disabled:opacity-40 rounded text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_10px_rgba(16,185,129,0.2)] transition-all"
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                      Apply +{calculatedHullRegained} HP &amp; Complete Recharge
-                    </button>
-                  )}
-                </div>
+                      {hasEmergencyGenerator && (
+                        <button
+                          disabled={emergencyGenUsed}
+                          onClick={() => handleTriggerEmergencyGenerator("drop1")}
+                          className={`p-2.5 rounded border text-left flex flex-col gap-1 transition cursor-pointer ${
+                            emergencyGenUsed
+                              ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                              : "bg-cyan-500/10 border-cyan-neon text-cyan-neon hover:bg-cyan-500/20"
+                          }`}
+                        >
+                          <div className="flex justify-between items-center font-bold">
+                            <span>Emergency Gen</span>
+                            <span>{emergencyGenUsed ? "EXPENDED" : "READY"}</span>
+                          </div>
+                          <span className="text-[9px] text-muted-foreground">Drop shields to 1 SP</span>
+                        </button>
+                      )}
+
+                      {hasElectronicBaffle && (
+                        <button
+                          disabled={baffleUses >= tierUses}
+                          onClick={handleTriggerElectronicBaffle}
+                          className={`p-2.5 rounded border text-left flex flex-col gap-1 transition cursor-pointer ${
+                            baffleUses >= tierUses
+                              ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                              : "bg-rose-500/10 border-rose-400 text-rose-300 hover:bg-rose-500/20"
+                          }`}
+                        >
+                          <div className="flex justify-between items-center font-bold">
+                            <span>Electronic Baffle</span>
+                            <span>{tierUses - baffleUses}/{tierUses}</span>
+                          </div>
+                          <span className="text-[9px] text-muted-foreground">Roll 1 HD self-damage to clear condition</span>
+                        </button>
+                      )}
+
+                      {hasAltFuelConverter && (
+                        <button
+                          disabled={altFuelUses >= tierUses}
+                          onClick={handleTriggerAltFuel}
+                          className={`p-2.5 rounded border text-left flex flex-col gap-1 transition cursor-pointer ${
+                            altFuelUses >= tierUses
+                              ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                              : "bg-emerald-500/10 border-emerald-400 text-emerald-300 hover:bg-emerald-500/20"
+                          }`}
+                        >
+                          <div className="flex justify-between items-center font-bold">
+                            <span>Alt Fuel Converter</span>
+                            <span>{tierUses - altFuelUses}/{tierUses}</span>
+                          </div>
+                          <span className="text-[9px] text-muted-foreground">DC 10 Regulation: +1 Day Fuel</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {tacticalFeedback && (
+                      <div className="p-2 rounded bg-black/60 border border-bridge-border text-xs text-cyan-neon font-mono">
+                        {tacticalFeedback}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 7. HARDWARE MODIFICATIONS WORKSPACE */}
+                {cardId === "mods" && (
+                  <div className="flex flex-col gap-2">
+                    <StationModifications 
+                      station="Engineering" 
+                      installedMods={installedMods} 
+                      onRemoveMod={onRemoveMod} 
+                    />
+                  </div>
+                )}
+
+                {/* 8. CORE TELEMETRY SNAPSHOT WORKSPACE */}
+                {cardId === "telemetry" && (
+                  <div className="flex flex-col gap-3">
+                    <ShipStats shipConfig={shipConfig} />
+                  </div>
+                )}
               </div>
-            </div>
-          )}
-
-          {rechargeFeedback && (
-            <div className="p-2.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-300 mt-1 flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-              <span>{rechargeFeedback}</span>
-            </div>
-          )}
+            )
+          })}
         </div>
+      )}
 
-        {/* PATCH ACTION PANEL */}
-        <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between border-b border-bridge-border pb-3">
-            <div>
-              <h3 className="text-xs font-bold tracking-[0.2em] text-emerald-400 flex items-center gap-2">
-                <Wrench className="h-4 w-4 text-emerald-400" />
-                EMERGENCY PATCH PROTOCOL
-              </h3>
-              {(hasDamageControl || hasAutomatedProtocols) && (
-                <span className="text-[10px] text-cyan-300 font-mono mt-0.5 block">
-                  {hasAutomatedProtocols 
-                    ? "★ Automated Protocols: Take Patch as a REACTION (Tier Uses/Refit) + Add Int Mod to healing!" 
-                    : "★ Damage Control System: Take Patch as a BONUS ACTION (Tier Uses/Refit)!"}
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] font-bold text-muted-foreground">
-              Current DC: <span className="text-emerald-400 font-extrabold">{patchDC}</span> (Missing Hull: {missingHull})
-            </span>
+      {/* 6. CHASSIS TACTICAL SURGES & REACTIONS (ALWAYS READY TRAY AT BOTTOM) */}
+      {(shipTier >= 3) && (
+        <section className="rounded-md border border-cyan-neon/40 bg-bridge-panel p-2.5 shadow-[0_0_12px_rgba(0,255,255,0.04)] flex flex-col gap-2">
+          <div className="flex items-center justify-between border-b border-bridge-border/60 pb-1">
+            <h3 className="text-[10px] font-bold tracking-[0.2em] text-cyan-neon uppercase flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-cyan-neon" />
+              Tactical Surges &amp; Stances (Tier {shipTier})
+            </h3>
+            <span className="text-[8px] font-mono text-muted-foreground">COMBAT ACTIONS</span>
           </div>
 
-          <p className="text-[11px] text-muted-foreground">
-            Make a Constitution (Patch) check. Success: Roll Hull Die normally{hasAutomatedProtocols ? ` + ${Math.max(1, effectiveIntelligenceMod)} (Int Mod)` : ""}. Failure: Roll Hull Die twice, take lesser amount{hasAutomatedProtocols ? ` + ${Math.max(1, effectiveIntelligenceMod)} (Int Mod)` : ""}.
-          </p>
-
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            <button
-              onClick={() => handlePatchCheck(true)}
-              className="px-4 py-2 rounded border border-emerald-500/50 bg-emerald-500/20 text-emerald-300 text-xs font-bold hover:bg-emerald-500/30 transition-colors cursor-pointer flex items-center gap-2"
-            >
-              <Wrench className="h-3.5 w-3.5" />
-              Standard Action Patch (d20 {formatMod(effectivePatchSkillMod)})
-            </button>
-
-            {(hasDamageControl || hasAutomatedProtocols) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            {shipTier >= 4 && (
               <button
-                disabled={quickPatchUses >= tierUses}
-                onClick={() => {
-                  setQuickPatchUses((prev) => prev + 1)
-                  handlePatchCheck(true)
-                }}
-                className={`px-4 py-2 rounded text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 border ${
-                  quickPatchUses >= tierUses
-                    ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                    : "border-cyan-neon/60 bg-cyan-neon/20 text-cyan-neon hover:bg-cyan-neon/30 shadow-[0_0_8px_rgba(0,255,255,0.2)]"
+                type="button"
+                disabled={standingByUsed}
+                onClick={onUseStandingBy}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  standingByUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-cyan-neon/50 text-cyan-neon hover:bg-cyan-950/40"
                 }`}
               >
-                <Zap className="h-3.5 w-3.5 text-cyan-neon" />
-                {hasAutomatedProtocols ? "Reaction Patch" : "Bonus Action Patch"} ({tierUses - quickPatchUses} Left)
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Standing By</span>
+                  <span>{standingByUsed ? "USED" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Push limits: +1 Extra Action</span>
               </button>
             )}
 
-            {patchFeedback && (
+            {shipTier >= 5 && !isMedium && (
               <button
-                onClick={handleResetPatch}
-                className="px-3 py-2 rounded border border-bridge-border bg-secondary/40 text-secondary-foreground text-xs hover:bg-secondary/70 transition-colors cursor-pointer"
+                type="button"
+                disabled={leafOnTheWindUsed}
+                onClick={onUseLeafOnTheWind}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  leafOnTheWindUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-emerald-500/50 text-emerald-400 hover:bg-emerald-950/40"
+                }`}
               >
-                Reset Patch Log
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Leaf on the Wind</span>
+                  <span>{leafOnTheWindUsed ? "USED" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Treat roll as Nat 20</span>
+              </button>
+            )}
+
+            {hasVersatileTransport && (
+              <button
+                type="button"
+                disabled={versatileTransportUsed >= versatileMax}
+                onClick={handleUseVersatileTransport}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  versatileTransportUsed >= versatileMax
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-cyan-400/50 text-cyan-300 hover:bg-cyan-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Versatile Transport</span>
+                  <span>{versatileMax - versatileTransportUsed}/{versatileMax}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Trigger Advantage</span>
+              </button>
+            )}
+
+            {hasBestShip && (
+              <button
+                type="button"
+                disabled={bestShipInVerseUsed}
+                onClick={handleUseBestShip}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  bestShipInVerseUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-amber-400/50 text-amber-300 hover:bg-amber-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Best Ship in 'Verse</span>
+                  <span>{bestShipInVerseUsed ? "EXP" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Action: Un-enhanced Resistance</span>
               </button>
             )}
           </div>
-
-          {patchFeedback && (
-            <div className="p-3 rounded border border-emerald-500/40 bg-emerald-500/10 flex flex-col gap-2 mt-1">
-              <div className="text-xs text-emerald-300 font-mono">
-                {patchFeedback}
-              </div>
-              <div className="text-[11px] text-amber-400 font-bold flex items-center gap-1.5 pt-1 border-t border-emerald-500/20">
-                <span>📢 VERBAL COMMUNICATION REQUIRED:</span>
-                <span className="text-muted-foreground font-normal">Tell the Defense operator to manually increase the hull by this amount.</span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* INSTALLED STATION MODIFICATIONS */}
-        <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
-          <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase border-b border-bridge-border/60 pb-1">
-            Installed Station Modifications
-          </h3>
-          <StationModifications 
-            station="Engineering" 
-            installedMods={installedMods} 
-            onRemoveMod={onRemoveMod}
-          />
         </section>
+      )}
 
-        {/* VESSEL SETUP STATISTICS SNAPSHOT */}
-        <div className="rounded-md border border-cyan-neon/40 bg-bridge-panel p-4 flex flex-col gap-4">
-          <div className="flex items-center justify-between border-b border-bridge-border pb-3">
-            <div className="flex items-center gap-2">
-              <Sliders className="h-4 w-4 text-cyan-neon" />
-              <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon">
-                VESSEL SETUP STATISTICS SNAPSHOT
-              </h3>
-            </div>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${shipConfig ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" : "bg-red-500/20 text-red-300 border border-red-500/40"}`}>
-              {shipConfig ? `CONFIG ACTIVE (${shipConfig.name || "Custom Vessel"})` : "ERROR: NO CONFIG RECEIVED"}
-            </span>
-          </div>
-
-          {shipConfig ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="rounded border border-bridge-border p-3 bg-black/30 flex flex-col gap-2">
-                <span className="text-[10px] text-cyan-neon font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <Anchor className="h-3.5 w-3.5" /> Identification
-                </span>
-                <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                  <div>
-                    <span className="text-[9px] text-muted-foreground block">VESSEL NAME</span>
-                    <span className="font-bold text-foreground truncate block">{shipConfig.name ?? "N/A"}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-muted-foreground block">SHIP SIZE / CLASS</span>
-                    <span className="font-bold text-foreground truncate block">{shipConfig.size ?? "N/A"}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-muted-foreground block">TIER</span>
-                    <span className="font-bold text-amber-400">Tier {shipConfig.tier ?? "N/A"}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-muted-foreground block">COUPLING MODE</span>
-                    <span className="font-bold text-cyan-neon truncate block">{powerCoupling}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded border border-bridge-border p-3 bg-black/30 flex flex-col gap-2 sm:col-span-2">
-                <span className="text-[10px] text-cyan-neon font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <Cpu className="h-3.5 w-3.5" /> Core Attribute Scores &amp; Modifiers
-                </span>
-                <div className="grid grid-cols-6 gap-2 text-xs pt-1 text-center">
-                  <div className="rounded bg-bridge-panel p-1.5 border border-bridge-border">
-                    <span className="text-[9px] text-muted-foreground block">STR</span>
-                    <span className="font-bold text-foreground text-sm block">{shipConfig.stats?.strength ?? "N/A"}</span>
-                    <span className="text-[10px] text-cyan-neon font-bold block">{shipConfig.stats?.strength !== undefined ? formatMod(getModFromScore(shipConfig.stats.strength)) : "-"}</span>
-                  </div>
-                  <div className="rounded bg-bridge-panel p-1.5 border border-bridge-border">
-                    <span className="text-[9px] text-muted-foreground block">DEX</span>
-                    <span className="font-bold text-foreground text-sm block">{shipConfig.stats?.dexterity ?? "N/A"}</span>
-                    <span className="text-[10px] text-cyan-neon font-bold block">{shipConfig.stats?.dexterity !== undefined ? formatMod(getModFromScore(shipConfig.stats.dexterity)) : "-"}</span>
-                  </div>
-                  <div className="rounded bg-bridge-panel p-1.5 border border-bridge-border">
-                    <span className="text-[9px] text-muted-foreground block">CON</span>
-                    <span className="font-bold text-foreground text-sm block">{shipConfig.stats?.constitution ?? "N/A"}</span>
-                    <span className="text-[10px] text-cyan-neon font-bold block">{shipConfig.stats?.constitution !== undefined ? formatMod(getModFromScore(shipConfig.stats.constitution)) : "-"}</span>
-                  </div>
-                  <div className="rounded bg-bridge-panel p-1.5 border border-bridge-border">
-                    <span className="text-[9px] text-muted-foreground block">INT</span>
-                    <span className="font-bold text-foreground text-sm block">{shipConfig.stats?.intelligence ?? "N/A"}</span>
-                    <span className="text-[10px] text-cyan-neon font-bold block">{shipConfig.stats?.intelligence !== undefined ? formatMod(getModFromScore(shipConfig.stats.intelligence)) : "-"}</span>
-                  </div>
-                  <div className="rounded bg-bridge-panel p-1.5 border border-bridge-border">
-                    <span className="text-[9px] text-muted-foreground block">WIS</span>
-                    <span className="font-bold text-foreground text-sm block">{shipConfig.stats?.wisdom ?? "N/A"}</span>
-                    <span className="text-[10px] text-cyan-neon font-bold block">{shipConfig.stats?.wisdom !== undefined ? formatMod(getModFromScore(shipConfig.stats.wisdom)) : "-"}</span>
-                  </div>
-                  <div className="rounded bg-bridge-panel p-1.5 border border-bridge-border">
-                    <span className="text-[9px] text-muted-foreground block">CHA</span>
-                    <span className="font-bold text-foreground text-sm block">{shipConfig.stats?.charisma ?? "N/A"}</span>
-                    <span className="text-[10px] text-cyan-neon font-bold block">{shipConfig.stats?.charisma !== undefined ? formatMod(getModFromScore(shipConfig.stats.charisma)) : "-"}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded border border-bridge-border p-3 bg-black/30 flex flex-col gap-2 sm:col-span-3">
-                <span className="text-[10px] text-cyan-neon font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <Zap className="h-3.5 w-3.5" /> Operational Pools &amp; Defense
-                </span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
-                  <div>
-                    <span className="text-[9px] text-muted-foreground block">MAX HULL</span>
-                    <span className="font-bold text-emerald-400">{effectiveHullMax} HP</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-muted-foreground block">POWER POOL CAP</span>
-                    <span className="font-bold text-amber-400">{effectiveMaxPowerDice} ({effectivePowerDieType})</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-muted-foreground block">REACTOR TYPE</span>
-                    <span className="font-bold text-cyan-neon uppercase">{rawReactorType}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-muted-foreground block">MAX SHIELDS</span>
-                    <span className="font-bold text-foreground">{shipConfig.maxShields ?? "N/A"}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="p-4 rounded border border-red-500/40 bg-red-500/10 text-xs text-red-400">
-              🚨 CRITICAL ERROR: No <code className="font-bold">shipConfig</code> object received.
-            </div>
-          )}
-        </div>
-
-        <div className="border-t border-bridge-border pt-2">
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <Terminal className="h-3.5 w-3.5 text-cyan-neon" />
-            <span>All primary engineering circuits nominal</span>
-          </div>
-        </div>
-      </div>
-
-      {/* START-UP & DURESS INITIATION PROTOCOL MODAL */}
+      {/* MODAL: STARTUP PROTOCOL */}
       {showStartupModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
           <div className="bg-bridge-panel border border-cyan-neon/70 rounded-md p-5 max-w-xl w-full flex flex-col gap-4 shadow-[0_0_25px_rgba(0,255,255,0.15)] max-h-[90vh] overflow-y-auto">
@@ -1984,179 +1958,50 @@ export function EngineeringStation({
                   Reactor Ignition &amp; Start-Up Protocol
                 </h3>
               </div>
-              <button
-                onClick={() => setShowStartupModal(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
+              <button onClick={() => setShowStartupModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300">
-                Chassis Warm-Up: <strong className="text-amber-300">{normalStartupTime}</strong>
-              </span>
-              <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${
-                duressCondition === "advantage"
-                  ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                  : duressCondition === "disadvantage"
-                  ? "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse"
-                  : "bg-cyan-neon/10 text-cyan-neon border-cyan-neon/40"
-              }`}>
-                Integrity: {duressCondition.toUpperCase()} ({currentActualHull}/{effectiveHullMax} HP)
-              </span>
+              <span className="text-slate-300">Warm-Up: <strong className="text-amber-300">{normalStartupTime}</strong></span>
+              <span className="text-xs text-cyan-neon font-bold uppercase">{duressCondition}</span>
             </div>
 
             <div className="bg-black/60 p-3 rounded border border-bridge-border/60 flex flex-col gap-2">
-              <div className="flex justify-between text-xs">
-                <span className="font-bold text-slate-200">
-                  Procedures Completed: <strong className="text-cyan-neon text-sm">{initiationProcedures} / {targetProcedures}</strong>
-                </span>
-                <span className={`text-[10px] font-bold ${initiationProcedures >= targetProcedures ? "text-emerald-400" : "text-amber-300"}`}>
-                  {initiationProcedures >= targetProcedures ? "CORE ONLINE" : "COLD INITIATION"}
-                </span>
+              <div className="flex justify-between text-xs font-bold text-slate-200">
+                <span>Procedures Completed:</span>
+                <span className="text-cyan-neon">{initiationProcedures} / {targetProcedures}</span>
               </div>
-              <div className="h-2.5 w-full bg-slate-900 rounded-sm overflow-hidden border border-bridge-border/50">
-                <div
-                  className={`h-full transition-all duration-300 ${
-                    initiationProcedures >= targetProcedures ? "bg-emerald-400" : "bg-cyan-neon"
-                  }`}
-                  style={{ width: `${Math.min(100, (initiationProcedures / targetProcedures) * 100)}%` }}
-                />
-              </div>
-              <div className="flex justify-end gap-1 font-mono pt-1">
-                <button
-                  onClick={() => setInitiationProcedures((prev) => Math.max(0, prev - 1))}
-                  className="px-2 py-0.5 bg-black border border-bridge-border text-xs rounded text-slate-300 cursor-pointer"
-                >
-                  -1
-                </button>
-                <button
-                  onClick={() => setInitiationProcedures((prev) => Math.min(targetProcedures, prev + 1))}
-                  className="px-2 py-0.5 bg-black border border-bridge-border text-xs rounded text-slate-300 cursor-pointer"
-                >
-                  +1
-                </button>
+              <div className="h-2 w-full bg-slate-900 rounded-sm overflow-hidden">
+                <div className="h-full bg-cyan-neon" style={{ width: `${(initiationProcedures / 10) * 100}%` }} />
               </div>
             </div>
 
-            <div className="bg-black/50 p-3 rounded border border-bridge-border/60 flex flex-col gap-2.5">
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-cyan-neon uppercase">Duress Regulation Check</span>
-                <div className="flex items-center gap-1">
-                  <span className="text-[9px] text-muted-foreground uppercase">Mod:</span>
-                  <input
-                    type="number"
-                    value={engModInput}
-                    onChange={(e) => setEngModInput(parseInt(e.target.value, 10) || 0)}
-                    className="w-10 bg-black border border-bridge-border text-center rounded text-cyan-neon font-bold py-0.5 text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleRollDuressCheck}
-                  disabled={initiationProcedures >= targetProcedures}
-                  className="flex-1 py-1.5 rounded border border-cyan-neon/60 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-xs font-bold text-cyan-neon uppercase disabled:opacity-40 cursor-pointer"
-                >
-                  Roll Regulation Check
-                </button>
-                <form onSubmit={handleApplyManualProcedures} className="flex gap-1">
-                  <input
-                    type="number"
-                    placeholder="+Manual"
-                    value={manualProcInput}
-                    onChange={(e) => setManualProcInput(e.target.value)}
-                    className="w-16 bg-black border border-bridge-border text-xs text-center text-slate-200 px-1 rounded"
-                  />
-                  <button
-                    type="submit"
-                    disabled={initiationProcedures >= targetProcedures}
-                    className="px-2 bg-slate-900 border border-bridge-border text-xs font-bold text-muted-foreground hover:text-white rounded disabled:opacity-40 cursor-pointer"
-                  >
-                    Add
-                  </button>
-                </form>
-              </div>
-
-              {lastDuressRollLog && (
-                <div className="text-[10px] font-mono text-amber-300 bg-black/60 p-1.5 rounded border border-bridge-border/40">
-                  {lastDuressRollLog}
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-bridge-border/60 pt-3 flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2">
-                {initiationProcedures < targetProcedures ? (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setForcedStartupSafety((prev) => !prev)}
-                      className={`p-1.5 rounded border transition cursor-pointer ${
-                        forcedStartupSafety
-                          ? "border-red-500 bg-red-500/20 text-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
-                          : "border-bridge-border bg-black/50 text-slate-500"
-                      }`}
-                      title="Safety Interlock: Click to enable emergency reactor ignition"
-                    >
-                      {forcedStartupSafety ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-                    </button>
-                    <span className="text-[10px] text-muted-foreground">
-                      {forcedStartupSafety ? "IGNITION INTERLOCK DISENGAGED" : "Safety locked (Emergency start guarded)"}
-                    </span>
-                  </div>
-                ) : (
-                  <span className="text-xs text-emerald-400 font-bold uppercase">Ready for Clean Core Ignition</span>
-                )}
-
-                <div className="flex items-center gap-2">
-                  {isPoweredOn && (
-                    <button
-                      type="button"
-                      onClick={handleShutdownShip}
-                      className="px-3 py-2 rounded border border-rose-500/60 bg-rose-950/40 text-rose-300 hover:bg-rose-900/50 text-xs font-bold uppercase cursor-pointer"
-                    >
-                      SCRAM Core
-                    </button>
-                  )}
-
-                  <button
-                    disabled={initiationProcedures < targetProcedures && !forcedStartupSafety}
-                    onClick={handleEngageStartup}
-                    className={`px-4 py-2 rounded text-xs font-bold uppercase transition cursor-pointer ${
-                      initiationProcedures >= targetProcedures
-                        ? "border border-emerald-400 bg-emerald-500/20 text-emerald-300 animate-pulse"
-                        : forcedStartupSafety
-                        ? "border border-amber-400 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
-                        : "border border-bridge-border bg-slate-900 text-slate-600 cursor-not-allowed"
-                    }`}
-                  >
-                    {initiationProcedures >= targetProcedures ? "Ignite Reactor Core" : `Force Core Start (${initiationProcedures}/10)`}
-                  </button>
-                </div>
-              </div>
-
-              {mishapResultLog && (
-                <div className="p-2 rounded bg-black/80 border border-amber-400/50 text-[11px] text-amber-300">
-                  {mishapResultLog}
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-between items-center text-[9px] text-muted-foreground border-t border-bridge-border/40 pt-2">
-              <button onClick={handleResetStartup} className="hover:text-white underline cursor-pointer">
-                Reset Startup State
+            <div className="flex gap-2">
+              <button
+                onClick={handleRollDuressCheck}
+                disabled={initiationProcedures >= targetProcedures}
+                className="flex-1 py-1.5 rounded border border-cyan-neon/60 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-xs font-bold text-cyan-neon uppercase disabled:opacity-40 cursor-pointer"
+              >
+                Roll Regulation Check
               </button>
-              <button onClick={() => setShowStartupModal(false)} className="hover:text-cyan-neon font-bold cursor-pointer">
-                Close Panel
+              <button
+                onClick={handleEngageStartup}
+                className="px-4 py-1.5 rounded border border-emerald-500/60 bg-emerald-500/20 text-xs font-bold text-emerald-300 uppercase cursor-pointer"
+              >
+                Engage Core
               </button>
             </div>
+
+            {mishapResultLog && (
+              <div className="p-2 rounded bg-black/80 border border-amber-400/50 text-[11px] text-amber-300">
+                {mishapResultLog}
+              </div>
+            )}
           </div>
         </div>
       )}
-
     </div>
   )
 }

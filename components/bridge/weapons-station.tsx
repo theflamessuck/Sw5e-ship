@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import {
   Crosshair,
   AlertTriangle,
@@ -20,7 +20,18 @@ import {
   ShieldCheck,
   Lock,
   Sparkles,
-  Flame
+  Flame,
+  X,
+  Maximize2,
+  Minimize2,
+  Layers,
+  Bookmark,
+  Volume2,
+  VolumeX,
+  Activity,
+  Zap,
+  Gauge,
+  Cpu
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { CombatResources } from "./combat-resources"
@@ -37,6 +48,101 @@ import {
   type AttackRollResult,
   type DamageRollBreakdown
 } from "@/lib/combat-roller"
+
+// --- FLAT AVIONICS SOUND SYNTHESIZER & HAPTICS (NO ASSETS REQUIRED) ---
+let audioCtx: AudioContext | null = null
+
+function getAudioContext(): AudioContext | null {
+  if (!audioCtx && typeof window !== "undefined") {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+    if (AudioContextClass) {
+      audioCtx = new AudioContextClass()
+    }
+  }
+  return audioCtx
+}
+
+function playFlatGlassClick() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") ctx.resume()
+
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(1800, now)
+    osc.frequency.exponentialRampToValueAtTime(1400, now + 0.012)
+
+    gain.gain.setValueAtTime(0.035, now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.012)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start(now)
+    osc.stop(now + 0.012)
+  } catch {}
+}
+
+function playSubtleEngage() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") ctx.resume()
+
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = "triangle"
+    osc.frequency.setValueAtTime(520, now)
+    osc.frequency.exponentialRampToValueAtTime(740, now + 0.04)
+
+    gain.gain.setValueAtTime(0.04, now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start(now)
+    osc.stop(now + 0.04)
+  } catch {}
+}
+
+function triggerTactilePulse(type: "tap" | "heavy" = "tap") {
+  if (typeof window !== "undefined" && "vibrate" in navigator) {
+    try {
+      if (type === "tap") navigator.vibrate(10)
+      else navigator.vibrate([15, 20, 15])
+    } catch {}
+  }
+}
+
+export type WeaponsCardId =
+  | "masterArm"
+  | "powerDice"
+  | "batteries"
+  | "ordnance"
+  | "stances"
+  | "chassisSurges"
+  | "mods"
+  | "telemetry"
+
+interface CustomPreset {
+  id: string
+  name: string
+  activeCards: WeaponsCardId[]
+}
+
+const DEFAULT_PRESETS: CustomPreset[] = [
+  { id: "gunnery", name: "Battery Gunnery", activeCards: ["masterArm", "batteries", "powerDice"] },
+  { id: "ordnance", name: "Ordnance & Silos", activeCards: ["batteries", "ordnance", "powerDice"] },
+  { id: "combat", name: "Combat Stations", activeCards: ["masterArm", "batteries", "stances", "chassisSurges"] },
+  { id: "all", name: "All Weapons Systems", activeCards: ["masterArm", "powerDice", "batteries", "ordnance", "stances", "chassisSurges", "mods", "telemetry"] }
+]
 
 type LauncherFamily = "Missile launcher" | "Cluster pod" | "Torpedo launcher" | "Quaternary Ammunition"
 
@@ -134,9 +240,9 @@ export function WeaponsStation({
   onUseStandingBy,
   leafOnTheWindUsed = false,
   onUseLeafOnTheWind,
-  versatileTransportUsed,
+  versatileTransportUsed = 0,
   onUpdateVersatileTransportUsed,
-  bestShipInVerseUsed,
+  bestShipInVerseUsed = false,
   onUpdateBestShipInVerseUsed,
   ordnanceList: externalOrdnanceList,
   onUpdateOrdnanceList,
@@ -149,6 +255,59 @@ export function WeaponsStation({
   isWeaponsBoosted = false,
   onConsumeWeaponBoost,
 }: WeaponsStationProps) {
+  // --- MFD MODULAR DECK STATE (PER-CLIENT PERSISTENCE) ---
+  const [openCards, setOpenCards] = useState<WeaponsCardId[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("sw5e_weapons_open_cards")
+        if (saved) return JSON.parse(saved)
+      } catch {}
+    }
+    return ["batteries", "powerDice"]
+  })
+
+  const [maximizedCard, setMaximizedCard] = useState<WeaponsCardId | null>(null)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true)
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("sw5e_weapons_open_cards", JSON.stringify(openCards))
+      } catch {}
+    }
+  }, [openCards])
+
+  const toggleCard = (id: WeaponsCardId) => {
+    if (soundEnabled) {
+      playFlatGlassClick()
+      triggerTactilePulse("tap")
+    }
+    setOpenCards((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    )
+  }
+
+  const applyPreset = (cards: WeaponsCardId[]) => {
+    if (soundEnabled) {
+      playSubtleEngage()
+      triggerTactilePulse("heavy")
+    }
+    setOpenCards(cards)
+    setMaximizedCard(null)
+  }
+
+  const handleSaveCustomPreset = () => {
+    const name = window.prompt("Enter name for this custom weapons layout:", "Custom Weapons Setup")
+    if (!name) return
+    if (typeof window !== "undefined") {
+      try {
+        const key = `sw5e_weapons_preset_${Date.now()}`
+        localStorage.setItem(key, JSON.stringify({ id: key, name, activeCards: openCards }))
+        alert(`Preset '${name}' saved to this device!`)
+      } catch {}
+    }
+  }
+
   const [isArmed, setIsArmed] = useState<boolean>(false)
 
   const assignedConsoleCrew = useMemo(() => {
@@ -172,6 +331,23 @@ export function WeaponsStation({
   const effectiveMax = isDirect ? maxPowerDice : (isDistributed ? 2 : 1)
   const rawAvailable = isDirect ? availablePowerDice : currentStationDice
   const effectiveAvailable = Math.min(rawAvailable, effectiveMax)
+
+  // --- STRICT CHASSIS & TIER IDENTIFICATION ---
+  const shipSize = (shipConfig?.size || "medium").toLowerCase()
+  const isSmall = shipSize === "small"
+  const isMedium = shipSize === "medium"
+  const shipTier = typeof shipConfig?.tier === "number" ? shipConfig.tier : 0
+
+  // Small Ship Progression
+  const hasStandingBy = isSmall && shipTier >= 4
+  const hasLeafOnTheWind = isSmall && shipTier >= 5
+
+  // Medium Ship Progression
+  const hasVersatileTransport = isMedium && shipTier >= 3
+  const versatileMaxUses = 2 * shipTier
+  const hasBestShip = isMedium && shipTier >= 5
+
+  const hasAnyChassisSurge = hasStandingBy || hasLeafOnTheWind || hasVersatileTransport || hasBestShip
 
   const specialization = shipConfig?.roleSpecialization
   const mastery = shipConfig?.roleMastery
@@ -572,650 +748,985 @@ export function WeaponsStation({
     0
   )
 
+  // RENDER DOCKED SNAPSHOT CARD TILE
+  const renderSnapshotCard = (
+    id: WeaponsCardId,
+    title: string,
+    value: string,
+    statusText: string,
+    icon: React.ReactNode,
+    accentColor: string
+  ) => {
+    const isOpen = openCards.includes(id)
+    return (
+      <button
+        key={id}
+        type="button"
+        onClick={() => toggleCard(id)}
+        className={`flex flex-col justify-between p-2.5 rounded border transition-all text-left relative overflow-hidden group cursor-pointer ${
+          isOpen
+            ? "bg-slate-950 border-cyan-neon shadow-[0_0_15px_rgba(0,255,255,0.18)]"
+            : "bg-black/60 border-bridge-border/80 hover:border-cyan-neon/50 hover:bg-slate-950/80"
+        }`}
+      >
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 group-hover:text-cyan-neon flex items-center gap-1.5 truncate">
+            {icon}
+            {title}
+          </span>
+          <span
+            className={`w-2 h-2 rounded-full transition-all shrink-0 ${
+              isOpen
+                ? "bg-cyan-neon shadow-[0_0_8px_#06b6d4] scale-125"
+                : "bg-slate-700 group-hover:bg-cyan-neon/50"
+            }`}
+          />
+        </div>
+
+        <div className="my-1.5">
+          <span className={`text-sm md:text-base font-bold font-mono tracking-tight block truncate ${accentColor}`}>
+            {value}
+          </span>
+          <span className="text-[9px] text-muted-foreground uppercase tracking-widest block truncate">
+            {statusText}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
+          <span>CONSOLE</span>
+          <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
+            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+          </span>
+        </div>
+      </button>
+    )
+  }
+
   return (
-    <div className="flex flex-col gap-6 w-full font-mono">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-bridge-border pb-3 flex-wrap gap-2">
+    <div className="flex flex-col gap-3.5 w-full font-mono">
+      {/* 1. MASTER HEADER BAR */}
+      <header className="flex flex-col xl:flex-row items-start xl:items-center justify-between border-b border-bridge-border pb-2.5 gap-2.5">
         <div>
-          <h2 className="text-glow-cyan text-lg font-bold tracking-[0.15em] text-cyan-neon">
-            TACTICAL WEAPONS CONTROL
-          </h2>
-          <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60">
-            {shipConfig?.name?.toUpperCase() || "VESSEL"} // GUNNERY &amp; FIRE DIRECTORS
+          <div className="flex items-center gap-3">
+            <h2 className="text-glow-cyan text-base md:text-lg font-bold tracking-[0.15em] text-cyan-neon flex items-center gap-2">
+              <Crosshair className="h-5 w-5 text-cyan-neon" />
+              TACTICAL WEAPONS CONTROL
+            </h2>
+            <button
+              type="button"
+              onClick={() => setIsArmed((prev) => !prev)}
+              className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer flex items-center gap-1.5 ${
+                isArmed
+                  ? "bg-red-500/20 border-red-500 text-red-300 hover:bg-red-500/30 shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse"
+                  : "bg-emerald-500/20 border-emerald-500/60 text-emerald-300 hover:bg-emerald-500/30 shadow-[0_0_8px_rgba(52,211,153,0.2)]"
+              }`}
+            >
+              {isArmed ? (
+                <>
+                  <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+                  <span>DISARM (SAFE)</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>ARM WEAPONS</span>
+                </>
+              )}
+            </button>
+          </div>
+          <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
+            {shipConfig?.name?.toUpperCase() || "VESSEL"} // GUNNERY &amp; FIRE DIRECTORS //{" "}
+            <span className={isArmed ? "text-red-alert font-bold animate-pulse" : "text-emerald-400 font-bold"}>
+              {isArmed ? "CIRCUITS HOT (ARMED)" : "CIRCUITS SAFE (DISARMED)"}
+            </span>
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+
+        {/* Global Tactical Status Badges */}
+        <div className="flex items-center gap-2 flex-wrap text-xs">
           {shipConfig?.useBrutalCriticals && (
-            <span className="rounded-sm border border-amber-500/80 bg-amber-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-amber-300 flex items-center gap-1">
+            <span className="rounded border border-amber-500/80 bg-amber-950/60 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-amber-300 flex items-center gap-1">
               <Flame className="w-3 h-3 text-amber-400" />
-              BRUTAL CRITICALS ACTIVE
+              BRUTAL CRITS
             </span>
           )}
 
           {isWeaponsBoosted && (
-            <span className="rounded-sm border border-cyan-400/80 bg-cyan-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-cyan-300 flex items-center gap-1 animate-pulse shadow-[0_0_8px_rgba(0,255,255,0.4)]">
+            <span className="rounded border border-cyan-400/80 bg-cyan-950/60 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-cyan-300 flex items-center gap-1 animate-pulse shadow-[0_0_8px_rgba(0,255,255,0.4)]">
               <Sparkles className="w-3 h-3 text-cyan-neon" />
-              WEAPONS BOOSTED (+ADVANTAGE)
+              BOOST ACTIVE (+ADV)
             </span>
           )}
 
           {isBlinded && (
-            <span className="rounded-sm border border-red-500/80 bg-red-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.4)]">
-              ⚠️ BLINDED: ATTACKS AT DISADVANTAGE
+            <span className="rounded border border-red-500/80 bg-red-950/60 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse">
+              ⚠️ BLINDED
             </span>
           )}
 
           {isIonized && (
-            <span className="rounded-sm border border-red-500/80 bg-red-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.4)]">
-              ⚠️ IONIZED: ATTACKS AT DISADVANTAGE
-            </span>
-          )}
-
-          {isInvisible && (
-            <span className="rounded-sm border border-purple-500/80 bg-purple-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-purple-300 animate-pulse shadow-[0_0_10px_rgba(168,85,247,0.4)]">
-              ⚡ INVISIBLE: ATTACKS AT ADVANTAGE
-            </span>
-          )}
-
-          {hasSystemDamageAtkDisadv && (
-            <span className="rounded-sm border border-red-500/80 bg-red-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.4)]">
-              ⚠️ SYSTEM DAMAGE LVL {systemDamageLevel}: ATTACKS AT DISADVANTAGE
+            <span className="rounded border border-red-500/80 bg-red-950/60 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse">
+              ⚠️ IONIZED
             </span>
           )}
 
           {hasSFoils && (
             <span
-              className={`rounded-sm border px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider ${
+              className={`rounded border px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider ${
                 sFoilsMode === "unlocked"
                   ? "border-cyan-400 bg-cyan-950/40 text-cyan-300 shadow-[0_0_8px_rgba(0,255,255,0.4)]"
                   : "border-amber-400 bg-amber-950/40 text-amber-300"
               }`}
             >
-              {sFoilsMode === "unlocked"
-                ? "S-FOILS: ATTACK POSITION (+1 TO HIT)"
-                : "S-FOILS: CLOSED / CRUISE (-2 TO HIT)"}
+              {sFoilsMode === "unlocked" ? "S-FOILS: ATK (+1)" : "S-FOILS: CRUISE (-2)"}
             </span>
           )}
 
-          {isAttackFighter && (
-            <span className="rounded-sm border border-cyan-400/60 bg-cyan-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-cyan-300">
-              ROLE SPEC: ATTACK FIGHTER (+1 ATK / SAVE DC)
-            </span>
-          )}
-          {isBomber && (
-            <span className="rounded-sm border border-amber-400/60 bg-amber-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-amber-300">
-              ROLE SPEC: BOMBER (+1 WEAPON DMG)
-            </span>
-          )}
-          {isGunshipSpec && (
-            <span className="rounded-sm border border-cyan-400/60 bg-cyan-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-cyan-300">
-              ROLE SPEC: GUNSHIP (+1 WEAPON DMG)
-            </span>
-          )}
-          {isMissileBoatSpec && (
-            <span className="rounded-sm border border-amber-400/60 bg-amber-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-amber-300">
-              ROLE SPEC: MISSILE BOAT (DISADV ON ORDNANCE SAVES)
-            </span>
-          )}
-          {hasBomberRoleMastery && (
-            <span className="rounded-sm border border-rose-500/60 bg-rose-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-rose-300">
-              ROLE MASTERY: BOMBER (DISADV ON SAVES FOR LARGER TARGETS)
-            </span>
-          )}
-          {isGunshipMastery && (
-            <span className="rounded-sm border border-cyan-500/60 bg-cyan-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-cyan-300">
-              ROLE MASTERY: GUNSHIP (EXTRA CRIT DIE)
-            </span>
-          )}
-          {isMissileBoatMastery && (
-            <span className="rounded-sm border border-amber-500/60 bg-amber-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-amber-300">
-              ROLE MASTERY: MISSILE BOAT (MIXED MUNITIONS)
-            </span>
-          )}
-          
-          {isArmed ? (
-            <span className="rounded-sm border border-red-alert/80 bg-red-alert/20 px-3 py-1.5 text-[10px] font-bold tracking-[0.2em] text-red-alert text-glow-amber animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.4)]">
-              WEAPONS: HOT
+          <span className={`rounded-sm border px-2.5 py-0.5 text-[9px] font-bold tracking-wider ${
+            isArmed ? "border-red-alert/80 bg-red-alert/20 text-red-alert animate-pulse" : "border-emerald-500/80 bg-emerald-950/40 text-emerald-400"
+          }`}>
+            WEAPONS: {isArmed ? "HOT" : "SAFE"}
+          </span>
+        </div>
+      </header>
+
+      {/* 2. PRESET WORKSPACE SELECTOR & AUDIO/HAPTIC MUTE BAR */}
+      <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded bg-black/60 border border-bridge-border text-xs">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[9px] uppercase tracking-wider text-slate-400 flex items-center gap-1">
+            <Layers className="w-3.5 h-3.5 text-cyan-neon" /> Presets:
+          </span>
+          {DEFAULT_PRESETS.map((p) => {
+            const isMatch =
+              p.activeCards.length === openCards.length &&
+              p.activeCards.every((c) => openCards.includes(c))
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => applyPreset(p.activeCards)}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition border cursor-pointer ${
+                  isMatch
+                    ? "bg-cyan-neon/20 border-cyan-neon text-cyan-neon shadow-[0_0_8px_rgba(0,255,255,0.3)]"
+                    : "bg-black/40 border-bridge-border/60 text-slate-400 hover:text-white"
+                }`}
+              >
+                {p.name}
+              </button>
+            )
+          })}
+          <button
+            type="button"
+            onClick={handleSaveCustomPreset}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
+            title="Save current layout to local browser"
+          >
+            <Bookmark className="w-3 h-3" /> Save View
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSoundEnabled((prev) => !prev)
+              triggerTactilePulse("tap")
+            }}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-bold uppercase cursor-pointer transition ${
+              soundEnabled
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : "border-slate-800 bg-slate-900 text-slate-500"
+            }`}
+          >
+            {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{soundEnabled ? "Audio & Haptics ON" : "Muted"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 3. COMPACT CREW ROSTER HUD */}
+      <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
+            <Users className="h-3.5 w-3.5" />
+            <span>Weapons Console Personnel:</span>
+          </div>
+
+          {assignedConsoleCrew.length === 0 ? (
+            <span className="text-xs text-amber-300 italic px-2 py-0.5 border border-amber-500/30 bg-amber-950/20 rounded">
+              Console Uncrewed — Assign Weapons Officer
             </span>
           ) : (
-            <span className="rounded-sm border border-emerald-500/80 bg-emerald-950/40 px-3 py-1.5 text-[10px] font-bold tracking-[0.2em] text-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.2)]">
-              WEAPONS: SAFE
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* STATION CREW ASSIGNMENT & COMBAT TURN HUD */}
-      <div className="rounded-md border border-cyan-neon/40 bg-black/40 p-3 shadow-[0_0_15px_rgba(0,255,255,0.05)]">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-neon uppercase tracking-wider">
-              <Users className="h-4 w-4 text-cyan-neon" />
-              <span>Console Personnel:</span>
-            </div>
-
-            {assignedConsoleCrew.length === 0 ? (
-              <span className="text-xs text-slate-500 italic bg-slate-900/60 border border-slate-800 px-3 py-1 rounded">
-                Console Uncrewed — Select personnel to assign
-              </span>
-            ) : (
-              assignedConsoleCrew.map((member, idx) => {
-                const isLead = idx === 0
-                return (
-                  <div
-                    key={member.id}
-                    className={`flex items-center gap-2 px-2.5 py-1 rounded border text-xs transition ${
-                      member.hasTakenTurnThisRound
-                        ? "bg-slate-900/60 border-slate-800 text-slate-400"
-                        : "bg-slate-950 border-cyan-500/40 text-slate-100"
+            assignedConsoleCrew.map((member, idx) => {
+              const isLead = idx === 0
+              return (
+                <div
+                  key={member.id}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs ${
+                    member.hasTakenTurnThisRound
+                      ? "bg-slate-900/60 border-slate-800 text-slate-400"
+                      : "bg-slate-950 border-cyan-500/40 text-slate-100"
+                  }`}
+                >
+                  <span
+                    className={`text-[8px] font-bold px-1 rounded border uppercase ${
+                      isLead
+                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                        : "bg-sky-500/20 text-sky-400 border-sky-500/40"
                     }`}
                   >
-                    <span
-                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase ${
-                        isLead
-                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                          : "bg-sky-500/20 text-sky-400 border-sky-500/40"
-                      }`}
-                    >
-                      {isLead ? "Weapons Officer" : "Support"}
-                    </span>
+                    {isLead ? "Weapons Officer" : "Support"}
+                  </span>
+                  <span className="font-bold text-xs">{member.name}</span>
 
-                    <span className="font-bold text-xs">{member.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => onToggleTurn && onToggleTurn(member.id)}
+                    className="cursor-pointer ml-0.5"
+                    title={member.hasTakenTurnThisRound ? "Action Taken" : "Action Pending"}
+                  >
+                    {member.hasTakenTurnThisRound ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                    ) : (
+                      <Clock className="h-3.5 w-3.5 text-amber-400" />
+                    )}
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => onToggleTurn && onToggleTurn(member.id)}
-                      className={`p-0.5 rounded transition ${
-                        member.hasTakenTurnThisRound
-                          ? "text-emerald-400 hover:text-emerald-300"
-                          : "text-amber-400 hover:text-amber-300"
-                      }`}
-                      title={member.hasTakenTurnThisRound ? "Turn Taken" : "Turn Pending"}
-                    >
-                      {member.hasTakenTurnThisRound ? (
-                        <CheckCircle2 className="h-4 w-4" />
-                      ) : (
-                        <Clock className="h-4 w-4" />
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
-                      className="text-slate-500 hover:text-rose-400 transition ml-1 cursor-pointer"
-                      title="Vacate Station (Return to Quarters)"
-                    >
-                      <UserMinus className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )
-              })
-            )}
-          </div>
-
-          {availablePersonnel.length > 0 && onAssignCrew && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">
-                Deploy to Console:
-              </span>
-              <select
-                value=""
-                onChange={(e) => {
-                  if (e.target.value) {
-                    onAssignCrew(e.target.value, "weapons")
-                  }
-                }}
-                className="rounded bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon"
-              >
-                <option value="" disabled>
-                  + Assign Weapons Crew...
-                </option>
-                {availablePersonnel
-                  .filter((p) => p.location !== "weapons")
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({getCrewRole(p, manifest)})
-                    </option>
-                  ))}
-              </select>
-            </div>
+                  <button
+                    type="button"
+                    onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
+                    className="text-slate-500 hover:text-rose-400 transition ml-0.5 cursor-pointer"
+                    title="Relieve from Station"
+                  >
+                    <UserMinus className="h-3 w-3" />
+                  </button>
+                </div>
+              )
+            })
           )}
         </div>
-      </div>
 
-      {/* CORE SHIP STATS & COMBAT RESOURCES */}
-      <div className="grid gap-4 grid-cols-1 w-full">
-        <ShipStats shipConfig={shipConfig} systemDamageLevel={systemDamageLevel} />
-        <div className="flex flex-col rounded-md border border-bridge-border bg-bridge-panel p-4 gap-4 w-full">
-          <CombatResources 
-            availablePowerDice={effectiveAvailable}
-            maxPowerDice={effectiveMax}
-            powerDieType={powerDieType}
-            onConsumePowerDice={handleCustomConsume}
-            standingByUsed={standingByUsed}
-            onUseStandingBy={onUseStandingBy}
-            leafOnTheWindUsed={leafOnTheWindUsed}
-            onUseLeafOnTheWind={onUseLeafOnTheWind}
-            versatileTransportUsed={versatileTransportUsed}
-            onUpdateVersatileTransportUsed={onUpdateVersatileTransportUsed}
-            bestShipInVerseUsed={bestShipInVerseUsed}
-            onUpdateBestShipInVerseUsed={onUpdateBestShipInVerseUsed}
-            shipTier={shipConfig?.tier ?? 0}
-            shipSize={shipConfig?.size}
-          />
-          
-          {isHubAndSpoke && (
-            <div className="flex flex-col gap-3 pt-3 border-t border-bridge-border/60 w-full">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-amber-400 font-bold tracking-wider uppercase">Shared Reactor Pool</span>
-                <span className="font-bold text-amber-400">{sharedPoolDice} / 2</span>
-              </div>
-              <div className="flex items-center gap-1.5 w-full">
-                {Array.from({ length: 2 }).map((_, i) => (
-                  <span
-                    key={i}
-                    className={`h-3 flex-1 rounded-sm inline-block ${
-                      i < sharedPoolDice 
-                        ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
-                        : "bg-black/80 border border-bridge-border"
-                    }`}
-                  />
-                ))}
-              </div>
-
-              {!canSpendStation && canSpendShared && (
-                <button
-                  onClick={() => handleCustomConsume(1)}
-                  className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-2 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
-                >
-                  CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* INSTALLED STATION MODIFICATIONS */}
-      <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
-        <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase border-b border-bridge-border/60 pb-1">
-          INSTALLED STATION MODIFICATIONS
-        </h3>
-        <StationModifications 
-          station="Weapons" 
-          installedMods={installedMods} 
-          onRemoveMod={onRemoveMod} 
-        />
-      </section>
-
-      {/* DYNAMIC WEAPON BATTERIES & LAUNCHERS */}
-      <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
-        <div className="flex items-center justify-between mb-3 border-b border-bridge-border/60 pb-2 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
-              Active Batteries &amp; Hardpoint Fire Controls ({mountedWeapons.length} Mounted)
-            </h3>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsArmed((prev) => !prev)}
-              className={`px-3 py-1 rounded text-xs font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer flex items-center gap-1.5 ${
-                isArmed
-                  ? "bg-red-500/20 border-red-500 text-red-300 hover:bg-red-500/30 shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse"
-                  : "bg-emerald-500/20 border-emerald-500/60 text-emerald-300 hover:bg-emerald-500/30 shadow-[0_0_8px_rgba(52,211,153,0.2)]"
-              }`}
-              title={isArmed ? "Click to set weapons to SAFE" : "Click to ARM weapons (WEAPONS HOT)"}
+        {availablePersonnel.length > 0 && onAssignCrew && (
+          <div className="flex items-center gap-1.5 self-end md:self-auto">
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Deploy:</span>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onAssignCrew(e.target.value, "weapons")
+              }}
+              className="rounded bg-slate-950 border border-slate-700 px-2 py-0.5 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon cursor-pointer"
             >
-              {isArmed ? (
-                <>
-                  <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-                  <span>DISARM (SET SAFE)</span>
-                </>
-              ) : (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>ARM WEAPONS (HOT)</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Status Alerts Summary Line */}
-        {(isAttackFighter || isBomber || hasBomberRoleMastery || hasSFoils || isGunshipSpec || isMissileBoatSpec || hasSystemDamageAtkDisadv || isBlinded || isIonized || isInvisible || isWeaponsBoosted) && (
-          <div className="text-[10px] font-mono text-cyan-300 mb-3 bg-black/40 p-2 rounded border border-bridge-border/40">
-            {isWeaponsBoosted && <strong className="text-cyan-neon">Engineering Weapon Boost Active (+Advantage) | </strong>}
-            {isBlinded && <strong className="text-red-400">Blinded (Disadv) | </strong>}
-            {isIonized && <strong className="text-red-400">Ionized (Disadv) | </strong>}
-            {isInvisible && <strong className="text-purple-300">Invisible (Adv) | </strong>}
-            {hasSystemDamageAtkDisadv && <strong className="text-red-400">System Damage Lvl {systemDamageLevel} (Disadv) | </strong>}
-            {hasSFoils && (sFoilsMode === "unlocked" ? "S-Foils: +1 to hit" : "S-Foils: -2 to hit")}
-            {isAttackFighter && " | Attack Fighter: +1 to attack rolls and save DCs"}
-            {isBomber && " | Bomber: +1 to damage rolls"}
-            {isGunshipSpec && " | Gunship: +1 to damage rolls"}
-            {hasBomberRoleMastery && " | Bomber Mastery: Target Save Disadvantage"}
-            {isMissileBoatSpec && " | Missile Boat: Target Save Disadvantage"}
+              <option value="" disabled>+ Assign Weapons Crew...</option>
+              {availablePersonnel
+                .filter((p) => p.location !== "weapons")
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({getCrewRole(p, manifest)})
+                  </option>
+                ))}
+            </select>
           </div>
         )}
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {mountedWeapons.map((w) => {
-            const instanceKey = w.instanceId || w.id
-            const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === w.name.toLowerCase())
-            const isOrdnance = !!w.isOrdnanceLauncher
-            const heat = (w as any).currentHeat ?? 0
-            const maxHeat = typeof w.overheat === "number" && w.overheat > 0 ? w.overheat : catalogDef?.overheat ?? 4
-            const isOverheated = heat >= maxHeat
-            const isFiredThisRound = !!(w as any).firedThisRound
+      {/* 4. TOP-DECK MODULAR SNAPSHOT TILES (8 UNIFORM TILES) */}
+      <section className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 w-full">
+        {renderSnapshotCard(
+          "masterArm",
+          "Weapon Safety",
+          isArmed ? "WEAPONS HOT" : "WEAPONS SAFE",
+          isArmed ? "Firing Circuits Live" : "Interlocks Engaged",
+          isArmed ? <ShieldAlert className="w-3 h-3 text-red-alert" /> : <ShieldCheck className="w-3 h-3 text-emerald-400" />,
+          isArmed ? "text-red-alert animate-pulse" : "text-emerald-400"
+        )}
 
-            const launcherState = isOrdnance ? getLauncherState(instanceKey, w) : null
-            const isLauncherArmed = launcherState ? launcherState.loadedCount > 0 : false
-            const armedAmmoDef = isOrdnance ? findArmedAmmoCatalog(launcherState) : null
+        {renderSnapshotCard(
+          "powerDice",
+          "Weapons Power",
+          isDistributed ? `${currentStationDice}/2 Dice` : `${effectiveAvailable}/${effectiveMax} Dice`,
+          isHubAndSpoke ? `${sharedPoolDice}/2 Shared` : powerCoupling.replace(" Power Coupling", ""),
+          <Zap className="w-3 h-3 text-amber-400" />,
+          "text-amber-300"
+        )}
 
-            const isTurret = isTurretMounted(w)
-            const turretCompartmentId: ShipCompartmentId = `turret-${instanceKey}`
-            const assignedGunner = getAssignedGunner(w)
-            const isManned = isTurret ? !!assignedGunner : true
+        {renderSnapshotCard(
+          "batteries",
+          "Active Batteries",
+          `${mountedWeapons.length} Mounted`,
+          `${mountedWeapons.filter((w) => isTurretMounted(w)).length} Turrets`,
+          <Crosshair className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
 
-            const rawProps = isOrdnance && armedAmmoDef?.properties
-              ? armedAmmoDef.properties
-              : (w.properties || catalogDef?.properties || [])
+        {renderSnapshotCard(
+          "ordnance",
+          "Ordnance Silos",
+          `${ordnanceList.reduce((acc, o) => acc + o.currentReserve, 0)} In Reserve`,
+          totalRequisitionCost > 0 ? `${totalRequisitionCost.toLocaleString()} cr Req` : "Magazines Stocked",
+          <PackagePlus className="w-3 h-3 text-amber-400" />,
+          "text-amber-300"
+        )}
 
-            const effectiveRangeDisplay = isOrdnance
-              ? (armedAmmoDef?.range || (isLauncherArmed ? "Payload" : "Empty"))
-              : (w.range || catalogDef?.range || "Payload")
+        {renderSnapshotCard(
+          "stances",
+          "Targeting Stance",
+          hasSFoils ? (sFoilsMode === "unlocked" ? "S-Foils: Attack" : "S-Foils: Cruise") : "Standard Aim",
+          isAttackFighter ? "+1 Role Bonus" : hasSFoils ? (sFoilsMode === "unlocked" ? "+1 Hit" : "-2 Hit") : "Nominal",
+          <Compass className="w-3 h-3 text-cyan-neon" />,
+          sFoilsMode === "unlocked" ? "text-cyan-neon" : "text-amber-300"
+        )}
 
-            const rawDmgString = isOrdnance ? (launcherState?.damage || null) : (w.damage || catalogDef?.damage)
-            const effectiveAtk = computeAttackModDisplay(rawProps, !isOrdnance)
-            const effectiveDmg = computeDamageDisplay(rawDmgString, rawProps)
+        {renderSnapshotCard(
+          "chassisSurges",
+          "Tactical Surges",
+          !hasAnyChassisSurge
+            ? `Locked (Tier ${shipTier})`
+            : isSmall
+            ? (standingByUsed ? "Used (Recharge)" : "Surges Ready")
+            : isMedium
+            ? `${versatileMaxUses - versatileTransportUsed} Uses (Refit)`
+            : "Chassis Surges",
+          !hasAnyChassisSurge
+            ? `${shipSize.toUpperCase()} Chassis`
+            : isSmall
+            ? (leafOnTheWindUsed ? "Nat 20 Expended" : "Surges Active")
+            : isMedium
+            ? (bestShipInVerseUsed ? "Best Ship Active" : "Transport Ready")
+            : "Nominal",
+          <Sparkles className="w-3 h-3 text-purple-400" />,
+          !hasAnyChassisSurge
+            ? "text-slate-500"
+            : (standingByUsed || leafOnTheWindUsed || bestShipInVerseUsed)
+            ? "text-amber-300"
+            : "text-purple-300"
+        )}
+
+        {renderSnapshotCard(
+          "mods",
+          "Hardware",
+          `${installedMods.length} Mods`,
+          "Weapons Station",
+          <Cpu className="w-3 h-3 text-purple-400" />,
+          "text-purple-300"
+        )}
+
+        {renderSnapshotCard(
+          "telemetry",
+          "Telemetry",
+          `${shipConfig?.stats?.wisdom ?? 10} WIS`,
+          `${shipConfig?.stats?.strength ?? 10} STR`,
+          <Activity className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
+      </section>
+
+      {/* 5. EXPANDABLE DYNAMIC WORKSPACE GRID (RESPONSIVE 2-COLUMN) */}
+      {openCards.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
+          <Crosshair className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL WEAPONS CONSOLE DRAWERS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any of the status cards above or choose an operational preset.</p>
+        </div>
+      ) : (
+        <div
+          className={`grid gap-3.5 transition-all duration-300 ${
+            maximizedCard
+              ? "grid-cols-1"
+              : openCards.length === 1
+              ? "grid-cols-1"
+              : "grid-cols-1 lg:grid-cols-2"
+          }`}
+        >
+          {openCards.map((cardId) => {
+            if (maximizedCard && maximizedCard !== cardId) return null
+            const isMax = maximizedCard === cardId
 
             return (
               <div
-                key={instanceKey}
-                className={`rounded-lg border bg-black/40 p-4 flex flex-col justify-between gap-3 relative transition-all ${
-                  isFiredThisRound
-                    ? "border-slate-800 opacity-60"
-                    : isTurret
-                    ? isManned
-                      ? "border-cyan-neon/80 shadow-[0_0_15px_rgba(0,255,255,0.12)]"
-                      : "border-amber-500/60 shadow-[0_0_15px_rgba(245,158,11,0.08)]"
-                    : "border-bridge-border/80"
-                }`}
+                key={cardId}
+                className="flex flex-col rounded-lg border border-cyan-neon/50 bg-bridge-panel p-3.5 shadow-[0_0_20px_rgba(0,255,255,0.06)] relative overflow-hidden transition-all duration-200"
               >
-                <div>
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h4 className="text-sm font-bold text-cyan-neon tracking-wide truncate">
-                          {w.name}
-                        </h4>
-                        <span className="text-[8px] font-bold uppercase px-1 rounded border border-bridge-border text-muted-foreground shrink-0">
-                          {isOrdnance ? "ORDNANCE" : (w.damageType || "ENERGY").toUpperCase()}
+                {/* SUB-PANEL DRAWER HEADER */}
+                <div className="flex items-center justify-between border-b border-bridge-border pb-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-xs bg-cyan-neon shadow-[0_0_6px_#06b6d4]" />
+                    <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
+                      {cardId === "masterArm" && "Weapon Safety & Master Arm Controls"}
+                      {cardId === "powerDice" && "Weapons Power Coupling Matrix"}
+                      {cardId === "batteries" && "Active Batteries & Hardpoint Controls"}
+                      {cardId === "ordnance" && "Ordnance Magazine & Requisition"}
+                      {cardId === "stances" && "Tactical Targeting & Firing Stances"}
+                      {cardId === "chassisSurges" && "Tactical Chassis Surges & Reactions"}
+                      {cardId === "mods" && "Installed Weapon Modifications"}
+                      {cardId === "telemetry" && "Ship Core Telemetry & Gunnery Modifiers"}
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setMaximizedCard((prev) => (prev === cardId ? null : cardId))}
+                      className="p-1 rounded text-slate-400 hover:text-cyan-neon hover:bg-black/40 cursor-pointer"
+                      title={isMax ? "Restore Multi-Window" : "Maximize to Full-Width"}
+                    >
+                      {isMax ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleCard(cardId)}
+                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
+                      title="Collapse Drawer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 1. MASTER ARM WORKSPACE */}
+                {cardId === "masterArm" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-col sm:flex-row items-center justify-between p-3 rounded border border-bridge-border/60 bg-black/40 gap-3">
+                      <div>
+                        <span className="text-xs font-bold uppercase text-slate-200 block mb-0.5">
+                          Master Circuit Interlock Status
                         </span>
-                        {isTurret && (
-                          <span className={`text-[8px] font-bold uppercase px-1.5 py-0.2 rounded border font-mono shrink-0 ${
-                            isManned
-                              ? "border-cyan-400/50 bg-cyan-950/40 text-cyan-300"
-                              : "border-amber-400/50 bg-amber-950/40 text-amber-300 animate-pulse"
-                          }`}>
-                            {isManned ? "TURRET (MANNED)" : "TURRET (UNMANNED)"}
-                          </span>
-                        )}
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          Weapons cannot be fired while set to SAFE. Arm the weapons to engage firing computers, targeting reticles, and ordnance chamber tubes.
+                        </p>
                       </div>
 
-                      {/* Turret Arc & Crew Assignment Row */}
-                      <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-bridge-border/40">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <Compass className={`w-3.5 h-3.5 shrink-0 ${isManned ? "text-cyan-neon" : "text-amber-400"}`} />
-                            <span
-                              className={`text-[10px] font-mono tracking-wider uppercase font-bold truncate ${
-                                isManned ? "text-cyan-neon" : "text-amber-400"
-                              }`}
-                            >
-                              {isManned ? "ARC: 360° UNLIMITED" : "ARC: FORWARD ONLY"}
-                            </span>
-                          </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsArmed((prev) => !prev)}
+                        className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer shrink-0 flex items-center gap-2 ${
+                          isArmed
+                            ? "bg-red-500/20 border-red-500 text-red-300 hover:bg-red-500/30 shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse"
+                            : "bg-emerald-500/20 border-emerald-500/60 text-emerald-300 hover:bg-emerald-500/30 shadow-[0_0_8px_rgba(52,211,153,0.2)]"
+                        }`}
+                      >
+                        {isArmed ? (
+                          <>
+                            <ShieldAlert className="w-4 h-4 text-red-400" />
+                            <span>SET TO SAFE</span>
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                            <span>ARM WEAPONS HOT</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-                          {!isManned && isTurret && (
-                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 animate-pulse shrink-0">
-                              DISADVANTAGE
-                            </span>
-                          )}
+                {/* 2. POWER MATRIX WORKSPACE */}
+                {cardId === "powerDice" && (
+                  <div className="flex flex-col gap-3">
+                    <CombatResources 
+                      availablePowerDice={effectiveAvailable}
+                      maxPowerDice={effectiveMax}
+                      powerDieType={powerDieType}
+                      onConsumePowerDice={handleCustomConsume}
+                      standingByUsed={standingByUsed}
+                      onUseStandingBy={onUseStandingBy}
+                      leafOnTheWindUsed={leafOnTheWindUsed}
+                      onUseLeafOnTheWind={onUseLeafOnTheWind}
+                      versatileTransportUsed={versatileTransportUsed}
+                      onUpdateVersatileTransportUsed={onUpdateVersatileTransportUsed}
+                      bestShipInVerseUsed={bestShipInVerseUsed}
+                      onUpdateBestShipInVerseUsed={onUpdateBestShipInVerseUsed}
+                      shipTier={shipConfig?.tier ?? 0}
+                      shipSize={shipConfig?.size}
+                    />
+
+                    {isHubAndSpoke && (
+                      <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
+                          <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 w-full">
+                          {Array.from({ length: 2 }).map((_, i) => (
+                            <span
+                              key={i}
+                              className={`h-2.5 flex-1 rounded-xs inline-block ${
+                                i < sharedPoolDice 
+                                  ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
+                                  : "bg-black/80 border border-bridge-border"
+                              }`}
+                            />
+                          ))}
                         </div>
 
-                        {isTurret && (
-                          <div className="flex flex-col gap-1.5 bg-slate-950/80 p-2 rounded border border-bridge-border/60">
-                            <div className="flex items-center justify-between text-[10px]">
-                              <div className="flex items-center gap-1.5">
-                                <Crosshair className="h-3 w-3 text-cyan-400 shrink-0" />
-                                <span className="font-bold text-muted-foreground uppercase tracking-wider">
-                                  Stationed Gunner:
+                        {!canSpendStation && canSpendShared && (
+                          <button
+                            type="button"
+                            onClick={() => handleCustomConsume(1)}
+                            className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
+                          >
+                            CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. BATTERIES WORKSPACE */}
+                {cardId === "batteries" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto pr-1">
+                      {mountedWeapons.map((w) => {
+                        const instanceKey = w.instanceId || w.id
+                        const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === w.name.toLowerCase())
+                        const isOrdnance = !!w.isOrdnanceLauncher
+                        const heat = (w as any).currentHeat ?? 0
+                        const maxHeat = typeof w.overheat === "number" && w.overheat > 0 ? w.overheat : catalogDef?.overheat ?? 4
+                        const isOverheated = heat >= maxHeat
+                        const isFiredThisRound = !!(w as any).firedThisRound
+
+                        const launcherState = isOrdnance ? getLauncherState(instanceKey, w) : null
+                        const isLauncherArmed = launcherState ? launcherState.loadedCount > 0 : false
+                        const armedAmmoDef = isOrdnance ? findArmedAmmoCatalog(launcherState) : null
+
+                        const isTurret = isTurretMounted(w)
+                        const turretCompartmentId: ShipCompartmentId = `turret-${instanceKey}`
+                        const assignedGunner = getAssignedGunner(w)
+                        const isManned = isTurret ? !!assignedGunner : true
+
+                        const rawProps = isOrdnance && armedAmmoDef?.properties
+                          ? armedAmmoDef.properties
+                          : (w.properties || catalogDef?.properties || [])
+
+                        const effectiveRangeDisplay = isOrdnance
+                          ? (armedAmmoDef?.range || (isLauncherArmed ? "Payload" : "Empty"))
+                          : (w.range || catalogDef?.range || "Payload")
+
+                        const rawDmgString = isOrdnance ? (launcherState?.damage || null) : (w.damage || catalogDef?.damage)
+                        const effectiveAtk = computeAttackModDisplay(rawProps, !isOrdnance)
+                        const effectiveDmg = computeDamageDisplay(rawDmgString, rawProps)
+
+                        return (
+                          <div
+                            key={instanceKey}
+                            className={`rounded-lg border bg-black/40 p-3 flex flex-col justify-between gap-2.5 transition-all ${
+                              isFiredThisRound
+                                ? "border-slate-800 opacity-60"
+                                : isTurret
+                                ? isManned
+                                  ? "border-cyan-neon/80 shadow-[0_0_15px_rgba(0,255,255,0.12)]"
+                                  : "border-amber-500/60 shadow-[0_0_15px_rgba(245,158,11,0.08)]"
+                                : "border-bridge-border/80"
+                            }`}
+                          >
+                            <div>
+                              <div className="flex justify-between items-start gap-1.5">
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="text-xs font-bold text-cyan-neon tracking-wide truncate">
+                                    {w.name}
+                                  </h4>
+                                  <span className="text-[7px] font-bold uppercase px-1 rounded border border-slate-700 text-slate-400 font-mono inline-block mt-0.5">
+                                    {isTurret ? (isManned ? "TURRET (MANNED)" : "TURRET (UNMANNED)") : (w.damageType || "ENERGY").toUpperCase()}
+                                  </span>
+                                </div>
+
+                                <span
+                                  className={`text-[8px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${
+                                    isFiredThisRound
+                                      ? "bg-slate-900 border-slate-700 text-slate-400"
+                                      : isOrdnance
+                                      ? isLauncherArmed
+                                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                                        : "bg-red-500/20 text-red-400 border-red-500/40"
+                                      : isOverheated
+                                      ? "bg-red-500/20 text-red-400 border-red-500/40"
+                                      : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                                  }`}
+                                >
+                                  {isFiredThisRound
+                                    ? "FIRED"
+                                    : isOrdnance
+                                    ? isLauncherArmed
+                                      ? "ARMED"
+                                      : "EMPTY"
+                                    : isOverheated
+                                    ? "OVERHEAT"
+                                    : "READY"}
                                 </span>
                               </div>
-                              <span className={`font-bold ${assignedGunner ? "text-cyan-300" : "text-amber-400 italic"}`}>
-                                {assignedGunner ? assignedGunner.name : "Unassigned"}
-                              </span>
-                            </div>
 
-                            <div className="flex items-center gap-2 pt-1 border-t border-bridge-border/30">
-                              {assignedGunner ? (
-                                <div className="flex items-center justify-between w-full">
-                                  <button
-                                    type="button"
-                                    onClick={() => onToggleTurn && onToggleTurn(assignedGunner.id)}
-                                    className="flex items-center gap-1 text-[10px] transition cursor-pointer"
-                                  >
-                                    {assignedGunner.hasTakenTurnThisRound ? (
-                                      <>
-                                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                                        <span className="text-emerald-400 font-bold">Turn Taken</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Clock className="h-3.5 w-3.5 text-amber-400" />
-                                        <span className="text-amber-400 font-bold">Turn Pending</span>
-                                      </>
-                                    )}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => onAssignCrew && onAssignCrew(assignedGunner.id, "crew_quarters")}
-                                    className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-rose-950/40 border border-rose-500/40 text-rose-300 hover:bg-rose-900/50 transition cursor-pointer"
-                                  >
-                                    Vacate
-                                  </button>
+                              <div className="grid grid-cols-3 gap-1 my-2 text-center">
+                                <div className="rounded border border-bridge-border/40 bg-bridge-panel/50 p-1 flex flex-col justify-between">
+                                  <span className="text-[7px] text-muted-foreground uppercase">ATK</span>
+                                  <span className="text-[11px] font-bold text-cyan-neon font-mono">{effectiveAtk.display}</span>
+                                </div>
+                                <div className="rounded border border-bridge-border/40 bg-bridge-panel/50 p-1 flex flex-col justify-between">
+                                  <span className="text-[7px] text-muted-foreground uppercase">DMG</span>
+                                  <span className="text-[11px] font-bold text-cyan-neon font-mono">{effectiveDmg.display}</span>
+                                </div>
+                                <div className="rounded border border-bridge-border/40 bg-bridge-panel/50 p-1 flex flex-col justify-between">
+                                  <span className="text-[7px] text-muted-foreground uppercase">RNG</span>
+                                  <span className="text-[9px] font-bold text-cyan-neon font-mono truncate px-0.5" title={effectiveRangeDisplay}>
+                                    {effectiveRangeDisplay}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {isTurret && (
+                                <div className="flex flex-col gap-1 bg-slate-950/80 p-1.5 rounded border border-bridge-border/60 mb-2">
+                                  <div className="flex items-center justify-between text-[9px]">
+                                    <span className="text-muted-foreground uppercase">Gunner:</span>
+                                    <span className={assignedGunner ? "text-cyan-300 font-bold" : "text-amber-400 italic"}>
+                                      {assignedGunner ? assignedGunner.name : "Unassigned"}
+                                    </span>
+                                  </div>
+                                  {!assignedGunner && onAssignCrew && (
+                                    <select
+                                      value=""
+                                      onChange={(e) => {
+                                        if (e.target.value) onAssignCrew(e.target.value, turretCompartmentId)
+                                      }}
+                                      className="w-full rounded bg-black border border-slate-700 px-1.5 py-0.5 text-[10px] text-cyan-300"
+                                    >
+                                      <option value="" disabled>+ Deploy Gunner...</option>
+                                      {availablePersonnel
+                                        .filter((p) => p.location !== turretCompartmentId)
+                                        .map((p) => (
+                                          <option key={p.id} value={p.id}>{p.name}</option>
+                                        ))}
+                                    </select>
+                                  )}
+                                </div>
+                              )}
+
+                              {!isOrdnance ? (
+                                <div className="flex flex-col gap-0.5">
+                                  <div className="flex justify-between text-[9px]">
+                                    <span className="text-muted-foreground uppercase">Heat:</span>
+                                    <span className={heat >= maxHeat ? "text-red-400 font-bold" : "text-cyan-neon"}>
+                                      {heat}/{maxHeat}
+                                    </span>
+                                  </div>
+                                  <div className="h-1.5 w-full bg-slate-900 rounded-sm overflow-hidden border border-bridge-border/30">
+                                    <div
+                                      className={`h-full transition-all ${
+                                        heat >= maxHeat ? "bg-red-500" : heat >= maxHeat * 0.75 ? "bg-amber-400" : "bg-cyan-neon"
+                                      }`}
+                                      style={{ width: `${Math.min(100, (heat / maxHeat) * 100)}%` }}
+                                    />
+                                  </div>
                                 </div>
                               ) : (
-                                onAssignCrew && (
-                                  <select
-                                    value=""
-                                    onChange={(e) => {
-                                      if (e.target.value) {
-                                        onAssignCrew(e.target.value, turretCompartmentId)
-                                      }
-                                    }}
-                                    className="w-full rounded bg-black border border-slate-700 px-2 py-1 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon cursor-pointer"
-                                  >
-                                    <option value="" disabled>
-                                      + Deploy Gunner to Turret...
-                                    </option>
-                                    {availablePersonnel
-                                      .filter((p) => p.location !== turretCompartmentId)
-                                      .map((p) => (
-                                        <option key={p.id} value={p.id}>
-                                          {p.name}
-                                        </option>
-                                      ))}
-                                  </select>
-                                )
+                                <div className="flex flex-col gap-1 rounded border border-bridge-border/60 bg-black/60 p-1.5 text-[9px] font-mono">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-muted-foreground uppercase">ARMED:</span>
+                                    <span className="font-bold text-cyan-neon truncate max-w-[120px]">
+                                      {launcherState?.ordnanceName ? launcherState.ordnanceName.toUpperCase() : "NONE"}
+                                    </span>
+                                  </div>
+                                  <div className="flex gap-1 w-full my-0.5">
+                                    {Array.from({ length: launcherState?.maxCapacity ?? 4 }).map((_, i) => (
+                                      <span
+                                        key={i}
+                                        className={`h-1 flex-1 rounded-sm ${
+                                          i < (launcherState?.loadedCount ?? 0)
+                                            ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"
+                                            : "bg-slate-800"
+                                        }`}
+                                      />
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-1.5 pt-1.5 border-t border-bridge-border/40">
+                              <button
+                                type="button"
+                                onClick={() => openWizard(w)}
+                                disabled={!isArmed || isFiredThisRound || (!isOrdnance ? isOverheated : !isLauncherArmed)}
+                                className={`col-span-2 rounded border py-1.5 text-[10px] font-bold tracking-wider font-mono flex items-center justify-center gap-1 transition-all ${
+                                  !isArmed
+                                    ? "bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed opacity-60"
+                                    : isFiredThisRound
+                                    ? "bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed"
+                                    : (!isOrdnance ? isOverheated : !isLauncherArmed)
+                                    ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed opacity-40"
+                                    : "border-cyan-neon/60 bg-cyan-neon/20 text-cyan-neon hover:bg-cyan-neon/30 cursor-pointer shadow-[0_0_8px_rgba(0,255,255,0.2)]"
+                                }`}
+                              >
+                                <Crosshair className="w-3 h-3 text-cyan-neon" />
+                                <span>{isFiredThisRound ? "FIRED" : !isArmed ? "SAFE" : "ENGAGE"}</span>
+                              </button>
+
+                              {!isOrdnance ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCoolMountedWeapon(instanceKey)}
+                                  disabled={heat === 0}
+                                  className="rounded border border-bridge-border bg-black/60 py-1.5 text-[9px] font-bold text-muted-foreground hover:text-cyan-neon disabled:opacity-30 cursor-pointer"
+                                >
+                                  FLUSH
+                                </button>
+                              ) : !isLauncherArmed ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setWeaponArmModal({ weapon: w })}
+                                  className="rounded border border-emerald-500/60 bg-emerald-500/20 py-1.5 text-[9px] font-bold text-emerald-400 hover:bg-emerald-500/30 cursor-pointer flex items-center justify-center gap-0.5"
+                                >
+                                  <PackagePlus className="w-2.5 h-2.5" /> ARM
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDisarmLauncher(instanceKey)}
+                                  className="rounded border border-amber-500/60 bg-amber-500/20 py-1.5 text-[9px] font-bold text-amber-300 hover:bg-amber-500/30 cursor-pointer flex items-center justify-center gap-0.5"
+                                >
+                                  <Undo2 className="w-2.5 h-2.5" /> DISARM
+                                </button>
                               )}
                             </div>
                           </div>
-                        )}
-                      </div>
+                        )
+                      })}
                     </div>
-
-                    <span
-                      className={`text-[9px] font-bold px-2 py-0.5 rounded border shrink-0 ${
-                        isFiredThisRound
-                          ? "bg-slate-900 border-slate-700 text-slate-400"
-                          : isOrdnance
-                          ? isLauncherArmed
-                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                            : "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse"
-                          : isOverheated
-                          ? "bg-red-500/20 text-red-400 border-red-500/40"
-                          : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                      }`}
-                    >
-                      {isFiredThisRound
-                        ? "FIRED (ROUND LOCK)"
-                        : isOrdnance
-                        ? isLauncherArmed
-                          ? "ARMED"
-                          : "EMPTY"
-                        : isOverheated
-                        ? "OVERHEATED"
-                        : "READY"}
-                    </span>
                   </div>
+                )}
 
-                  <div className="grid grid-cols-3 gap-1.5 my-3 text-center">
-                    <div className="rounded border border-bridge-border/40 bg-bridge-panel/50 p-1.5 flex flex-col justify-between">
-                      <span className="block text-[8px] text-muted-foreground uppercase">ATK MOD</span>
-                      <span className="text-xs font-bold text-cyan-neon font-mono">{effectiveAtk.display}</span>
-                    </div>
-                    <div className="rounded border border-bridge-border/40 bg-bridge-panel/50 p-1.5 flex flex-col justify-between">
-                      <span className="block text-[8px] text-muted-foreground uppercase">DAMAGE</span>
-                      <span className="text-xs font-bold text-cyan-neon font-mono">{effectiveDmg.display}</span>
-                    </div>
-                    <div className="rounded border border-bridge-border/40 bg-bridge-panel/50 p-1.5 flex flex-col justify-between">
-                      <span className="block text-[8px] text-muted-foreground uppercase">RANGE (FT)</span>
-                      <span className="text-[10px] font-bold text-cyan-neon font-mono truncate px-0.5" title={effectiveRangeDisplay}>
-                        {effectiveRangeDisplay}
+                {/* 4. ORDNANCE WORKSPACE */}
+                {cardId === "ordnance" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex justify-between items-center border-b border-bridge-border/60 pb-1.5">
+                      <span className="text-[10px] text-muted-foreground">Warhead Reserve &amp; Requisition Catalog</span>
+                      <span className="text-[10px] text-amber-300 font-bold bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                        Total Req: {totalRequisitionCost.toLocaleString()} cr
                       </span>
                     </div>
+
+                    <div className="overflow-x-auto max-h-72 overflow-y-auto border border-bridge-border/40 rounded">
+                      <table className="w-full text-left text-xs">
+                        <thead className="sticky top-0 bg-slate-950 border-b border-bridge-border/60 text-[9px] uppercase text-muted-foreground">
+                          <tr>
+                            <th className="p-1.5">Ordnance</th>
+                            <th className="p-1.5">Damage</th>
+                            <th className="p-1.5">In Reserve</th>
+                            <th className="p-1.5">Action</th>
+                            <th className="p-1.5">Req Qty</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-bridge-border/20 text-cyan-neon/90 text-[11px]">
+                          {ordnanceList.map((item) => {
+                            const matchingInstalled = mountedWeapons.filter((w) => getLauncherFamily(w.name) === item.category)
+                            const hasMatchingLauncher = matchingInstalled.length > 0
+                            const isArmedInAnyWeapon = matchingInstalled.some((w) => {
+                              const key = w.instanceId || w.id
+                              const state = getLauncherState(key, w)
+                              return state.ordnanceId === item.id && state.loadedCount > 0
+                            })
+
+                            return (
+                              <tr key={item.id} className="hover:bg-cyan-neon/5 transition-colors">
+                                <td className="p-1.5 font-medium text-cyan-neon truncate max-w-[120px]">{item.name}</td>
+                                <td className="p-1.5 text-amber-300 font-mono text-[10px]">{item.damage} {item.damageType}</td>
+                                <td className="p-1.5 font-bold font-mono">{item.currentReserve}</td>
+                                <td className="p-1.5">
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setWeaponArmModal({ weapon: matchingInstalled[0] })}
+                                      disabled={!hasMatchingLauncher || item.currentReserve <= 0}
+                                      className={`px-1.5 py-0.5 rounded border text-[8px] font-bold uppercase transition-all flex items-center gap-0.5 ${
+                                        !hasMatchingLauncher || item.currentReserve <= 0
+                                          ? "bg-red-950/20 border-red-500/30 text-slate-500 cursor-not-allowed opacity-40"
+                                          : "bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer"
+                                      }`}
+                                    >
+                                      <ArrowDownToLine className="w-2.5 h-2.5" /> Arm
+                                    </button>
+                                    {isArmedInAnyWeapon && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setOrdnanceDisarmModal({ ordnance: item })}
+                                        className="px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-[8px] font-bold text-amber-300 hover:bg-amber-500/20 cursor-pointer"
+                                      >
+                                        Unload
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="p-1.5">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={item.requisitionQty}
+                                    onChange={(e) => handleRequisitionChange(item.id, parseInt(e.target.value) || 0)}
+                                    className="w-12 rounded bg-black/60 border border-bridge-border px-1 py-0.5 text-[10px] text-cyan-neon text-center"
+                                  />
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
+                )}
 
-                  {!isOrdnance ? (
-                    <div className="flex flex-col gap-1 mb-2">
-                      <div className="flex justify-between text-[10px]">
-                        <span className="text-muted-foreground uppercase">Thermal Buildup</span>
-                        <span className={heat >= maxHeat ? "text-red-400 font-bold" : "text-cyan-neon"}>
-                          {heat} / {maxHeat} Heat (Overheat {maxHeat})
-                        </span>
-                      </div>
-                      <div className="h-2 w-full bg-slate-900 rounded-sm overflow-hidden border border-bridge-border/30">
-                        <div
-                          className={`h-full transition-all ${
-                            heat >= maxHeat ? "bg-red-500" : heat >= maxHeat * 0.75 ? "bg-amber-400" : "bg-cyan-neon"
-                          }`}
-                          style={{ width: `${Math.min(100, (heat / maxHeat) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-1.5 mb-2 rounded border border-bridge-border/60 bg-black/60 p-2.5 text-[10px] font-mono">
-                      <div className="flex justify-between items-center border-b border-bridge-border/40 pb-1">
-                        <span className="text-muted-foreground uppercase">WARHEAD ARMED:</span>
-                        <span className="font-bold text-cyan-neon">
-                          {launcherState?.ordnanceName ? launcherState.ordnanceName.toUpperCase() : "NONE LOADED"}
-                        </span>
-                      </div>
-
-                      <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground uppercase">MAGAZINE TUBE:</span>
-                        <span className={`font-bold ${isLauncherArmed ? "text-emerald-400" : "text-red-400"}`}>
-                          {launcherState?.loadedCount ?? 0} / {launcherState?.maxCapacity ?? 4} LOADED
-                        </span>
-                      </div>
-
-                      <div className="flex gap-1 w-full my-0.5">
-                        {Array.from({ length: launcherState?.maxCapacity ?? 4 }).map((_, i) => (
-                          <span
-                            key={i}
-                            className={`h-1.5 flex-1 rounded-sm ${
-                              i < (launcherState?.loadedCount ?? 0)
-                                ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"
-                                : "bg-slate-800 border border-bridge-border/50"
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/40">
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      onClick={() => openWizard(w)}
-                      disabled={!isArmed || isFiredThisRound || (!isOrdnance ? isOverheated : !isLauncherArmed)}
-                      className={`col-span-2 rounded border py-2 text-xs font-bold tracking-wider font-mono flex items-center justify-center gap-1.5 transition-all ${
-                        !isArmed
-                          ? "bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed opacity-60"
-                          : isFiredThisRound
-                          ? "bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed"
-                          : (!isOrdnance ? isOverheated : !isLauncherArmed)
-                          ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed opacity-40"
-                          : "border-cyan-neon/60 bg-cyan-neon/20 text-cyan-neon hover:bg-cyan-neon/30 shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
-                      }`}
-                      title={
-                        !isArmed
-                          ? "Weapons are SAFE. Click 'ARM WEAPONS' above to enable fire controls."
-                          : isFiredThisRound
-                          ? "Weapon already fired this round. Locks until Reactor is Cycled."
-                          : "Engage target fire controls"
-                      }
-                    >
-                      {isFiredThisRound ? (
-                        <>
-                          <Lock className="w-3.5 h-3.5" />
-                          <span>FIRED THIS ROUND</span>
-                        </>
-                      ) : (
-                        <>
-                          <Crosshair className="w-3.5 h-3.5 text-cyan-neon" />
-                          <span>{!isArmed ? "SAFE (ARM REQ)" : "ENGAGE TARGET"}</span>
-                        </>
+                {/* 5. STANCES WORKSPACE */}
+                {cardId === "stances" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {hasSFoils && (
+                        <div className="p-3 bg-black/40 rounded border border-cyan-400/40 flex flex-col gap-1">
+                          <span className="font-bold text-cyan-neon uppercase">S-Foils Operational Mode</span>
+                          <span className="text-[10px] text-slate-300">
+                            Current: <strong>{sFoilsMode === "unlocked" ? "Attack Position (+1 to hit)" : "Closed / Cruise (-2 to hit)"}</strong>
+                          </span>
+                        </div>
                       )}
-                    </button>
 
-                    {!isOrdnance ? (
-                      <button
-                        onClick={() => handleCoolMountedWeapon(instanceKey)}
-                        disabled={heat === 0}
-                        className="rounded border border-bridge-border bg-black/60 py-2 text-xs font-bold text-muted-foreground hover:text-cyan-neon hover:border-cyan-neon/40 disabled:opacity-30 font-mono cursor-pointer"
-                      >
-                        FLUSH
-                      </button>
-                    ) : !isLauncherArmed ? (
-                      <button
-                        onClick={() => setWeaponArmModal({ weapon: w })}
-                        className="rounded border border-emerald-500/60 bg-emerald-500/20 py-2 text-xs font-bold text-emerald-400 hover:bg-emerald-500/30 font-mono cursor-pointer tracking-wider flex items-center justify-center gap-1"
-                      >
-                        <PackagePlus className="w-3 h-3" />
-                        ARM
-                      </button>
+                      {isAttackFighter && (
+                        <div className="p-3 bg-black/40 rounded border border-cyan-400/40 flex flex-col gap-1">
+                          <span className="font-bold text-cyan-300 uppercase">Attack Fighter Trait</span>
+                          <span className="text-[10px] text-slate-300">Automated +1 bonus to all attack rolls and save DCs.</span>
+                        </div>
+                      )}
+
+                      {isBomber && (
+                        <div className="p-3 bg-black/40 rounded border border-amber-500/40 flex flex-col gap-1">
+                          <span className="font-bold text-amber-300 uppercase">Bomber Trait</span>
+                          <span className="text-[10px] text-slate-300">Automated +1 bonus to all weapon damage rolls.</span>
+                        </div>
+                      )}
+
+                      {isGunshipSpec && (
+                        <div className="p-3 bg-black/40 rounded border border-cyan-400/40 flex flex-col gap-1">
+                          <span className="font-bold text-cyan-neon uppercase">Gunship Role Spec</span>
+                          <span className="text-[10px] text-slate-300">Automated +1 flat bonus to all weapon damage rolls.</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. CHASSIS SURGES WORKSPACE (GUARDED STRICTLY BY SIZE AND TIER) */}
+                {cardId === "chassisSurges" && (
+                  <div className="flex flex-col gap-3">
+                    {!hasAnyChassisSurge ? (
+                      <div className="p-4 rounded border border-dashed border-bridge-border/60 text-center text-xs text-muted-foreground font-mono">
+                        No chassis surges unlocked for this {shipConfig?.size || "Medium"} hull at Tier {shipTier}.
+                      </div>
                     ) : (
-                      <button
-                        onClick={() => handleDisarmLauncher(instanceKey)}
-                        className="rounded border border-amber-500/60 bg-amber-500/20 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/30 font-mono cursor-pointer tracking-wider flex items-center justify-center gap-1"
-                      >
-                        <Undo2 className="w-3 h-3" />
-                        DISARM
-                      </button>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        {/* SMALL CHASSIS: Standing By (Tier 4) */}
+                        {hasStandingBy && (
+                          <button
+                            type="button"
+                            disabled={standingByUsed}
+                            onClick={onUseStandingBy}
+                            className={`p-2.5 rounded border text-left transition cursor-pointer ${
+                              standingByUsed
+                                ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                                : "bg-black/40 border-cyan-neon/50 text-cyan-neon hover:bg-cyan-950/40"
+                            }`}
+                          >
+                            <div className="flex justify-between items-center font-bold">
+                              <span>Standing By (Small Tier 4)</span>
+                              <span>{standingByUsed ? "USED" : "READY"}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 block mt-0.5">Surge: Take 1 Extra Action (Recharge)</span>
+                          </button>
+                        )}
+
+                        {/* SMALL CHASSIS: Leaf on the Wind (Tier 5) */}
+                        {hasLeafOnTheWind && (
+                          <button
+                            type="button"
+                            disabled={leafOnTheWindUsed}
+                            onClick={onUseLeafOnTheWind}
+                            className={`p-2.5 rounded border text-left transition cursor-pointer ${
+                              leafOnTheWindUsed
+                                ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                                : "bg-black/40 border-emerald-500/50 text-emerald-400 hover:bg-emerald-950/40"
+                            }`}
+                          >
+                            <div className="flex justify-between items-center font-bold">
+                              <span>Leaf on the Wind (Small Tier 5)</span>
+                              <span>{leafOnTheWindUsed ? "USED" : "READY"}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 block mt-0.5">Reaction: Treat roll as Nat 20 (Recharge)</span>
+                          </button>
+                        )}
+
+                        {/* MEDIUM CHASSIS: Versatile Transport (Tier 3) */}
+                        {hasVersatileTransport && (
+                          <button
+                            type="button"
+                            disabled={versatileTransportUsed >= versatileMaxUses}
+                            onClick={() => {
+                              onUpdateVersatileTransportUsed?.((prev) => Math.min(versatileMaxUses, (Number(prev) || 0) + 1))
+                            }}
+                            className={`p-2.5 rounded border text-left transition cursor-pointer ${
+                              versatileTransportUsed >= versatileMaxUses
+                                ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                                : "bg-black/40 border-cyan-400/50 text-cyan-300 hover:bg-cyan-950/40"
+                            }`}
+                          >
+                            <div className="flex justify-between items-center font-bold">
+                              <span>Versatile Transport (Med Tier 3)</span>
+                              <span>{versatileMaxUses - versatileTransportUsed}/{versatileMaxUses}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 block mt-0.5">Reaction: Trigger Advantage on check, attack, or save (Refit)</span>
+                          </button>
+                        )}
+
+                        {/* MEDIUM CHASSIS: Best Ship in the 'Verse (Tier 5) */}
+                        {hasBestShip && (
+                          <button
+                            type="button"
+                            disabled={bestShipInVerseUsed}
+                            onClick={() => onUpdateBestShipInVerseUsed?.(true)}
+                            className={`p-2.5 rounded border text-left transition cursor-pointer ${
+                              bestShipInVerseUsed
+                                ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                                : "bg-black/40 border-amber-400/50 text-amber-300 hover:bg-amber-950/40"
+                            }`}
+                          >
+                            <div className="flex justify-between items-center font-bold">
+                              <span>Best Ship in 'Verse (Med Tier 5)</span>
+                              <span>{bestShipInVerseUsed ? "EXP" : "READY"}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 block mt-0.5">Action: Un-enhanced Damage Resistance for 1 min (Recharge)</span>
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
-                </div>
+                )}
+
+                {/* 7. HARDWARE MODS WORKSPACE */}
+                {cardId === "mods" && (
+                  <div className="flex flex-col gap-2">
+                    <StationModifications 
+                      station="Weapons" 
+                      installedMods={installedMods} 
+                      onRemoveMod={onRemoveMod} 
+                    />
+                  </div>
+                )}
+
+                {/* 8. CORE TELEMETRY WORKSPACE */}
+                {cardId === "telemetry" && (
+                  <div className="flex flex-col gap-3">
+                    <ShipStats shipConfig={shipConfig} systemDamageLevel={systemDamageLevel} />
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
-      </section>
+      )}
 
       {/* MODAL 1: ARM FROM WEAPON CARD DIRECTLY */}
       {weaponArmModal && (() => {
@@ -1236,6 +1747,7 @@ export function WeaponsStation({
                   </h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setWeaponArmModal(null)}
                   className="text-muted-foreground hover:text-white cursor-pointer"
                 >
@@ -1255,6 +1767,7 @@ export function WeaponsStation({
                   availableOptions.map((ordnance) => (
                     <button
                       key={ordnance.id}
+                      type="button"
                       onClick={() => executeArmLauncher(weapon, ordnance)}
                       className="p-3 rounded border border-bridge-border bg-black/60 hover:border-emerald-400 hover:bg-emerald-500/10 text-left flex justify-between items-center transition-all cursor-pointer group"
                     >
@@ -1279,12 +1792,13 @@ export function WeaponsStation({
                   ))
                 ) : (
                   <div className="p-4 text-center rounded border border-bridge-border/40 bg-black/40 text-xs text-amber-300">
-                    No compatible {family} ammunition in cargo reserves! Requisition or scavenge warheads in the magazine below.
+                    No compatible {family} ammunition in cargo reserves! Requisition warheads in the Ordnance tab.
                   </div>
                 )}
               </div>
 
               <button
+                type="button"
                 onClick={() => setWeaponArmModal(null)}
                 className="w-full py-1.5 rounded border border-bridge-border text-xs text-muted-foreground hover:text-white uppercase cursor-pointer"
               >
@@ -1311,6 +1825,7 @@ export function WeaponsStation({
                   </h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setOrdnanceArmModal(null)}
                   className="text-muted-foreground hover:text-white cursor-pointer"
                 >
@@ -1332,6 +1847,7 @@ export function WeaponsStation({
                   return (
                     <button
                       key={key}
+                      type="button"
                       disabled={(Boolean(isMixed) && !isMissileBoatMastery) || isFull}
                       onClick={() => executeArmLauncher(launcher, ordnance)}
                       className={`p-3 rounded border text-left flex justify-between items-center transition-all ${
@@ -1361,6 +1877,7 @@ export function WeaponsStation({
               </div>
 
               <button
+                type="button"
                 onClick={() => setOrdnanceArmModal(null)}
                 className="w-full py-1.5 rounded border border-bridge-border text-xs text-muted-foreground hover:text-white uppercase cursor-pointer"
               >
@@ -1391,6 +1908,7 @@ export function WeaponsStation({
                   </h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setOrdnanceDisarmModal(null)}
                   className="text-muted-foreground hover:text-white cursor-pointer"
                 >
@@ -1410,6 +1928,7 @@ export function WeaponsStation({
                   return (
                     <button
                       key={key}
+                      type="button"
                       onClick={() => handleDisarmLauncher(key)}
                       className="p-3 rounded border border-amber-500/40 bg-black/60 hover:border-amber-400 hover:bg-amber-500/20 text-left flex justify-between items-center transition-all cursor-pointer"
                     >
@@ -1434,6 +1953,7 @@ export function WeaponsStation({
               </div>
 
               <button
+                type="button"
                 onClick={() => setOrdnanceDisarmModal(null)}
                 className="w-full py-1.5 rounded border border-bridge-border text-xs text-muted-foreground hover:text-white uppercase cursor-pointer"
               >
@@ -1444,7 +1964,7 @@ export function WeaponsStation({
         )
       })()}
 
-      {/* FIRE CONTROL ATTACK WIZARD MODAL */}
+      {/* MODAL 4: FIRE CONTROL ATTACK WIZARD */}
       {activeWizardWeapon && (() => {
         const instanceKey = activeWizardWeapon.instanceId || activeWizardWeapon.id
         const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === activeWizardWeapon.name.toLowerCase())
@@ -1522,7 +2042,6 @@ export function WeaponsStation({
 
         const saveDC = 8 + attackMod
 
-        // Advantage/Disadvantage net calculation via combat-roller including Engineering Weapons Boost
         const hasAdvantage = isInvisible || isWeaponsBoosted
         const hasDisadvantage = rangeBracket === "long" || failsCon || hasSystemDamageAtkDisadv || isBlinded || isIonized || (!isManned && isTurret)
         const netRollMode = resolveAdvantageMode(hasAdvantage, hasDisadvantage)
@@ -1561,7 +2080,6 @@ export function WeaponsStation({
         if (dynamicFlat > 0) finalDmgFormula = `${diceString} + ${dynamicFlat}`
         else if (dynamicFlat < 0) finalDmgFormula = `${diceString} - ${Math.abs(dynamicFlat)}`
 
-        // Trigger digital d20 roll via combat-roller
         const handleRollDigitalAttack = () => {
           const res = rollAttackD20({
             modifier: attackMod,
@@ -1586,7 +2104,6 @@ export function WeaponsStation({
           }
         }
 
-        // Trigger damage roll via combat-roller
         const handleRollDigitalDamage = (forceCrit?: boolean) => {
           const isCrit = forceCrit !== undefined ? forceCrit : (attackOutcome === "crit" || attackRollData?.isCrit === true)
           const dmgRes = rollDamage({
@@ -1631,6 +2148,7 @@ export function WeaponsStation({
                 </div>
 
                 <button
+                  type="button"
                   onClick={closeWizard}
                   className="rounded p-1 text-muted-foreground hover:text-white transition-colors cursor-pointer"
                 >
@@ -1753,6 +2271,7 @@ export function WeaponsStation({
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <button
+                      type="button"
                       disabled={!canDoStandard}
                       onClick={() => setFiringMode("standard")}
                       className={`p-3 rounded border text-left flex flex-col justify-between gap-2 transition-all ${
@@ -1778,6 +2297,7 @@ export function WeaponsStation({
                     </button>
 
                     <button
+                      type="button"
                       disabled={!canDoRapid}
                       onClick={() => setFiringMode("rapid")}
                       className={`p-3 rounded border text-left flex flex-col justify-between gap-2 transition-all ${
@@ -1809,6 +2329,7 @@ export function WeaponsStation({
                     </button>
 
                     <button
+                      type="button"
                       disabled={!canDoBurst}
                       onClick={() => setFiringMode("burst")}
                       className={`p-3 rounded border text-left flex flex-col justify-between gap-2 transition-all ${
@@ -1874,6 +2395,7 @@ export function WeaponsStation({
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <button
+                      type="button"
                       onClick={() => setRangeBracket("normal")}
                       className={`p-3 rounded border text-left transition-all cursor-pointer ${
                         rangeBracket === "normal"
@@ -1889,6 +2411,7 @@ export function WeaponsStation({
                     </button>
 
                     <button
+                      type="button"
                       onClick={() => setRangeBracket("long")}
                       className={`p-3 rounded border text-left transition-all cursor-pointer ${
                         rangeBracket === "long"
@@ -1902,6 +2425,7 @@ export function WeaponsStation({
                     </button>
 
                     <button
+                      type="button"
                       onClick={() => setRangeBracket("out")}
                       className={`p-3 rounded border text-left transition-all cursor-pointer ${
                         rangeBracket === "out"
@@ -2157,6 +2681,7 @@ export function WeaponsStation({
                       {attackOutcome === "pending" && (
                         <div className="grid grid-cols-3 gap-2 pt-2">
                           <button
+                            type="button"
                             onClick={() => completeAttack(currentHeatCost)}
                             className="p-3 rounded border border-red-500/50 bg-red-500/10 text-red-400 font-bold uppercase text-xs flex items-center justify-center gap-1.5 hover:bg-red-500/20 cursor-pointer"
                           >
@@ -2165,6 +2690,7 @@ export function WeaponsStation({
                           </button>
 
                           <button
+                            type="button"
                             onClick={() => {
                               setAttackOutcome("hit")
                               handleRollDigitalDamage(false)
@@ -2176,6 +2702,7 @@ export function WeaponsStation({
                           </button>
 
                           <button
+                            type="button"
                             onClick={() => {
                               setAttackOutcome("crit")
                               handleRollDigitalDamage(true)
@@ -2261,6 +2788,7 @@ export function WeaponsStation({
                           </div>
 
                           <button
+                            type="button"
                             onClick={() => completeAttack(currentHeatCost)}
                             className={`mt-2 w-full py-2 rounded border text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
                               attackOutcome === "crit"
@@ -2294,6 +2822,7 @@ export function WeaponsStation({
                       {attackOutcome === "pending" && (
                         <div className="grid grid-cols-2 gap-3 pt-2">
                           <button
+                            type="button"
                             onClick={() => completeAttack(currentHeatCost)}
                             className="p-3 rounded border border-amber-500/50 bg-amber-500/10 text-amber-400 font-bold uppercase text-xs flex items-center justify-center gap-2 hover:bg-amber-500/20 cursor-pointer"
                           >
@@ -2301,6 +2830,7 @@ export function WeaponsStation({
                           </button>
 
                           <button
+                            type="button"
                             onClick={() => {
                               setAttackOutcome("failed")
                               handleRollDigitalDamage(false)
@@ -2352,6 +2882,7 @@ export function WeaponsStation({
                           </div>
 
                           <button
+                            type="button"
                             onClick={() => completeAttack(currentHeatCost)}
                             className="mt-2 w-full py-2 rounded border border-emerald-500/60 bg-emerald-500/20 text-emerald-300 text-xs font-bold uppercase tracking-wider hover:bg-emerald-500/30 cursor-pointer"
                           >
@@ -2368,6 +2899,7 @@ export function WeaponsStation({
               <div className="flex justify-between items-center pt-3 border-t border-bridge-border/40">
                 {wizardStep > 1 && attackOutcome === "pending" ? (
                   <button
+                    type="button"
                     onClick={() => setWizardStep((prev) => Math.max(1, prev - 1) as any)}
                     className="px-3 py-1.5 rounded border border-bridge-border text-xs text-muted-foreground hover:text-white uppercase cursor-pointer"
                   >
@@ -2379,6 +2911,7 @@ export function WeaponsStation({
 
                 {wizardStep < 4 && (
                   <button
+                    type="button"
                     disabled={(wizardStep === 1 && !hasSufficientHeat) || (wizardStep === 2 && rangeBracket === "out")}
                     onClick={() => setWizardStep((prev) => Math.min(4, prev + 1) as any)}
                     className={`px-4 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-all ${
@@ -2395,103 +2928,6 @@ export function WeaponsStation({
           </div>
         )
       })()}
-
-      {/* ORDNANCE CATALOG */}
-      <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
-        <div className="flex justify-between items-center mb-3 border-b border-bridge-border/60 pb-2">
-          <div>
-            <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
-              Ordnance Reserve, Hardpoint Arming &amp; Requisition
-            </h3>
-            <p className="text-[10px] text-muted-foreground">
-              Magazines &amp; Launch Silos // Arming fills launcher to capacity (4 max) in 1 min. Disarming returns warheads to reserve in 1 min.
-            </p>
-          </div>
-          <span className="text-xs text-amber-300 font-semibold bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded">
-            Requisition Total: {totalRequisitionCost.toLocaleString()} cr
-          </span>
-        </div>
-
-        <div className="overflow-x-auto max-h-[440px] overflow-y-auto border border-bridge-border/40 rounded">
-          <table className="w-full text-left text-xs relative">
-            <thead className="sticky top-0 bg-slate-950 border-b border-bridge-border/60 text-[10px] uppercase text-muted-foreground z-10">
-              <tr>
-                <th className="p-2">Ordnance Type</th>
-                <th className="p-2">Category</th>
-                <th className="p-2">Payload (Standard)</th>
-                <th className="p-2">In Reserve</th>
-                <th className="p-2">Magazine Actions</th>
-                <th className="p-2">Order Qty</th>
-                <th className="p-2 text-right">Subtotal</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-bridge-border/20 text-cyan-neon/90">
-              {ordnanceList.map((item) => {
-                const matchingInstalled = mountedWeapons.filter((w) => getLauncherFamily(w.name) === item.category)
-                const hasMatchingLauncher = matchingInstalled.length > 0
-
-                const isArmedInAnyWeapon = matchingInstalled.some((w) => {
-                  const key = w.instanceId || w.id
-                  const state = getLauncherState(key, w)
-                  return state.ordnanceId === item.id && state.loadedCount > 0
-                })
-
-                return (
-                  <tr key={item.id} className="hover:bg-cyan-neon/5 transition-colors">
-                    <td className="p-2 font-medium text-cyan-neon">{item.name}</td>
-                    <td className="p-2 text-[10px] text-muted-foreground">{item.category}</td>
-                    <td className="p-2 text-[10px] text-amber-300 font-mono">{item.damage} {item.damageType}</td>
-                    <td className="p-2 font-bold">{item.currentReserve}</td>
-
-                    <td className="p-2">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => setWeaponArmModal({ weapon: matchingInstalled[0] })}
-                          disabled={!hasMatchingLauncher || item.currentReserve <= 0}
-                          className={`px-2 py-0.5 rounded border text-[9px] font-bold uppercase transition-all flex items-center gap-1 ${
-                            !hasMatchingLauncher || item.currentReserve <= 0
-                              ? "bg-red-950/20 border-red-500/30 text-slate-500 cursor-not-allowed opacity-40"
-                              : "bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer"
-                          }`}
-                          title="Select a compatible launcher to arm with this ordnance"
-                        >
-                          <ArrowDownToLine className="w-2.5 h-2.5" />
-                          Arm Full
-                        </button>
-
-                        {isArmedInAnyWeapon && (
-                          <button
-                            onClick={() => setOrdnanceDisarmModal({ ordnance: item })}
-                            className="px-2 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-[9px] font-bold text-amber-300 hover:bg-amber-500/20 uppercase transition-all flex items-center gap-1 cursor-pointer"
-                            title="Unload this ordnance from armed weapon tubes back into reserve"
-                          >
-                            <Undo2 className="w-2.5 h-2.5" />
-                            Unload
-                          </button>
-                        )}
-                      </div>
-                    </td>
-
-                    <td className="p-2">
-                      <input
-                        type="number"
-                        min="0"
-                        value={item.requisitionQty}
-                        onChange={(e) => handleRequisitionChange(item.id, parseInt(e.target.value) || 0)}
-                        className="w-14 rounded bg-black/60 border border-bridge-border px-1.5 py-0.5 text-xs text-cyan-neon text-center focus:outline-none focus:border-cyan-neon"
-                      />
-                    </td>
-
-                    <td className="p-2 text-right font-semibold text-amber-300">
-                      {(item.requisitionQty * item.costPerUnit).toLocaleString()} cr
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
     </div>
   )
 }

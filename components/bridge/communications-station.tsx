@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { CombatResources } from "./combat-resources"
 import { StationModifications } from "./ship-modifications"
 import { ShipStats } from "./ship-stats"
@@ -20,8 +20,113 @@ import {
   AlertOctagon,
   CheckCircle2,
   Clock,
-  UserMinus
+  UserMinus,
+  X,
+  Maximize2,
+  Minimize2,
+  Layers,
+  Bookmark,
+  Volume2,
+  VolumeX,
+  Activity,
+  MessageSquare,
+  ShieldCheck
 } from "lucide-react"
+
+// --- FLAT AVIONICS SOUND SYNTHESIZER & HAPTICS (NO ASSETS REQUIRED) ---
+let audioCtx: AudioContext | null = null
+
+function getAudioContext(): AudioContext | null {
+  if (!audioCtx && typeof window !== "undefined") {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+    if (AudioContextClass) {
+      audioCtx = new AudioContextClass()
+    }
+  }
+  return audioCtx
+}
+
+function playFlatGlassClick() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") ctx.resume()
+
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(1800, now)
+    osc.frequency.exponentialRampToValueAtTime(1400, now + 0.012)
+
+    gain.gain.setValueAtTime(0.035, now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.012)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start(now)
+    osc.stop(now + 0.012)
+  } catch {}
+}
+
+function playSubtleEngage() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") ctx.resume()
+
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = "triangle"
+    osc.frequency.setValueAtTime(520, now)
+    osc.frequency.exponentialRampToValueAtTime(740, now + 0.04)
+
+    gain.gain.setValueAtTime(0.04, now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start(now)
+    osc.stop(now + 0.04)
+  } catch {}
+}
+
+function triggerTactilePulse(type: "tap" | "heavy" = "tap") {
+  if (typeof window !== "undefined" && "vibrate" in navigator) {
+    try {
+      if (type === "tap") navigator.vibrate(10)
+      else navigator.vibrate([15, 20, 15])
+    } catch {}
+  }
+}
+
+export type CommunicationsCardId =
+  | "commsLink"
+  | "powerDice"
+  | "electronicWarfare"
+  | "interfere"
+  | "broadcast"
+  | "yachtProtocols"
+  | "mods"
+  | "telemetry"
+
+interface CustomPreset {
+  id: string
+  name: string
+  activeCards: CommunicationsCardId[]
+}
+
+const DEFAULT_PRESETS: CustomPreset[] = [
+  { id: "ew", name: "Electronic Warfare", activeCards: ["electronicWarfare", "interfere", "powerDice"] },
+  { id: "social", name: "Social & Comms", activeCards: ["commsLink", "broadcast", "yachtProtocols"] },
+  { id: "combat", name: "Tactical Combat", activeCards: ["powerDice", "electronicWarfare", "interfere"] },
+  { id: "all", name: "All Systems", activeCards: ["commsLink", "powerDice", "electronicWarfare", "interfere", "broadcast", "yachtProtocols", "mods", "telemetry"] }
+]
 
 interface CommunicationsStationProps {
   availablePowerDice?: number
@@ -49,7 +154,6 @@ interface CommunicationsStationProps {
   onUpdateBestShipInVerseUsed?: (used: boolean | ((prev: boolean) => boolean)) => void
   systemDamageLevel?: number
   isDisabled?: boolean
-  // Manifest & Turn Integration
   manifest?: ManifestMember[]
   onAssignCrew?: (memberId: string, targetLocation: ShipCompartmentId) => void
   onToggleTurn?: (memberId: string) => void
@@ -91,6 +195,59 @@ export function CommunicationsStation({
   onAssignCrew,
   onToggleTurn,
 }: CommunicationsStationProps) {
+  // --- MFD MODULAR DECK STATE (PER-CLIENT PERSISTENCE) ---
+  const [openCards, setOpenCards] = useState<CommunicationsCardId[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("sw5e_comms_open_cards")
+        if (saved) return JSON.parse(saved)
+      } catch {}
+    }
+    return ["electronicWarfare", "interfere", "powerDice"]
+  })
+
+  const [maximizedCard, setMaximizedCard] = useState<CommunicationsCardId | null>(null)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true)
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("sw5e_comms_open_cards", JSON.stringify(openCards))
+      } catch {}
+    }
+  }, [openCards])
+
+  const toggleCard = (id: CommunicationsCardId) => {
+    if (soundEnabled) {
+      playFlatGlassClick()
+      triggerTactilePulse("tap")
+    }
+    setOpenCards((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    )
+  }
+
+  const applyPreset = (cards: CommunicationsCardId[]) => {
+    if (soundEnabled) {
+      playSubtleEngage()
+      triggerTactilePulse("heavy")
+    }
+    setOpenCards(cards)
+    setMaximizedCard(null)
+  }
+
+  const handleSaveCustomPreset = () => {
+    const name = window.prompt("Enter name for this custom communications layout:", "Custom Comms Setup")
+    if (!name) return
+    if (typeof window !== "undefined") {
+      try {
+        const key = `sw5e_comms_preset_${Date.now()}`
+        localStorage.setItem(key, JSON.stringify({ id: key, name, activeCards: openCards }))
+        alert(`Preset '${name}' saved to this device!`)
+      } catch {}
+    }
+  }
+
   // --- CREW ASSIGNMENT EXTRACTION ---
   const assignedCrew = useMemo(() => {
     return manifest
@@ -101,9 +258,6 @@ export function CommunicationsStation({
   const availablePersonnel = useMemo(() => {
     return manifest.filter((m) => m.location !== "communications" && !m.isPassenger)
   }, [manifest])
-
-  const commsOfficer = assignedCrew[0] || null
-  const commsSupport = assignedCrew.slice(1)
 
   const shipTier = typeof shipConfig?.tier === "number" ? shipConfig.tier : 0
   const tierUses = Math.max(1, shipTier)
@@ -121,7 +275,6 @@ export function CommunicationsStation({
   const isDirect = !isDistributed && !isHubAndSpoke
 
   const currentStationDice = stationPools["communications"] ?? 0
-
   const effectiveMax = isDirect ? maxPowerDice : (isDistributed ? 2 : 1)
   const effectiveAvailable = isDirect ? availablePowerDice : currentStationDice
 
@@ -200,488 +353,742 @@ export function CommunicationsStation({
     setTacticalFeedback(`${shipSlicerMod.name} Executed: Target must make a DC ${dc} Intelligence saving throw! (${shipSlicerMod.description})`)
   }
 
+  // RENDER DOCKED SNAPSHOT CARD TILE
+  const renderSnapshotCard = (
+    id: CommunicationsCardId,
+    title: string,
+    value: string,
+    statusText: string,
+    icon: React.ReactNode,
+    accentColor: string
+  ) => {
+    const isOpen = openCards.includes(id)
+    return (
+      <button
+        key={id}
+        type="button"
+        onClick={() => toggleCard(id)}
+        className={`flex flex-col justify-between p-2.5 rounded border transition-all text-left relative overflow-hidden group cursor-pointer ${
+          isOpen
+            ? "bg-slate-950 border-cyan-neon shadow-[0_0_15px_rgba(0,255,255,0.18)]"
+            : "bg-black/60 border-bridge-border/80 hover:border-cyan-neon/50 hover:bg-slate-950/80"
+        }`}
+      >
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 group-hover:text-cyan-neon flex items-center gap-1.5 truncate">
+            {icon}
+            {title}
+          </span>
+          <span
+            className={`w-2 h-2 rounded-full transition-all shrink-0 ${
+              isOpen
+                ? "bg-cyan-neon shadow-[0_0_8px_#06b6d4] scale-125"
+                : "bg-slate-700 group-hover:bg-cyan-neon/50"
+            }`}
+          />
+        </div>
+
+        <div className="my-1.5">
+          <span className={`text-sm md:text-base font-bold font-mono tracking-tight block truncate ${accentColor}`}>
+            {value}
+          </span>
+          <span className="text-[9px] text-muted-foreground uppercase tracking-widest block truncate">
+            {statusText}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
+          <span>CONSOLE</span>
+          <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
+            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+          </span>
+        </div>
+      </button>
+    )
+  }
+
   return (
-    <div className="flex flex-col gap-6 w-full font-mono">
-      {/* Header Banner */}
-      <div className="flex items-center justify-between border-b border-bridge-border pb-3 flex-wrap gap-2">
+    <div className="flex flex-col gap-3.5 w-full font-mono">
+      {/* 1. MASTER HEADER BAR */}
+      <header className="flex flex-col xl:flex-row items-start xl:items-center justify-between border-b border-bridge-border pb-2.5 gap-2.5">
         <div>
-          <h2 className="text-glow-cyan text-lg font-bold tracking-[0.15em] text-cyan-neon">
-            SUB-SPACE &amp; INTERNAL COMMUNICATIONS
-          </h2>
-          <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60">
-            {shipConfig?.name?.toUpperCase() || "VESSEL"} // COMMS &amp; ELECTRONIC WARFARE
+          <div className="flex items-center gap-3">
+            <h2 className="text-glow-cyan text-base md:text-lg font-bold tracking-[0.15em] text-cyan-neon flex items-center gap-2">
+              <Radio className="h-5 w-5 text-cyan-neon" />
+              SUB-SPACE &amp; INTERNAL COMMUNICATIONS
+            </h2>
+          </div>
+          <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
+            {shipConfig?.name?.toUpperCase() || "VESSEL"} // COMMS &amp; ELECTRONIC WARFARE //{" "}
+            <span className={isDisabled ? "text-red-400 font-bold animate-pulse" : "text-emerald-400 font-bold"}>
+              {isDisabled ? "LINK RESTRICTED (<1000 FT)" : "NETWORK SECURE"}
+            </span>
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+
+        {/* Status Badges */}
+        <div className="flex items-center gap-2 flex-wrap text-xs">
           {isDisabled && (
-            <span className="rounded border border-red-500/80 bg-red-950/60 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]">
-              ⚠️ COMMS DISABLED (&lt; 1,000 FT ONLY)
+            <span className="rounded border border-red-500/80 bg-red-950/60 px-2.5 py-0.5 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]">
+              ⚠️ DISABLED (&lt; 1,000 FT ONLY)
             </span>
           )}
 
           {hasCommsRenowned ? (
             <span className="rounded border border-purple-400/60 bg-purple-950/40 px-2 py-0.5 text-[9px] font-mono font-bold text-purple-300">
-              BROADCAST: GALAXY-WIDE
+              GALAXY-WIDE LINK
             </span>
           ) : hasCommsPrototype ? (
             <span className="rounded border border-cyan-400/60 bg-cyan-950/40 px-2 py-0.5 text-[9px] font-mono font-bold text-cyan-300">
-              BROADCAST: TERRITORY-WIDE (ENCRYPTED)
+              TERRITORY (ENCRYPTED)
             </span>
           ) : hasCommsPremium ? (
             <span className="rounded border border-cyan-400/60 bg-cyan-950/40 px-2 py-0.5 text-[9px] font-mono font-bold text-cyan-300">
-              BROADCAST: SECTOR-WIDE
+              SECTOR-WIDE
             </span>
           ) : null}
 
           {isScrambler && (
-            <span className="rounded border border-cyan-400/60 bg-cyan-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-cyan-300">
-              SCRAMBLER SPEC (INTERFERE AS BONUS ACTION)
+            <span className="rounded border border-cyan-400/60 bg-cyan-950/40 px-2 py-0.5 text-[9px] font-mono font-bold text-cyan-300">
+              SCRAMBLER SPEC
             </span>
           )}
-          {isYachtSpec && (
-            <span className="rounded border border-amber-400/60 bg-amber-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-amber-300">
-              YACHT SPEC (GUESTS DISADV ON INT/WIS)
-            </span>
-          )}
-          {isYachtMastery && (
-            <span className="rounded border border-emerald-400/60 bg-emerald-950/40 px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider text-emerald-300">
-              YACHT MASTERY (ADV ON VISUAL CHA CHECKS)
-            </span>
-          )}
-          <span className="rounded-sm border border-cyan-neon/50 bg-cyan-neon/10 px-3 py-1.5 text-[10px] font-bold tracking-[0.2em] text-cyan-neon">
+
+          <span className="rounded-sm border border-cyan-neon/50 bg-cyan-neon/10 px-2.5 py-0.5 text-[9px] font-bold tracking-wider text-cyan-neon">
             COMMS: {isDisabled ? "RESTRICTED" : "SECURE"}
           </span>
         </div>
+      </header>
+
+      {/* 2. PRESET WORKSPACE SELECTOR & AUDIO/HAPTIC MUTE BAR */}
+      <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded bg-black/60 border border-bridge-border text-xs">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[9px] uppercase tracking-wider text-slate-400 flex items-center gap-1">
+            <Layers className="w-3.5 h-3.5 text-cyan-neon" /> Presets:
+          </span>
+          {DEFAULT_PRESETS.map((p) => {
+            const isMatch =
+              p.activeCards.length === openCards.length &&
+              p.activeCards.every((c) => openCards.includes(c))
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => applyPreset(p.activeCards)}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition border cursor-pointer ${
+                  isMatch
+                    ? "bg-cyan-neon/20 border-cyan-neon text-cyan-neon shadow-[0_0_8px_rgba(0,255,255,0.3)]"
+                    : "bg-black/40 border-bridge-border/60 text-slate-400 hover:text-white"
+                }`}
+              >
+                {p.name}
+              </button>
+            )
+          })}
+          <button
+            type="button"
+            onClick={handleSaveCustomPreset}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
+            title="Save current layout to local browser"
+          >
+            <Bookmark className="w-3 h-3" /> Save View
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSoundEnabled((prev) => !prev)
+              triggerTactilePulse("tap")
+            }}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-bold uppercase cursor-pointer transition ${
+              soundEnabled
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : "border-slate-800 bg-slate-900 text-slate-500"
+            }`}
+          >
+            {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{soundEnabled ? "Audio & Haptics ON" : "Muted"}</span>
+          </button>
+        </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* STATION CREW ASSIGNMENT & COMBAT TURN HUD */}
-      {/* ========================================================================= */}
-      <div className="rounded-md border border-cyan-neon/40 bg-black/40 p-3 shadow-[0_0_15px_rgba(0,255,255,0.05)]">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Assigned Personnel Cards */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-neon uppercase tracking-wider">
-              <Users className="h-4 w-4 text-cyan-neon" />
-              <span>Assigned Personnel:</span>
-            </div>
+      {/* 3. COMPACT CREW ROSTER HUD */}
+      <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
+            <Users className="h-3.5 w-3.5" />
+            <span>Manned Communications:</span>
+          </div>
 
-            {assignedCrew.length === 0 ? (
-              <span className="text-xs text-slate-500 italic bg-slate-900/60 border border-slate-800 px-3 py-1 rounded">
-                Console Uncrewed — Select personnel to assign
-              </span>
-            ) : (
-              assignedCrew.map((member, idx) => {
-                const isLead = idx === 0
-                return (
-                  <div
-                    key={member.id}
-                    className={`flex items-center gap-2 px-2.5 py-1 rounded border text-xs transition ${
-                      member.hasTakenTurnThisRound
-                        ? "bg-slate-900/60 border-slate-800 text-slate-400"
-                        : "bg-slate-950 border-cyan-500/40 text-slate-100"
+          {assignedCrew.length === 0 ? (
+            <span className="text-xs text-amber-300 italic px-2 py-0.5 border border-amber-500/30 bg-amber-950/20 rounded">
+              Console Uncrewed — Assign Comms Officer
+            </span>
+          ) : (
+            assignedCrew.map((member, idx) => {
+              const isLead = idx === 0
+              return (
+                <div
+                  key={member.id}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs ${
+                    member.hasTakenTurnThisRound
+                      ? "bg-slate-900/60 border-slate-800 text-slate-400"
+                      : "bg-slate-950 border-cyan-500/40 text-slate-100"
+                  }`}
+                >
+                  <span
+                    className={`text-[8px] font-bold px-1 rounded border uppercase ${
+                      isLead
+                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                        : "bg-sky-500/20 text-sky-400 border-sky-500/40"
                     }`}
                   >
-                    <span
-                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase ${
-                        isLead
-                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                          : "bg-sky-500/20 text-sky-400 border-sky-500/40"
-                      }`}
-                    >
-                      {isLead ? "Comms Officer" : "Support"}
-                    </span>
+                    {isLead ? "Comms Officer" : "Support"}
+                  </span>
+                  <span className="font-bold text-xs">{member.name}</span>
 
-                    <span className="font-bold text-xs">{member.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => onToggleTurn && onToggleTurn(member.id)}
+                    className="cursor-pointer ml-0.5"
+                    title={member.hasTakenTurnThisRound ? "Action Taken" : "Action Pending"}
+                  >
+                    {member.hasTakenTurnThisRound ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                    ) : (
+                      <Clock className="h-3.5 w-3.5 text-amber-400" />
+                    )}
+                  </button>
 
-                    {/* Turn Toggle */}
-                    <button
-                      type="button"
-                      onClick={() => onToggleTurn && onToggleTurn(member.id)}
-                      className={`p-0.5 rounded transition ${
-                        member.hasTakenTurnThisRound
-                          ? "text-emerald-400 hover:text-emerald-300"
-                          : "text-amber-400 hover:text-amber-300"
-                      }`}
-                      title={member.hasTakenTurnThisRound ? "Turn Taken" : "Turn Pending"}
-                    >
-                      {member.hasTakenTurnThisRound ? (
-                        <CheckCircle2 className="h-4 w-4" />
-                      ) : (
-                        <Clock className="h-4 w-4" />
-                      )}
-                    </button>
+                  <button
+                    type="button"
+                    onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
+                    className="text-slate-500 hover:text-rose-400 transition ml-0.5 cursor-pointer"
+                    title="Relieve from Station"
+                  >
+                    <UserMinus className="h-3 w-3" />
+                  </button>
+                </div>
+              )
+            })
+          )}
+        </div>
 
-                    {/* Vacate / Return to Quarters */}
-                    <button
-                      type="button"
-                      onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
-                      className="text-slate-500 hover:text-rose-400 transition ml-1"
-                      title="Vacate Station (Return to Quarters)"
-                    >
-                      <UserMinus className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )
-              })
-            )}
-          </div>
-
-          {/* Quick Pull Selector: Bring Crew to Comms */}
-          {availablePersonnel.length > 0 && onAssignCrew && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">
-                Deploy to Console:
-              </span>
-              <select
-                value=""
-                onChange={(e) => {
-                  if (e.target.value) {
-                    onAssignCrew(e.target.value, "communications")
-                  }
-                }}
-                className="rounded bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon"
-              >
-                <option value="" disabled>
-                  + Assign Crew Member...
+        {availablePersonnel.length > 0 && onAssignCrew && (
+          <div className="flex items-center gap-1.5 self-end md:self-auto">
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Deploy:</span>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onAssignCrew(e.target.value, "communications")
+              }}
+              className="rounded bg-slate-950 border border-slate-700 px-2 py-0.5 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon cursor-pointer"
+            >
+              <option value="" disabled>+ Assign Crew...</option>
+              {availablePersonnel.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({getCrewRole(p, manifest)})
                 </option>
-                {availablePersonnel.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({getCrewRole(p, manifest)})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
-      {/* DISABLED OVERRIDE BANNER */}
-      {isDisabled && (
-        <section className="rounded-md border-2 border-red-500 bg-red-950/70 p-4 shadow-[0_0_20px_rgba(239,68,68,0.3)] flex items-center justify-center gap-3 text-center animate-pulse font-mono">
-          <AlertOctagon className="w-6 h-6 text-red-400 shrink-0" />
-          <span className="text-xs font-black uppercase tracking-widest text-red-200">
-            ⛔ COMMS RESTRICTED: DISABLED SHIP CANNOT COMMUNICATE WITH EXTERNAL SOURCES BEYOND 1,000 FEET
-          </span>
-        </section>
-      )}
+      {/* 4. TOP-DECK MODULAR SNAPSHOT TILES (8 UNIFORM TILES) */}
+      <section className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 w-full">
+        {renderSnapshotCard(
+          "commsLink",
+          "Array Link",
+          isDisabled ? "Restricted" : hasCommsRenowned ? "Galaxy-Wide" : hasCommsPrototype ? "Territory" : "Standard",
+          isDisabled ? "< 1,000 Ft Only" : "Broadband Online",
+          <Radio className="w-3 h-3 text-cyan-neon" />,
+          isDisabled ? "text-red-400" : "text-cyan-neon"
+        )}
 
-      {/* 1. SHIP STATS & COMBAT RESOURCES */}
-      <div className="grid gap-4 grid-cols-1 w-full">
-        <ShipStats shipConfig={shipConfig} systemDamageLevel={systemDamageLevel} />
-        <div className="flex flex-col rounded-md border border-bridge-border bg-bridge-panel p-4 gap-4 w-full">
-          <CombatResources 
-            availablePowerDice={effectiveAvailable}
-            maxPowerDice={effectiveMax}
-            powerDieType={powerDieType}
-            onConsumePowerDice={handleCustomConsume}
-            standingByUsed={standingByUsed}
-            onUseStandingBy={onUseStandingBy}
-            leafOnTheWindUsed={leafOnTheWindUsed}
-            onUseLeafOnTheWind={onUseLeafOnTheWind}
-            versatileTransportUsed={versatileTransportUsed}
-            onUpdateVersatileTransportUsed={onUpdateVersatileTransportUsed}
-            bestShipInVerseUsed={bestShipInVerseUsed}
-            onUpdateBestShipInVerseUsed={onUpdateBestShipInVerseUsed}
-            shipTier={shipConfig?.tier ?? 0}
-            shipSize={shipConfig?.size}
-          />
-          
-          {isHubAndSpoke && (
-            <div className="flex flex-col gap-3 pt-3 border-t border-bridge-border/60 w-full">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-amber-400 font-bold tracking-wider uppercase">Shared Reactor Pool</span>
-                <span className="font-bold text-amber-400">{sharedPoolDice} / 2</span>
-              </div>
-              <div className="flex items-center gap-1.5 w-full">
-                {Array.from({ length: 2 }).map((_, i) => (
-                  <span
-                    key={i}
-                    className={`h-3 flex-1 rounded-sm inline-block ${
-                      i < sharedPoolDice 
-                        ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
-                        : "bg-black/80 border border-bridge-border"
-                    }`}
-                  />
-                ))}
-              </div>
+        {renderSnapshotCard(
+          "powerDice",
+          "Comms Power",
+          isDistributed ? `${currentStationDice}/2 Dice` : `${effectiveAvailable}/${effectiveMax} Dice`,
+          isHubAndSpoke ? `${sharedPoolDice}/2 Shared` : powerCoupling.replace(" Power Coupling", ""),
+          <Zap className="w-3 h-3 text-amber-400" />,
+          "text-amber-300"
+        )}
 
-              {!canSpendStation && canSpendShared && (
-                <button
-                  onClick={() => handleCustomConsume(1)}
-                  className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-2 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
-                >
-                  CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+        {renderSnapshotCard(
+          "electronicWarfare",
+          "EW & Slicing",
+          hasEMPDevice || hasElectricalDischargers || scramblerMod || shipSlicerMod ? "Active Grid" : "Passive",
+          empUses > 0 || dischargerUses > 0 || scramblerUses > 0 || slicerUses > 0 ? "Modules Fired" : "Systems Ready",
+          <Cpu className="w-3 h-3 text-purple-400" />,
+          "text-purple-300"
+        )}
 
-      {/* YACHT DIPLOMATIC BENEFITS DISPLAY */}
-      {(isYachtSpec || isYachtMastery) && (
-        <section className="rounded-md border border-amber-500/40 bg-black/40 p-4 shadow-[0_0_15px_rgba(251,191,36,0.1)] flex flex-col gap-3">
-          <div className="flex items-center justify-between border-b border-amber-500/30 pb-2">
-            <h3 className="text-xs font-bold tracking-[0.2em] text-amber-400 flex items-center gap-2 uppercase">
-              <Users className="h-4 w-4" />
-              Yacht Diplomatic Protocols
-            </h3>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {isYachtSpec && (
-              <div className="p-3 bg-black/60 rounded border border-amber-500/40 flex flex-col gap-1.5">
-                <span className="text-xs font-bold text-amber-300 uppercase">Recreational Hosting (Spec)</span>
-                <p className="text-[10px] text-slate-300 leading-relaxed font-mono">
-                  While hosting guests on your ship, they have disadvantage on Intelligence and Wisdom checks.
-                </p>
-              </div>
-            )}
-            {isYachtMastery && (
-              <div className="p-3 bg-black/60 rounded border border-emerald-500/40 flex flex-col gap-1.5">
-                <span className="text-xs font-bold text-emerald-300 uppercase">Visual Diplomacy (Mastery)</span>
-                <p className="text-[10px] text-slate-300 leading-relaxed font-mono">
-                  You have advantage on Charisma checks made against those who can see your ship.
-                </p>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
+        {renderSnapshotCard(
+          "interfere",
+          "Interfere",
+          interfereMod !== undefined ? (interfereMod >= 0 ? `+${interfereMod}` : `${interfereMod}`) : "+0",
+          isScrambler ? "Bonus Action" : "Standard Action",
+          <ShieldAlert className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
 
-      {/* 2. TACTICAL ELECTRONIC WARFARE & SLICER MODULES */}
-      {(hasElectricalDischargers || hasEMPDevice || scramblerMod || shipSlicerMod || commsSuppressorMod) && (
-        <section className="rounded-md border border-cyan-neon/50 bg-bridge-panel p-4 flex flex-col gap-3 shadow-[0_0_15px_rgba(0,255,255,0.06)] font-mono">
-          <div className="flex items-center justify-between border-b border-bridge-border pb-2">
-            <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon flex items-center gap-2 uppercase">
-              <Radio className="h-4 w-4 text-cyan-neon animate-pulse" />
-              Tactical Slicer &amp; Electronic Warfare Modules
-            </h3>
-            <span className="text-[10px] text-muted-foreground">
-              OFFENSIVE COMMS &amp; EMP SUITE
-            </span>
-          </div>
+        {renderSnapshotCard(
+          "broadcast",
+          "Broadcast",
+          menaceMod !== undefined ? (menaceMod >= 0 ? `+${menaceMod}` : `${menaceMod}`) : "+0",
+          "Hail & Impress",
+          <MessageSquare className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {hasElectricalDischargers && (
-              <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-amber-300 uppercase flex items-center gap-1.5">
-                      <Zap className="w-3.5 h-3.5 text-amber-400" /> Electrical Dischargers
-                    </span>
-                    <span className="text-[8px] font-mono px-1.5 py-0.2 rounded border bg-amber-950/40 text-amber-300 border-amber-500/40 font-bold">
-                      {tierUses - dischargerUses} / {tierUses} (RECHARGE)
-                    </span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-relaxed">
-                    Action: Discharge 50-ft burst. DC {8 + proficiencyBonus + strMod} Dex save or take {Math.max(1, shipTier)}d6 lightning damage.
-                  </p>
-                </div>
-                <button
-                  disabled={dischargerUses >= tierUses}
-                  onClick={handleTriggerElectricalDischarge}
-                  className={`w-full py-1.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer ${
-                    dischargerUses >= tierUses
-                      ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                      : "bg-amber-500/20 border-amber-400 text-amber-300 hover:bg-amber-500/30"
-                  }`}
-                >
-                  ⚡ Fire Electrical Burst ({Math.max(1, shipTier)}d6)
-                </button>
-              </div>
-            )}
+        {renderSnapshotCard(
+          "yachtProtocols",
+          "Diplomacy",
+          isYachtMastery ? "Mastery Active" : isYachtSpec ? "Specialization" : "Standard",
+          isYachtMastery ? "Advantage Visual" : isYachtSpec ? "Disadv Guests" : "Standard Channel",
+          <Users className="w-3 h-3 text-amber-400" />,
+          isYachtSpec || isYachtMastery ? "text-amber-300" : "text-slate-400"
+        )}
 
-            {hasEMPDevice && (
-              <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-rose-400 uppercase flex items-center gap-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> EMP Device
-                    </span>
-                    <span className="text-[8px] font-mono px-1.5 py-0.2 rounded border bg-rose-950/40 text-rose-300 border-rose-500/40 font-bold">
-                      {tierUses - empUses} / {tierUses} (RECHARGE)
-                    </span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-relaxed">
-                    Action: 100-ft EMP blast. DC {8 + proficiencyBonus + strMod} Con save or stunned for 1 minute.
-                  </p>
-                </div>
-                <button
-                  disabled={empUses >= tierUses}
-                  onClick={handleTriggerEMP}
-                  className={`w-full py-1.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer ${
-                    empUses >= tierUses
-                      ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                      : "bg-rose-500/20 border-rose-400 text-rose-300 hover:bg-rose-500/30"
-                  }`}
-                >
-                  Trigger EMP Wave
-                </button>
-              </div>
-            )}
+        {renderSnapshotCard(
+          "mods",
+          "Hardware",
+          `${installedMods.length} Mods`,
+          "Comms Systems",
+          <Cpu className="w-3 h-3 text-purple-400" />,
+          "text-purple-300"
+        )}
 
-            {scramblerMod && (
-              <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-cyan-neon uppercase flex items-center gap-1.5">
-                      <Radio className="w-3.5 h-3.5 text-cyan-neon" /> {scramblerMod.name}
-                    </span>
-                    <span className="text-[8px] font-mono px-1.5 py-0.2 rounded border bg-cyan-950/40 text-cyan-300 border-cyan-500/40 font-bold">
-                      {tierUses - scramblerUses} / {tierUses} (RECHARGE)
-                    </span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-relaxed truncate" title={scramblerMod.description}>
-                    DC {8 + proficiencyBonus + chaMod} Wis save. {scramblerMod.description}
-                  </p>
-                </div>
-                <button
-                  disabled={scramblerUses >= tierUses}
-                  onClick={handleTriggerScrambler}
-                  className={`w-full py-1.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer ${
-                    scramblerUses >= tierUses
-                      ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                      : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
-                  }`}
-                >
-                  Activate Scrambler Pulse
-                </button>
-              </div>
-            )}
-
-            {shipSlicerMod && (
-              <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-purple-300 uppercase flex items-center gap-1.5">
-                      <Cpu className="w-3.5 h-3.5 text-purple-300" /> {shipSlicerMod.name}
-                    </span>
-                    <span className="text-[8px] font-mono px-1.5 py-0.2 rounded border bg-purple-950/40 text-purple-300 border-purple-500/40 font-bold">
-                      {tierUses - slicerUses} / {tierUses} (RECHARGE)
-                    </span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-relaxed truncate" title={shipSlicerMod.description}>
-                    DC {8 + proficiencyBonus + chaMod} Int save. {shipSlicerMod.description}
-                  </p>
-                </div>
-                <button
-                  disabled={slicerUses >= tierUses}
-                  onClick={handleTriggerShipSlicer}
-                  className={`w-full py-1.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer ${
-                    slicerUses >= tierUses
-                      ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                      : "bg-purple-500/20 border-purple-400 text-purple-300 hover:bg-purple-500/30 shadow-[0_0_8px_rgba(192,132,252,0.25)]"
-                  }`}
-                >
-                  Execute Slicer Protocol
-                </button>
-              </div>
-            )}
-
-            {commsSuppressorMod && (
-              <div className="p-3 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-slate-200 uppercase flex items-center gap-1.5">
-                      <Radio className="w-3.5 h-3.5 text-cyan-neon" /> Comms Suppressor
-                    </span>
-                    <span className="text-[8px] font-mono px-1.5 py-0.2 rounded border bg-black/60 text-emerald-400 border-bridge-border font-bold">
-                      ACTIVE SYSTEM
-                    </span>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-relaxed">
-                    Action: Suppress communications within 1 mile. DC {8 + (interfereMod ?? 0)} Wisdom save.
-                  </p>
-                </div>
-                <div className="p-1.5 rounded bg-black/60 border border-bridge-border/40 text-[9px] font-mono text-cyan-300 text-center">
-                  DC {8 + (interfereMod ?? 0)} Wisdom Save
-                </div>
-              </div>
-            )}
-          </div>
-
-          {tacticalFeedback && (
-            <div className="p-2 rounded bg-black/60 border border-bridge-border/60 text-xs font-mono text-cyan-neon">
-              {tacticalFeedback}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* 3. CREW COMMUNICATIONS & ELECTRONIC WARFARE ACTIONS */}
-      <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
-        <div className="flex items-center justify-between border-b border-bridge-border/60 pb-2 mb-3">
-          <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
-            Electronic Warfare &amp; Communications Actions
-          </h3>
-          <span className="text-[10px] text-muted-foreground font-mono">
-            CHARISMA SYSTEM INTERFACES
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-mono text-xs">
-          {/* INTERFERE ACTION */}
-          <div className="bg-black/40 border border-bridge-border/60 p-3 rounded flex flex-col justify-between gap-2">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <h4 className="font-bold text-cyan-neon text-sm">INTERFERE</h4>
-                <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${
-                  isScrambler
-                    ? "bg-cyan-500/20 text-cyan-300 border-cyan-400 shadow-[0_0_8px_rgba(0,255,255,0.3)] animate-pulse"
-                    : "bg-black/60 text-muted-foreground border-bridge-border"
-                }`}>
-                  {isScrambler ? "BONUS ACTION (SCRAMBLER SPEC)" : "STANDARD ACTION"}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed">
-                You can attempt to interfere with another creature within 1,000 feet, in the attempt of a task. When you take the Interfere action, you make a Charisma (Interfere) check contested by the target’s Wisdom (Scan) check. If you succeed, the subject has disadvantage on the next ability check or attack roll it makes before the start of your next turn. The Interfere action can be taken multiple times on a ship’s turn.
-              </p>
-            </div>
-            <div className="flex items-center justify-between border-t border-bridge-border/40 pt-2 text-[10px]">
-              <span className="text-muted-foreground">Skill Modifier:</span>
-              <span className="font-bold text-amber-300">
-                {interfereMod !== undefined ? (interfereMod >= 0 ? `+${interfereMod}` : `${interfereMod}`) : "+0"}
-              </span>
-            </div>
-          </div>
-
-          {/* SWINDLE / MENACE ACTION */}
-          <div className="bg-black/40 border border-bridge-border/60 p-3 rounded flex flex-col justify-between gap-2">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <h4 className="font-bold text-cyan-neon text-sm">TRANSMIT / HULL-HAIL</h4>
-                <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-black/60 text-muted-foreground border border-bridge-border">
-                  STANDARD ACTION
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed">
-                {isDisabled
-                  ? "Local range restricted to 1,000 ft while vessel is Disabled. Broadcast deceptive transponder codes, demand unconditional surrender, or hail external vessels."
-                  : "Broadcast deceptive transponder codes, demand unconditional surrender, or impersonate imperial authorities via broad-band holonet channels."}
-              </p>
-            </div>
-            <div className="flex items-center justify-between border-t border-bridge-border/40 pt-2 text-[10px]">
-              <span className="text-muted-foreground">Impress / Menace Mod:</span>
-              <span className="font-bold text-cyan-neon">
-                {menaceMod !== undefined ? (menaceMod >= 0 ? `+${menaceMod}` : `${menaceMod}`) : "+0"}
-              </span>
-            </div>
-          </div>
-        </div>
+        {renderSnapshotCard(
+          "telemetry",
+          "Telemetry",
+          `${(shipConfig as any)?.stats?.charisma ?? 10} CHA`,
+          `DC ${8 + proficiencyBonus + chaMod} Save`,
+          <Activity className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
       </section>
 
-      {/* 4. INSTALLED STATION MODIFICATIONS */}
-      <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
-        <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase border-b border-bridge-border/60 pb-1">
-          Installed Station Modifications
-        </h3>
-        <StationModifications 
-          station="Communications" 
-          installedMods={installedMods} 
-          onRemoveMod={onRemoveMod} 
-        />
-      </section>
+      {/* 5. EXPANDABLE DYNAMIC WORKSPACE GRID (RESPONSIVE 2-COLUMN) */}
+      {openCards.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
+          <Radio className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL COMMUNICATIONS DRAWERS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any of the status cards above or choose an operational preset.</p>
+        </div>
+      ) : (
+        <div
+          className={`grid gap-3.5 transition-all duration-300 ${
+            maximizedCard
+              ? "grid-cols-1"
+              : openCards.length === 1
+              ? "grid-cols-1"
+              : "grid-cols-1 lg:grid-cols-2"
+          }`}
+        >
+          {openCards.map((cardId) => {
+            if (maximizedCard && maximizedCard !== cardId) return null
+            const isMax = maximizedCard === cardId
+
+            return (
+              <div
+                key={cardId}
+                className="flex flex-col rounded-lg border border-cyan-neon/50 bg-bridge-panel p-3.5 shadow-[0_0_20px_rgba(0,255,255,0.06)] relative overflow-hidden transition-all duration-200"
+              >
+                {/* SUB-PANEL DRAWER HEADER */}
+                <div className="flex items-center justify-between border-b border-bridge-border pb-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-xs bg-cyan-neon shadow-[0_0_6px_#06b6d4]" />
+                    <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
+                      {cardId === "commsLink" && "Sub-Space Array & Transmission Grid"}
+                      {cardId === "powerDice" && "Communications Power Matrix"}
+                      {cardId === "electronicWarfare" && "Tactical Slicer & EW Modules"}
+                      {cardId === "interfere" && "Interference Warfare Protocols"}
+                      {cardId === "broadcast" && "Hail & Social Broadcast Channels"}
+                      {cardId === "yachtProtocols" && "Yacht Diplomatic Protocols"}
+                      {cardId === "mods" && "Installed Communications Hardware"}
+                      {cardId === "telemetry" && "Vessel Charisma & Core Telemetry"}
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setMaximizedCard((prev) => (prev === cardId ? null : cardId))}
+                      className="p-1 rounded text-slate-400 hover:text-cyan-neon hover:bg-black/40 cursor-pointer"
+                      title={isMax ? "Restore Multi-Window" : "Maximize to Full-Width"}
+                    >
+                      {isMax ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleCard(cardId)}
+                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
+                      title="Collapse Drawer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 1. COMMS LINK WORKSPACE */}
+                {cardId === "commsLink" && (
+                  <div className="flex flex-col gap-3">
+                    {isDisabled && (
+                      <div className="p-2.5 rounded border border-red-500/80 bg-red-950/60 text-xs text-red-200 flex items-center gap-2">
+                        <AlertOctagon className="w-4 h-4 text-red-400 shrink-0" />
+                        <span>DISABLED VESSEL: External communications restricted to within 1,000 feet.</span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="p-2.5 rounded border border-bridge-border bg-black/40">
+                        <span className="text-[9px] text-muted-foreground uppercase block">Transmission Range</span>
+                        <span className="font-bold text-cyan-neon font-mono">
+                          {hasCommsRenowned ? "Galaxy-Wide Holonet" : hasCommsPrototype ? "Territory-Wide (Encrypted)" : hasCommsPremium ? "Sector-Wide Relay" : "Local System"}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded border border-bridge-border bg-black/40">
+                        <span className="text-[9px] text-muted-foreground uppercase block">Encryption Status</span>
+                        <span className="font-bold text-emerald-400 font-mono">
+                          {hasCommsPrototype ? "Mil-Spec Cipher (Active)" : "Standard Sub-Space"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      Primary transceiver coordinates sub-space traffic, encrypted diplomatic frequencies, emergency distress beacons, and remote override links.
+                    </p>
+                  </div>
+                )}
+
+                {/* 2. POWER MATRIX WORKSPACE */}
+                {cardId === "powerDice" && (
+                  <div className="flex flex-col gap-3">
+                    <CombatResources 
+                      availablePowerDice={effectiveAvailable}
+                      maxPowerDice={effectiveMax}
+                      powerDieType={powerDieType}
+                      onConsumePowerDice={handleCustomConsume}
+                      standingByUsed={standingByUsed}
+                      onUseStandingBy={onUseStandingBy}
+                      leafOnTheWindUsed={leafOnTheWindUsed}
+                      onUseLeafOnTheWind={onUseLeafOnTheWind}
+                      versatileTransportUsed={versatileTransportUsed}
+                      onUpdateVersatileTransportUsed={onUpdateVersatileTransportUsed}
+                      bestShipInVerseUsed={bestShipInVerseUsed}
+                      onUpdateBestShipInVerseUsed={onUpdateBestShipInVerseUsed}
+                      shipTier={shipConfig?.tier ?? 0}
+                      shipSize={shipConfig?.size}
+                    />
+
+                    {isHubAndSpoke && (
+                      <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
+                          <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 w-full">
+                          {Array.from({ length: 2 }).map((_, i) => (
+                            <span
+                              key={i}
+                              className={`h-2.5 flex-1 rounded-xs inline-block ${
+                                i < sharedPoolDice 
+                                  ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
+                                  : "bg-black/80 border border-bridge-border"
+                              }`}
+                            />
+                          ))}
+                        </div>
+
+                        {!canSpendStation && canSpendShared && (
+                          <button
+                            type="button"
+                            onClick={() => handleCustomConsume(1)}
+                            className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
+                          >
+                            CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. ELECTRONIC WARFARE WORKSPACE */}
+                {cardId === "electronicWarfare" && (
+                  <div className="flex flex-col gap-3">
+                    {(hasElectricalDischargers || hasEMPDevice || scramblerMod || shipSlicerMod || commsSuppressorMod) ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {hasElectricalDischargers && (
+                          <div className="p-2.5 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-1.5">
+                            <div>
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="text-xs font-bold text-amber-300 uppercase flex items-center gap-1">
+                                  <Zap className="w-3 h-3 text-amber-400" /> Dischargers
+                                </span>
+                                <span className="text-[8px] font-mono px-1 py-0.2 rounded border bg-amber-950/40 text-amber-300 border-amber-500/40 font-bold">
+                                  {tierUses - dischargerUses}/{tierUses}
+                                </span>
+                              </div>
+                              <p className="text-[9px] text-muted-foreground leading-relaxed">
+                                50-ft burst: DC {8 + proficiencyBonus + strMod} Dex save or {Math.max(1, shipTier)}d6 lightning damage.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={dischargerUses >= tierUses}
+                              onClick={handleTriggerElectricalDischarge}
+                              className={`w-full py-1 rounded text-[9px] font-bold uppercase border transition-all cursor-pointer ${
+                                dischargerUses >= tierUses
+                                  ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
+                                  : "bg-amber-500/20 border-amber-400 text-amber-300 hover:bg-amber-500/30"
+                              }`}
+                            >
+                              Fire Burst ({Math.max(1, shipTier)}d6)
+                            </button>
+                          </div>
+                        )}
+
+                        {hasEMPDevice && (
+                          <div className="p-2.5 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-1.5">
+                            <div>
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="text-xs font-bold text-rose-400 uppercase flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3 text-rose-400" /> EMP Device
+                                </span>
+                                <span className="text-[8px] font-mono px-1 py-0.2 rounded border bg-rose-950/40 text-rose-300 border-rose-500/40 font-bold">
+                                  {tierUses - empUses}/{tierUses}
+                                </span>
+                              </div>
+                              <p className="text-[9px] text-muted-foreground leading-relaxed">
+                                100-ft EMP: DC {8 + proficiencyBonus + strMod} Con save or Stunned 1 min.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={empUses >= tierUses}
+                              onClick={handleTriggerEMP}
+                              className={`w-full py-1 rounded text-[9px] font-bold uppercase border transition-all cursor-pointer ${
+                                empUses >= tierUses
+                                  ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
+                                  : "bg-rose-500/20 border-rose-400 text-rose-300 hover:bg-rose-500/30"
+                              }`}
+                            >
+                              Trigger EMP
+                            </button>
+                          </div>
+                        )}
+
+                        {scramblerMod && (
+                          <div className="p-2.5 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-1.5">
+                            <div>
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="text-xs font-bold text-cyan-neon uppercase truncate">
+                                  {scramblerMod.name}
+                                </span>
+                                <span className="text-[8px] font-mono px-1 py-0.2 rounded border bg-cyan-950/40 text-cyan-300 border-cyan-500/40 font-bold">
+                                  {tierUses - scramblerUses}/{tierUses}
+                                </span>
+                              </div>
+                              <p className="text-[9px] text-muted-foreground leading-relaxed truncate" title={scramblerMod.description}>
+                                DC {8 + proficiencyBonus + chaMod} Wis save.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={scramblerUses >= tierUses}
+                              onClick={handleTriggerScrambler}
+                              className={`w-full py-1 rounded text-[9px] font-bold uppercase border transition-all cursor-pointer ${
+                                scramblerUses >= tierUses
+                                  ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
+                                  : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
+                              }`}
+                            >
+                              Activate Scrambler
+                            </button>
+                          </div>
+                        )}
+
+                        {shipSlicerMod && (
+                          <div className="p-2.5 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-1.5">
+                            <div>
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="text-xs font-bold text-purple-300 uppercase truncate">
+                                  {shipSlicerMod.name}
+                                </span>
+                                <span className="text-[8px] font-mono px-1 py-0.2 rounded border bg-purple-950/40 text-purple-300 border-purple-500/40 font-bold">
+                                  {tierUses - slicerUses}/{tierUses}
+                                </span>
+                              </div>
+                              <p className="text-[9px] text-muted-foreground leading-relaxed truncate" title={shipSlicerMod.description}>
+                                DC {8 + proficiencyBonus + chaMod} Int save.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={slicerUses >= tierUses}
+                              onClick={handleTriggerShipSlicer}
+                              className={`w-full py-1 rounded text-[9px] font-bold uppercase border transition-all cursor-pointer ${
+                                slicerUses >= tierUses
+                                  ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
+                                  : "bg-purple-500/20 border-purple-400 text-purple-300 hover:bg-purple-500/30"
+                              }`}
+                            >
+                              Execute Slicer
+                            </button>
+                          </div>
+                        )}
+
+                        {commsSuppressorMod && (
+                          <div className="p-2.5 rounded border border-bridge-border/60 bg-black/40 flex flex-col justify-between gap-1.5">
+                            <div>
+                              <span className="text-xs font-bold text-slate-200 uppercase block">Suppressor</span>
+                              <p className="text-[9px] text-muted-foreground leading-relaxed">
+                                Suppress comms within 1 mile. DC {8 + (interfereMod ?? 0)} Wisdom save.
+                              </p>
+                            </div>
+                            <div className="p-1 rounded bg-black/60 border border-bridge-border/40 text-[9px] text-cyan-300 text-center font-bold">
+                              DC {8 + (interfereMod ?? 0)} Wis Save
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded border border-dashed border-bridge-border/60 text-center text-xs text-muted-foreground">
+                        No tactical electronic warfare modules installed.
+                      </div>
+                    )}
+
+                    {tacticalFeedback && (
+                      <div className="p-2 rounded bg-black/60 border border-bridge-border text-xs text-cyan-neon font-mono">
+                        {tacticalFeedback}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 4. INTERFERE WORKSPACE */}
+                {cardId === "interfere" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="bg-black/40 border border-bridge-border/60 p-3 rounded flex flex-col justify-between gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-cyan-neon text-sm uppercase">Interfere Check</span>
+                        <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${
+                          isScrambler
+                            ? "bg-cyan-500/20 text-cyan-300 border-cyan-400 animate-pulse"
+                            : "bg-black/60 text-muted-foreground border-bridge-border"
+                        }`}>
+                          {isScrambler ? "BONUS ACTION (SCRAMBLER)" : "STANDARD ACTION"}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        Contested Charisma (Interfere) check against target's Wisdom (Scan). On success, subject has disadvantage on its next ability check or attack roll before the start of your next turn.
+                      </p>
+                      <div className="flex items-center justify-between border-t border-bridge-border/40 pt-2 text-xs">
+                        <span className="text-muted-foreground">Interfere Modifier:</span>
+                        <span className="font-bold text-amber-300 font-mono text-sm">
+                          {interfereMod !== undefined ? (interfereMod >= 0 ? `+${interfereMod}` : `${interfereMod}`) : "+0"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. BROADCAST WORKSPACE */}
+                {cardId === "broadcast" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="bg-black/40 border border-bridge-border/60 p-3 rounded flex flex-col justify-between gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-cyan-neon text-sm uppercase">Transmit / Hull-Hail</span>
+                        <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-black/60 text-muted-foreground border border-bridge-border">
+                          STANDARD ACTION
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        {isDisabled
+                          ? "Transmission restricted to 1,000 ft while disabled. Broadcast deceptive codes, demand surrender, or coordinate tactical comms."
+                          : "Broadcast deceptive transponder codes, demand unconditional surrender, or hail external vessels across holonet channels."}
+                      </p>
+                      <div className="grid grid-cols-3 gap-2 border-t border-bridge-border/40 pt-2 text-xs">
+                        <div>
+                          <span className="text-[9px] text-muted-foreground block">Impress</span>
+                          <span className="font-bold text-cyan-neon font-mono">
+                            {impressMod !== undefined ? (impressMod >= 0 ? `+${impressMod}` : `${impressMod}`) : "+0"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-muted-foreground block">Menace</span>
+                          <span className="font-bold text-cyan-neon font-mono">
+                            {menaceMod !== undefined ? (menaceMod >= 0 ? `+${menaceMod}` : `${menaceMod}`) : "+0"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-muted-foreground block">Swindle</span>
+                          <span className="font-bold text-cyan-neon font-mono">
+                            {swindleMod !== undefined ? (swindleMod >= 0 ? `+${swindleMod}` : `${swindleMod}`) : "+0"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. YACHT DIPLOMATIC WORKSPACE */}
+                {cardId === "yachtProtocols" && (
+                  <div className="flex flex-col gap-3">
+                    {(isYachtSpec || isYachtMastery) ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        {isYachtSpec && (
+                          <div className="p-3 bg-black/40 rounded border border-amber-500/40 flex flex-col gap-1">
+                            <span className="font-bold text-amber-300 uppercase">Recreational Hosting (Spec)</span>
+                            <p className="text-[10px] text-slate-300 leading-relaxed">
+                              While hosting guests, they have disadvantage on Intelligence and Wisdom checks.
+                            </p>
+                          </div>
+                        )}
+                        {isYachtMastery && (
+                          <div className="p-3 bg-black/40 rounded border border-emerald-500/40 flex flex-col gap-1">
+                            <span className="font-bold text-emerald-300 uppercase">Visual Diplomacy (Mastery)</span>
+                            <p className="text-[10px] text-slate-300 leading-relaxed">
+                              Advantage on Charisma checks against those who can see your ship.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded border border-dashed border-bridge-border/60 text-center text-xs text-muted-foreground">
+                        Standard diplomatic channel active. (No Yacht role specialization).
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 7. HARDWARE MODIFICATIONS WORKSPACE */}
+                {cardId === "mods" && (
+                  <div className="flex flex-col gap-2">
+                    <StationModifications 
+                      station="Communications" 
+                      installedMods={installedMods} 
+                      onRemoveMod={onRemoveMod} 
+                    />
+                  </div>
+                )}
+
+                {/* 8. CORE TELEMETRY WORKSPACE */}
+                {cardId === "telemetry" && (
+                  <div className="flex flex-col gap-3">
+                    <ShipStats shipConfig={shipConfig} systemDamageLevel={systemDamageLevel} />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

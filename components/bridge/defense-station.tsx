@@ -1,7 +1,33 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import { ShieldAlert, ShieldCheck, Users, CheckCircle2, Clock, UserMinus } from "lucide-react"
+import { 
+  ShieldAlert, 
+  ShieldCheck, 
+  Users, 
+  CheckCircle2, 
+  Clock, 
+  UserMinus,
+  X,
+  Maximize2,
+  Minimize2,
+  Layers,
+  Bookmark,
+  Volume2,
+  VolumeX,
+  Activity,
+  Zap,
+  Shield,
+  Gauge,
+  AlertTriangle,
+  RotateCw,
+  Sliders,
+  Cpu,
+  Flame,
+  AlertOctagon,
+  Anchor,
+  Compass
+} from "lucide-react"
 import { CombatResources } from "./combat-resources"
 import { StationModifications, Modification } from "./ship-modifications"
 import { ShipStats } from "./ship-stats"
@@ -9,6 +35,101 @@ import { type ShipConfig } from "./ship-setup"
 import { SHIP_SIZE_RULES, SHIP_TYPE_RULES, SHIP_TIER_PROGRESSION, ShipSize } from "@/lib/ship-rules"
 import type { ManifestMember, ShipCompartmentId } from "./bridge-dashboard"
 import { getCrewRole } from "./bridge-dashboard"
+
+// --- FLAT AVIONICS SOUND SYNTHESIZER & HAPTICS (NO ASSETS REQUIRED) ---
+let audioCtx: AudioContext | null = null
+
+function getAudioContext(): AudioContext | null {
+  if (!audioCtx && typeof window !== "undefined") {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+    if (AudioContextClass) {
+      audioCtx = new AudioContextClass()
+    }
+  }
+  return audioCtx
+}
+
+function playFlatGlassClick() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") ctx.resume()
+
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(1800, now)
+    osc.frequency.exponentialRampToValueAtTime(1400, now + 0.012)
+
+    gain.gain.setValueAtTime(0.035, now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.012)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start(now)
+    osc.stop(now + 0.012)
+  } catch {}
+}
+
+function playSubtleEngage() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") ctx.resume()
+
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = "triangle"
+    osc.frequency.setValueAtTime(520, now)
+    osc.frequency.exponentialRampToValueAtTime(740, now + 0.04)
+
+    gain.gain.setValueAtTime(0.04, now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start(now)
+    osc.stop(now + 0.04)
+  } catch {}
+}
+
+function triggerTactilePulse(type: "tap" | "heavy" = "tap") {
+  if (typeof window !== "undefined" && "vibrate" in navigator) {
+    try {
+      if (type === "tap") navigator.vibrate(10)
+      else navigator.vibrate([15, 20, 15])
+    } catch {}
+  }
+}
+
+export type DefenseCardId =
+  | "shields"
+  | "hull"
+  | "armor"
+  | "systemDamage"
+  | "statuses"
+  | "tacticalDefense"
+  | "powerDice"
+  | "telemetry"
+
+interface CustomPreset {
+  id: string
+  name: string
+  activeCards: DefenseCardId[]
+}
+
+const DEFAULT_PRESETS: CustomPreset[] = [
+  { id: "shields", name: "Shields & Hull", activeCards: ["shields", "hull", "powerDice"] },
+  { id: "damageControl", name: "Damage Control", activeCards: ["hull", "systemDamage", "statuses"] },
+  { id: "tactical", name: "Tactical Defenses", activeCards: ["shields", "armor", "tacticalDefense"] },
+  { id: "all", name: "All Systems", activeCards: ["shields", "hull", "armor", "systemDamage", "statuses", "tacticalDefense", "powerDice", "telemetry"] }
+]
 
 export interface ActiveStatus {
   id: string
@@ -208,6 +329,59 @@ export function DefenseStation({
 }: DefenseStationProps) {
   const isInitialMount = useRef(true)
 
+  // --- MFD MODULAR DECK STATE (PER-CLIENT PERSISTENCE) ---
+  const [openCards, setOpenCards] = useState<DefenseCardId[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("sw5e_defense_open_cards")
+        if (saved) return JSON.parse(saved)
+      } catch {}
+    }
+    return ["shields", "hull", "powerDice"]
+  })
+
+  const [maximizedCard, setMaximizedCard] = useState<DefenseCardId | null>(null)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true)
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("sw5e_defense_open_cards", JSON.stringify(openCards))
+      } catch {}
+    }
+  }, [openCards])
+
+  const toggleCard = (id: DefenseCardId) => {
+    if (soundEnabled) {
+      playFlatGlassClick()
+      triggerTactilePulse("tap")
+    }
+    setOpenCards((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    )
+  }
+
+  const applyPreset = (cards: DefenseCardId[]) => {
+    if (soundEnabled) {
+      playSubtleEngage()
+      triggerTactilePulse("heavy")
+    }
+    setOpenCards(cards)
+    setMaximizedCard(null)
+  }
+
+  const handleSaveCustomPreset = () => {
+    const name = window.prompt("Enter name for this custom defense layout:", "Custom Defense Setup")
+    if (!name) return
+    if (typeof window !== "undefined") {
+      try {
+        const key = `sw5e_defense_preset_${Date.now()}`
+        localStorage.setItem(key, JSON.stringify({ id: key, name, activeCards: openCards }))
+        alert(`Preset '${name}' saved to this device!`)
+      } catch {}
+    }
+  }
+
   // Ensure systemDamageLevel is strictly a valid integer number
   const numericSystemDamageLevel = useMemo(() => {
     if (typeof rawSystemDamageLevel === "number") return rawSystemDamageLevel
@@ -345,7 +519,7 @@ export function DefenseStation({
     dexLimitLabel = "Max +2 DEX (Deflection)"
   }
 
-  // Astrogation Mishap (6-8): Gravity Warp reduces AC by 2 until refitted
+  // Astrogation Mishap (6-8): Gravity Warp reduces AC by 2 until refitted[cite: 1, 12]
   const hasGravityWarpMishap = statuses.some((s) => 
     s.id?.toLowerCase().includes("gravity warp") || 
     s.title?.toLowerCase().includes("gravity warp")
@@ -355,9 +529,7 @@ export function DefenseStation({
   const tierACBonus = SHIP_TIER_PROGRESSION[sizeKey]?.[shipTier]?.acUpgrade ?? (shipTier >= 2 ? shipTier - 1 : 0)
   const modsACBonus = installedMods.reduce((sum, mod) => sum + ((mod as any).acBonus || 0), 0)
   
-  // Base AC before mishap status adjustment
   const unpenalizedAC = (shipConfig as any)?.baseArmorClass ?? (10 + appliedDexMod + tierACBonus + modsACBonus)
-  // Ensure the Gravity Warp status penalty is explicitly applied
   const dynamicAC = Math.max(1, unpenalizedAC + gravityWarpACPenalty)
 
   const baseDiceCount = getBaseDiceBySize(shipConfig?.size)
@@ -713,1194 +885,907 @@ export function DefenseStation({
   const currentSelectedStatusMeta = SHIP_STATUS_OPTIONS.find((s) => s.id === selectedStatusId)
   const currentDamageDefinition = SYSTEM_DAMAGE_LEVEL_DEFINITIONS[numericSystemDamageLevel] || SYSTEM_DAMAGE_LEVEL_DEFINITIONS[0]
 
-  return (
-    <div className="flex flex-col gap-6 font-mono">
-      {/* STATION CREW ASSIGNMENT & COMBAT TURN HUD */}
-      <div className="rounded-md border border-cyan-neon/40 bg-black/40 p-3 shadow-[0_0_15px_rgba(0,255,255,0.05)]">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-neon uppercase tracking-wider">
-              <Users className="h-4 w-4 text-cyan-neon" />
-              <span>Assigned Personnel:</span>
-            </div>
-
-            {assignedCrew.length === 0 ? (
-              <span className="text-xs text-slate-500 italic bg-slate-900/60 border border-slate-800 px-3 py-1 rounded">
-                Console Uncrewed — Select personnel to assign
-              </span>
-            ) : (
-              assignedCrew.map((member, idx) => {
-                const isLead = idx === 0
-                return (
-                  <div
-                    key={member.id}
-                    className={`flex items-center gap-2 px-2.5 py-1 rounded border text-xs transition ${
-                      member.hasTakenTurnThisRound
-                        ? "bg-slate-900/60 border-slate-800 text-slate-400"
-                        : "bg-slate-950 border-cyan-500/40 text-slate-100"
-                    }`}
-                  >
-                    <span
-                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase ${
-                        isLead
-                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                          : "bg-sky-500/20 text-sky-400 border-sky-500/40"
-                      }`}
-                    >
-                      {isLead ? "Defense Officer" : "Support"}
-                    </span>
-
-                    <span className="font-bold text-xs">{member.name}</span>
-
-                    <button
-                      type="button"
-                      onClick={() => onToggleTurn && onToggleTurn(member.id)}
-                      className={`p-0.5 rounded transition cursor-pointer ${
-                        member.hasTakenTurnThisRound
-                          ? "text-emerald-400 hover:text-emerald-300"
-                          : "text-amber-400 hover:text-amber-300"
-                      }`}
-                      title={member.hasTakenTurnThisRound ? "Turn Taken" : "Turn Pending"}
-                    >
-                      {member.hasTakenTurnThisRound ? (
-                        <CheckCircle2 className="h-4 w-4" />
-                      ) : (
-                        <Clock className="h-4 w-4" />
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
-                      className="text-slate-500 hover:text-rose-400 transition ml-1 cursor-pointer"
-                      title="Vacate Station (Return to Quarters)"
-                    >
-                      <UserMinus className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )
-              })
-            )}
-          </div>
-
-          {availablePersonnel.length > 0 && onAssignCrew && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">
-                Deploy to Console:
-              </span>
-              <select
-                value=""
-                onChange={(e) => {
-                  if (e.target.value) {
-                    onAssignCrew(e.target.value, "defense")
-                  }
-                }}
-                className="rounded bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon cursor-pointer"
-              >
-                <option value="" disabled>
-                  + Assign Crew Member...
-                </option>
-                {availablePersonnel.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({getCrewRole(p, manifest)})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 1. SHIP STATS & COMBAT RESOURCES */}
-      <div className="grid gap-4 grid-cols-1 w-full">
-        <ShipStats 
-          shipConfig={shipConfig} 
-          systemDamageLevel={numericSystemDamageLevel} 
-          statuses={statuses}
-        />
-        <div className="flex flex-col rounded-md border border-bridge-border bg-bridge-panel p-4 gap-4 w-full">
-          <CombatResources 
-            availablePowerDice={effectiveAvailable}
-            maxPowerDice={effectiveMax}
-            powerDieType={powerDieType}
-            onConsumePowerDice={handleCustomConsume}
-            standingByUsed={standingByUsed}
-            onUseStandingBy={onUseStandingBy}
-            shipTier={shipConfig?.tier ?? 0}
+  // RENDER DOCKED SNAPSHOT CARD TILE
+  const renderSnapshotCard = (
+    id: DefenseCardId,
+    title: string,
+    value: string,
+    statusText: string,
+    icon: React.ReactNode,
+    accentColor: string
+  ) => {
+    const isOpen = openCards.includes(id)
+    return (
+      <button
+        key={id}
+        type="button"
+        onClick={() => toggleCard(id)}
+        className={`flex flex-col justify-between p-2.5 rounded border transition-all text-left relative overflow-hidden group cursor-pointer ${
+          isOpen
+            ? "bg-slate-950 border-cyan-neon shadow-[0_0_15px_rgba(0,255,255,0.18)]"
+            : "bg-black/60 border-bridge-border/80 hover:border-cyan-neon/50 hover:bg-slate-950/80"
+        }`}
+      >
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 group-hover:text-cyan-neon flex items-center gap-1.5 truncate">
+            {icon}
+            {title}
+          </span>
+          <span
+            className={`w-2 h-2 rounded-full transition-all shrink-0 ${
+              isOpen
+                ? "bg-cyan-neon shadow-[0_0_8px_#06b6d4] scale-125"
+                : "bg-slate-700 group-hover:bg-cyan-neon/50"
+            }`}
           />
-          
-          {isHubAndSpoke && (
-            <div className="flex flex-col gap-3 pt-3 border-t border-bridge-border/60 w-full">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-amber-400 font-bold tracking-wider uppercase">Shared Reactor Pool</span>
-                <span className="font-bold text-amber-400">{sharedPoolDice} / 2</span>
-              </div>
-              <div className="flex items-center gap-1.5 w-full">
-                {Array.from({ length: 2 }).map((_, i) => (
-                  <span
-                    key={i}
-                    className={`h-3 flex-1 rounded-sm inline-block ${
-                      i < sharedPoolDice 
-                        ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
-                        : "bg-black/80 border border-bridge-border"
-                    }`}
-                  />
-                ))}
-              </div>
+        </div>
 
-              {!canSpendStation && canSpendShared && (
-                <button
-                  onClick={() => handleCustomConsume(1)}
-                  className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-2 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
-                >
-                  CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
-                </button>
-              )}
-            </div>
+        <div className="my-1.5">
+          <span className={`text-sm md:text-base font-bold font-mono tracking-tight block truncate ${accentColor}`}>
+            {value}
+          </span>
+          <span className="text-[9px] text-muted-foreground uppercase tracking-widest block truncate">
+            {statusText}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
+          <span>CONSOLE</span>
+          <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
+            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+          </span>
+        </div>
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-3.5 w-full font-mono">
+      {/* 1. MASTER HEADER BAR */}
+      <header className="flex flex-col xl:flex-row items-start xl:items-center justify-between border-b border-bridge-border pb-2.5 gap-2.5">
+        <div>
+          <div className="flex items-center gap-3">
+            <h2 className="text-glow-cyan text-base md:text-lg font-bold tracking-[0.15em] text-cyan-neon flex items-center gap-2">
+              <Shield className="h-5 w-5 text-cyan-neon" />
+              DEFENSE, SHIELDS &amp; DAMAGE CONTROL
+            </h2>
+          </div>
+          <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
+            {shipConfig?.name?.toUpperCase() || "VESSEL"} // ARMOR &amp; SHIELD MITIGATION //{" "}
+            <span className={hull.current === 0 ? "text-red-500 font-bold animate-pulse" : (shipShields.current === 0 && shipShields.temp === 0) ? "text-amber-400 font-bold" : "text-emerald-400 font-bold"}>
+              {hull.current === 0 ? "CRITICAL BREACH" : (shipShields.current === 0 && shipShields.temp === 0) ? "SHIELDS DOWN" : "EMITTERS NOMINAL"}
+            </span>
+          </p>
+        </div>
+
+        {/* Tactical Status Badges */}
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          {hasGravityWarpMishap && (
+            <span className="rounded border border-red-500/80 bg-red-950/60 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse">
+              ⚠️ GRAVITY WARP (-2 AC)
+            </span>
           )}
+
+          {isLevel4Damage && (
+            <span className="rounded border border-red-500/80 bg-red-950/60 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse">
+              ⚠️ LVL 4: 50% HP/SP CAP
+            </span>
+          )}
+
+          {isAutoRegenActive && (
+            <span className="rounded border border-emerald-500/50 bg-emerald-950/40 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-emerald-400 flex items-center gap-1">
+              <ShieldCheck className="w-3 h-3" /> AUTO-REGEN ACTIVE
+            </span>
+          )}
+
+          <span className="rounded-sm border border-cyan-neon/50 bg-cyan-neon/10 px-2.5 py-0.5 text-[9px] font-bold tracking-wider text-cyan-neon">
+            AC {dynamicAC} • DR {damageReduction}
+          </span>
+        </div>
+      </header>
+
+      {/* 2. PRESET WORKSPACE SELECTOR & AUDIO/HAPTIC MUTE BAR */}
+      <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded bg-black/60 border border-bridge-border text-xs">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[9px] uppercase tracking-wider text-slate-400 flex items-center gap-1">
+            <Layers className="w-3.5 h-3.5 text-cyan-neon" /> Presets:
+          </span>
+          {DEFAULT_PRESETS.map((p) => {
+            const isMatch =
+              p.activeCards.length === openCards.length &&
+              p.activeCards.every((c) => openCards.includes(c))
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => applyPreset(p.activeCards)}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition border cursor-pointer ${
+                  isMatch
+                    ? "bg-cyan-neon/20 border-cyan-neon text-cyan-neon shadow-[0_0_8px_rgba(0,255,255,0.3)]"
+                    : "bg-black/40 border-bridge-border/60 text-slate-400 hover:text-white"
+                }`}
+              >
+                {p.name}
+              </button>
+            )
+          })}
+          <button
+            type="button"
+            onClick={handleSaveCustomPreset}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
+            title="Save current layout to local browser"
+          >
+            <Bookmark className="w-3 h-3" /> Save View
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSoundEnabled((prev) => !prev)
+              triggerTactilePulse("tap")
+            }}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-bold uppercase cursor-pointer transition ${
+              soundEnabled
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : "border-slate-800 bg-slate-900 text-slate-500"
+            }`}
+          >
+            {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{soundEnabled ? "Audio & Haptics ON" : "Muted"}</span>
+          </button>
         </div>
       </div>
 
-      {/* 2. ACTIVE TACTICAL DEFENSE CAPABILITIES */}
-      {(hasFeedbackShield || hasInvulnerabilityDrive || hasInertialDampeners || isNavigatorMastery) && (
-        <section className="rounded-md border border-cyan-neon/60 bg-bridge-panel p-4 shadow-[0_0_15px_rgba(0,255,255,0.08)] flex flex-col gap-4">
-          <div className="flex items-center justify-between border-b border-bridge-border/60 pb-2">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-cyan-neon animate-pulse" />
-              <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
-                Active Tactical Defense Modules
-              </h3>
-            </div>
-            <span className="text-[10px] font-mono text-cyan-300">
-              Reaction &amp; Protocol Triggers
-            </span>
+      {/* 3. COMPACT CREW ROSTER HUD */}
+      <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
+            <Users className="h-3.5 w-3.5" />
+            <span>Defense Console Personnel:</span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {hasFeedbackShield && (
-              <div className="bg-black/50 p-3 rounded border border-cyan-neon/40 flex flex-col justify-between gap-2.5">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs font-bold text-cyan-neon font-mono uppercase">
-                      Feedback Shield
-                    </span>
-                    <span className="text-[9px] font-mono text-amber-300 border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.2 rounded font-bold">
-                      REACTION
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-300 font-mono leading-relaxed">
-                    When struck by a primary or secondary weapon, use your reaction to retaliate directly against the attacker, dealing <strong>{feedbackDie}</strong> damage of the same damage type.
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <button
-                    onClick={handleTriggerFeedbackShield}
-                    className="w-full py-1.5 rounded border border-cyan-neon/60 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-xs font-bold text-cyan-neon font-mono uppercase tracking-wider transition-all shadow-[0_0_8px_rgba(0,255,255,0.2)] cursor-pointer"
-                  >
-                    ⚡ Retaliate ({feedbackDie} Dmg)
-                  </button>
-                  {feedbackRollLog && (
-                    <div className="text-[9px] font-mono text-amber-300 text-center bg-black/60 p-1 rounded border border-bridge-border/40">
-                      {feedbackRollLog}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {hasInvulnerabilityDrive && (
-              <div className="bg-black/50 p-3 rounded border border-purple-500/40 flex flex-col justify-between gap-2.5">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs font-bold text-purple-300 font-mono uppercase">
-                      Invulnerability Drive
-                    </span>
-                    <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold uppercase border ${
-                      invulnerabilityRounds > 0
-                        ? "bg-purple-500/30 text-purple-200 border-purple-400 animate-pulse"
-                        : invulnerabilityUsed
-                        ? "bg-slate-800 text-slate-500 border-slate-700"
-                        : "bg-purple-950/40 text-purple-300 border-purple-500/40"
-                    }`}>
-                      {invulnerabilityRounds > 0 ? `${invulnerabilityRounds} RNDS ACTIVE` : invulnerabilityUsed ? "EXPENDED (REFIT)" : "1 USE READY"}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-300 font-mono leading-relaxed">
-                    Render ship immune to all damage for 1d4 rounds. Flight speed is halved, turn speed is doubled. Requires Destruction Save upon expiration.
-                  </p>
-                </div>
-
-                {invulnerabilityRounds > 0 ? (
-                  <button
-                    onClick={handleEndInvulnerabilityDrive}
-                    className="w-full py-1.5 rounded border border-red-500/60 bg-red-500/20 hover:bg-red-500/30 text-xs font-bold text-red-300 font-mono uppercase tracking-wider transition-all cursor-pointer"
-                  >
-                    End Immunity &amp; Make Destruction Save
-                  </button>
-                ) : (
-                  <button
-                    disabled={invulnerabilityUsed}
-                    onClick={handleActivateInvulnerabilityDrive}
-                    className={`w-full py-1.5 rounded text-xs font-bold font-mono uppercase tracking-wider transition-all cursor-pointer border ${
-                      invulnerabilityUsed
-                        ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                        : "bg-purple-500/20 border-purple-400 text-purple-300 hover:bg-purple-500/30 shadow-[0_0_10px_rgba(192,132,252,0.3)]"
+          {assignedCrew.length === 0 ? (
+            <span className="text-xs text-amber-300 italic px-2 py-0.5 border border-amber-500/30 bg-amber-950/20 rounded">
+              Console Uncrewed — Assign Defense Officer
+            </span>
+          ) : (
+            assignedCrew.map((member, idx) => {
+              const isLead = idx === 0
+              return (
+                <div
+                  key={member.id}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs ${
+                    member.hasTakenTurnThisRound
+                      ? "bg-slate-900/60 border-slate-800 text-slate-400"
+                      : "bg-slate-950 border-cyan-500/40 text-slate-100"
+                  }`}
+                >
+                  <span
+                    className={`text-[8px] font-bold px-1 rounded border uppercase ${
+                      isLead
+                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                        : "bg-sky-500/20 text-sky-400 border-sky-500/40"
                     }`}
                   >
-                    {invulnerabilityUsed ? "EXPENDED (REFIT REQUIRED)" : "ENGAGE INVULNERABILITY DRIVE (1D4 RNDS)"}
+                    {isLead ? "Defense Officer" : "Support"}
+                  </span>
+                  <span className="font-bold text-xs">{member.name}</span>
+
+                  <button
+                    type="button"
+                    onClick={() => onToggleTurn && onToggleTurn(member.id)}
+                    className="cursor-pointer ml-0.5"
+                    title={member.hasTakenTurnThisRound ? "Action Taken" : "Action Pending"}
+                  >
+                    {member.hasTakenTurnThisRound ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                    ) : (
+                      <Clock className="h-3.5 w-3.5 text-amber-400" />
+                    )}
                   </button>
-                )}
-              </div>
-            )}
 
-            {hasInertialDampeners && (
-              <div className="bg-black/50 p-3 rounded border border-bridge-border/60 flex flex-col justify-between gap-2.5">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs font-bold text-slate-200 font-mono uppercase">
-                      Inertial Dampeners
-                    </span>
-                    <span className="text-[9px] font-mono text-emerald-400 border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.2 rounded font-bold">
-                      PASSIVE GRID
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-300 font-mono leading-relaxed">
-                    Advantage on Concentration checks from external impacts. When taking the Evade action, ship ability checks and attacks no longer suffer disadvantage.
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
+                    className="text-slate-500 hover:text-rose-400 transition ml-0.5 cursor-pointer"
+                    title="Relieve from Station"
+                  >
+                    <UserMinus className="h-3 w-3" />
+                  </button>
                 </div>
-
-                <div className="p-1.5 rounded bg-black/60 border border-bridge-border/40 text-[9px] font-mono text-cyan-300 text-center">
-                  ✓ Evade Disadvantage Filter Active
-                </div>
-              </div>
-            )}
-
-            {isNavigatorMastery && (
-              <div className="bg-black/50 p-3 rounded border border-amber-500/40 flex flex-col justify-between gap-2.5">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs font-bold text-amber-300 font-mono uppercase">
-                      Navigator Mastery Shielding
-                    </span>
-                    <span className="text-[9px] font-mono text-amber-300 border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.2 rounded font-bold">
-                      ENVIRONMENTAL
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-300 font-mono leading-relaxed">
-                    Resistance to damage from environmental hazards (radiation, stellar flares, nebulae, acid clouds). Advantage on saves vs environmental effects.
-                  </p>
-                </div>
-                <div className="p-1.5 rounded bg-amber-950/40 border border-amber-500/30 text-[9px] font-mono text-amber-200 text-center">
-                  ✓ Environmental Resistance Active
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* 3. HULL INTEGRITY & SHIELD STATUS */}
-      <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
-        <div className="flex justify-between items-center mb-3 border-b border-bridge-border/60 pb-2">
-          <div>
-            <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
-              Hull Integrity &amp; Shield Status
-            </h3>
-            <p className="text-[10px] text-muted-foreground">
-              Primary structural integrity, armor defense class, and operational energy shields.
-            </p>
-          </div>
+              )
+            })
+          )}
         </div>
 
-        {/* PROMINENT ARMOR & SHIELD VALUE BANNER */}
-        <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="bg-gradient-to-r from-cyan-neon/25 via-cyan-neon/10 to-black/60 p-3.5 rounded border-2 border-cyan-neon/60 flex flex-col justify-between shadow-[0_0_15px_rgba(0,255,255,0.15)]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-mono font-bold text-cyan-neon tracking-[0.2em] uppercase">
-                Armor: {armorType.toUpperCase()}
-              </span>
-              <span className={`text-[9px] font-mono font-bold uppercase ${hasGravityWarpMishap ? "text-red-400 animate-pulse" : "text-emerald-400"}`}>
-                {hasGravityWarpMishap ? "⚠️ GRAVITY WARP ACTIVE (-2 AC)" : "Hull Plating Intact"}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <div 
-                className="bg-black/60 p-2 rounded border border-cyan-neon/40 flex items-center gap-3"
-                title={`AC Breakdown: Base 10 + ${dexLimitLabel} (${appliedDexMod >= 0 ? `+${appliedDexMod}` : appliedDexMod}) + Tier ${shipTier} (+${tierACBonus}) + Mods (+${modsACBonus})${hasGravityWarpMishap ? " - 2 (Gravity Warp Mishap)" : ""} = ${dynamicAC}`}
-              >
-                <div className={`w-9 h-9 rounded border flex items-center justify-center font-mono font-black text-base shadow-[0_0_8px_rgba(0,255,255,0.4)] ${
-                  hasGravityWarpMishap
-                    ? "bg-red-950/60 border-red-500 text-red-300 animate-pulse"
-                    : "bg-cyan-neon/20 border-cyan-neon text-cyan-neon"
-                }`}>
-                  {dynamicAC}
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold font-mono text-slate-100">AC</span>
-                    {hasGravityWarpMishap ? (
-                      <span className="text-[8px] font-mono font-bold text-red-300 bg-red-950/60 px-1 py-0.2 rounded border border-red-500/60">
-                        -2 WARP
-                      </span>
-                    ) : tierACBonus > 0 ? (
-                      <span className="text-[8px] font-mono font-bold text-amber-300 bg-amber-500/20 px-1 py-0.2 rounded border border-amber-500/40">
-                        +T{shipTier}
-                      </span>
-                    ) : null}
-                  </div>
-                  <span className="text-[9px] font-mono text-muted-foreground uppercase block mt-0.5">
-                    {hasGravityWarpMishap ? "Warped (-2 Applied)" : "Base 10 + Dex + Tier"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="bg-black/60 p-2 rounded border border-cyan-neon/40 flex items-center gap-3">
-                <div className="w-9 h-9 rounded bg-cyan-neon/20 border border-cyan-neon flex items-center justify-center text-cyan-neon font-mono font-black text-base shadow-[0_0_8px_rgba(0,255,255,0.4)]">
-                  {damageReduction}
-                </div>
-                <div>
-                  <span className="text-xs font-bold font-mono text-slate-100 block">DR</span>
-                  <span className="text-[9px] font-mono text-muted-foreground uppercase block mt-0.5">
-                    Damage Reduction
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="text-[9px] font-mono text-cyan-300/90 space-y-0.5 bg-black/40 p-1.5 rounded border border-bridge-border/40">
-              <p>
-                • <strong>AC Formula:</strong> Base 10 + {appliedDexMod >= 0 ? `+${appliedDexMod}` : appliedDexMod} ({dexLimitLabel}) + {tierACBonus} (Tier {shipTier}) {modsACBonus > 0 ? `+ ${modsACBonus} (Mods)` : ""}{hasGravityWarpMishap ? " - 2 (Gravity Warp)" : ""} = <strong>{dynamicAC}</strong>
-              </p>
-              {hasGravityWarpMishap && (
-                <p className="text-red-400 font-bold">• ⚠️ Structural gravity warp active (-2 AC). Complete refit at a repair facility to restore Armor Class.</p>
-              )}
-              <p>• If DR reduces incoming damage to 0, you take 1 damage instead.</p>
-              {normalizedArmor.includes("reinforced") && (
-                <p className="text-amber-400 font-bold">• ⚠️ Reinforced Armor: Stealth checks are made with disadvantage.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-r from-cyan-neon/25 via-cyan-neon/10 to-black/60 p-3.5 rounded border-2 border-cyan-neon/60 flex flex-col justify-between shadow-[0_0_15px_rgba(0,255,255,0.15)]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-mono font-bold text-cyan-neon tracking-[0.2em] uppercase">
-                Shield: {currentShieldType.toUpperCase()}
-              </span>
-              <span className="text-[9px] font-mono text-cyan-400 font-bold uppercase">Energy Grid Active</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <div className="bg-black/60 p-2 rounded border border-cyan-neon/40 flex items-center gap-3">
-                <div className="w-9 h-9 rounded bg-cyan-neon/20 border border-cyan-neon flex items-center justify-center text-cyan-neon font-mono font-black text-base shadow-[0_0_8px_rgba(0,255,255,0.4)]">
-                  {shieldCapCoeff}
-                </div>
-                <div>
-                  <span className="text-[9px] font-mono text-muted-foreground uppercase block">Capacity</span>
-                  <span className="text-xs font-bold font-mono text-slate-100 block">COEFFICIENT</span>
-                </div>
-              </div>
-
-              <div className="bg-black/60 p-2 rounded border border-cyan-neon/40 flex items-center gap-3">
-                <div className="w-9 h-9 rounded bg-cyan-neon/20 border border-cyan-neon flex items-center justify-center text-cyan-neon font-mono font-black text-base shadow-[0_0_8px_rgba(0,255,255,0.4)]">
-                  {shieldRegenCoeff}
-                </div>
-                <div>
-                  <span className="text-[9px] font-mono text-muted-foreground uppercase block">Regeneration</span>
-                  <span className="text-xs font-bold font-mono text-slate-100 block">RATE</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="text-[9px] font-mono text-cyan-300/90 space-y-0.5 bg-black/40 p-1.5 rounded border border-bridge-border/40">
-              <p>• Energy shields absorb incoming damage before structural hull integrity.</p>
-              <p>• Temporary shields absorb impact first before base shields drain.</p>
-              {isLevel4Damage && (
-                <p className="text-red-400 font-bold">• ⚠️ System Damage Lvl 4: Shield Max &amp; Regen Rate are halved!</p>
-              )}
-              {isAttackFighterMastery && (
-                <p className="text-cyan-300 font-bold">• ★ Attack Fighter Role Mastery: Auto Shield Regeneration rate is doubled!</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Dual-Line Visual Telemetry Graph with Locked-Out Overlay */}
-        <div className="mb-4 bg-black/60 p-3 rounded border border-bridge-border/60 space-y-3">
-          <div className="flex justify-between items-center text-[10px] font-mono text-muted-foreground uppercase border-b border-bridge-border/40 pb-1.5">
-            <span>Ship Defensive Status</span>
-            <span className={shipShields.current === 0 && shipShields.temp === 0 && hull.current === 0 ? "text-red-400 font-bold animate-pulse" : (shipShields.current === 0 && shipShields.temp === 0) ? "text-red-400 animate-pulse" : isLevel4Damage ? "text-red-400 font-bold" : shipShields.temp > 0 ? "text-white font-bold" : "text-cyan-neon"}>
-              {shipShields.current === 0 && shipShields.temp === 0 && hull.current === 0
-                ? "CRITICAL BREACH"
-                : isLevel4Damage
-                ? "CAPACITY 50% LOCKED (LEVEL 4 DAMAGE)"
-                : (shipShields.current === 0 && shipShields.temp === 0)
-                ? "SHIELDS DOWN"
-                : shipShields.temp > 0
-                ? "TEMPORARY SHIELDS ACTIVE"
-                : "Status Nominal"}
-            </span>
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex justify-between items-center text-[10px] font-mono">
-              <span className={`flex items-center gap-1.5 ${totalEffectivePercent === 0 ? "text-red-400 font-bold" : shipShields.temp > 0 ? "text-white font-bold" : regularPercent <= 60 ? "text-amber-400" : "text-cyan-neon"}`}>
-                <span className={`w-2 h-2 rounded-full inline-block ${totalEffectivePercent === 0 ? "bg-red-500 animate-ping" : shipShields.temp > 0 ? "bg-white shadow-[0_0_8px_#ffffff]" : regularPercent <= 60 ? "bg-amber-400" : "bg-cyan-neon"}`} /> SHIELDS
-              </span>
-              <span className="text-slate-200">
-                {shipShields.current} / {isLevel4Damage ? `${effectiveMaxShields} (Base ${fullMaxShields})` : fullMaxShields} SP {shipShields.temp > 0 && <span className="text-white font-extrabold">(+{shipShields.temp} TEMP)</span>}
-              </span>
-            </div>
-            
-            <div className="relative h-2.5 w-full bg-slate-950 rounded-sm overflow-hidden border border-bridge-border/40 flex">
-              <div
-                className={`h-full transition-all duration-300 ${getBarColor(totalEffectivePercent)}`}
-                style={{ width: `${regularPercent}%` }}
-                title={`Base Shields: ${shipShields.current}/${fullMaxShields}`}
-              />
-              {shipShields.temp > 0 && (
-                <div
-                  className="h-full transition-all duration-300"
-                  style={{ 
-                    width: `${tempPercent}%`,
-                    backgroundColor: "#ffffff",
-                    boxShadow: "0 0 10px #ffffff, 0 0 4px #00ffff",
-                    borderLeft: "2px solid #00ffff"
-                  }}
-                  title={`Temporary Shields: ${shipShields.temp} SP`}
-                />
-              )}
-              {isLevel4Damage && (
-                <div
-                  className="absolute right-0 top-0 bottom-0 pointer-events-none"
-                  style={{
-                    width: "50%",
-                    background: "repeating-linear-gradient(45deg, rgba(239, 68, 68, 0.4), rgba(239, 68, 68, 0.4) 4px, rgba(0, 0, 0, 0.8) 4px, rgba(0, 0, 0, 0.8) 8px)",
-                    borderLeft: "2px solid #ef4444"
-                  }}
-                  title="50% Capacity Locked Out (System Damage Level 4)"
-                />
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex justify-between items-center text-[10px] font-mono">
-              <span className={`flex items-center gap-1.5 ${hullPercent === 0 ? "text-red-500 font-bold" : hullPercent <= 60 ? "text-amber-400" : "text-emerald-400"}`}>
-                <span className={`w-2 h-2 rounded-full inline-block ${hullPercent === 0 ? "bg-red-600 animate-ping" : hullPercent <= 60 ? "bg-amber-400" : "bg-emerald-500"}`} /> HULL INTEGRITY
-              </span>
-              <span className="text-slate-200">
-                {hull.current} / {isLevel4Damage ? `${effectiveMaxHull} (Base ${fullMaxHull})` : fullMaxHull} HP
-              </span>
-            </div>
-            <div className="relative h-2.5 w-full bg-slate-950 rounded-sm overflow-hidden border border-bridge-border/40 flex">
-              <div
-                className={`h-full transition-all duration-300 ${getHullBarColor(hullPercent)}`}
-                style={{ width: `${hullPercent}%` }}
-              />
-              {isLevel4Damage && (
-                <div
-                  className="absolute right-0 top-0 bottom-0 pointer-events-none"
-                  style={{
-                    width: "50%",
-                    background: "repeating-linear-gradient(45deg, rgba(239, 68, 68, 0.4), rgba(239, 68, 68, 0.4) 4px, rgba(0, 0, 0, 0.8) 4px, rgba(0, 0, 0, 0.8) 8px)",
-                    borderLeft: "2px solid #ef4444"
-                  }}
-                  title="50% Capacity Locked Out (System Damage Level 4)"
-                />
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* DESTRUCTION SAVING THROW TRACKER */}
-        {hull.current === 0 && (
-          <div className="mb-4 bg-red-950/40 border-2 border-red-500/70 p-4 rounded space-y-3 shadow-[0_0_20px_rgba(255,0,0,0.2)] animate-pulse">
-            <div className="flex justify-between items-center border-b border-red-500/30 pb-2">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-                <h4 className="text-xs font-bold text-red-400 tracking-[0.2em] uppercase font-mono">
-                  Destruction Saving Throw Protocol (0 HP)
-                </h4>
-              </div>
-              <button
-                onClick={handleResetDestructionSaves}
-                className="text-[9px] font-mono text-slate-400 hover:text-slate-200 bg-black/40 px-2 py-0.5 rounded border border-bridge-border cursor-pointer"
-              >
-                Reset Trackers
-              </button>
-            </div>
-
-            {hasHoldTogether && (
-              <div className="bg-emerald-950/50 border border-emerald-500/50 p-2 rounded text-[11px] font-mono text-emerald-300 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>
-                  ★ <strong>Hold Together Active (Tier 3 Feature):</strong> When your ship takes damage while at 0 hull points, it makes a Destruction saving throw instead of automatically failing!
-                </span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-              <div className="bg-black/60 p-3 rounded border border-red-500/40 text-center">
-                <span className="text-[9px] font-mono text-muted-foreground uppercase block mb-1">Vessel Status</span>
-                <span className={`text-xs font-mono font-black tracking-wider ${destructionSaves.isStable ? "text-emerald-400" : "text-red-400"}`}>
-                  {destructionSaves.isStable ? "STABLE (DISABLED)" : "CRITICAL / UNSTABLE"}
-                </span>
-                <span className="text-[9px] font-mono text-slate-400 block mt-0.5">
-                  {destructionSaves.isStable ? "Stopped making saves" : "Roll 10+ to succeed"}
-                </span>
-              </div>
-
-              <div className="space-y-2 bg-black/60 p-3 rounded border border-bridge-border/40">
-                <div className="flex justify-between items-center text-[10px] font-mono">
-                  <span className="text-cyan-neon">Successes ({destructionSaves.successes}/3):</span>
-                  <div className="flex gap-1">
-                    {[1, 2, 3].map((num) => (
-                      <button
-                        key={`succ-${num}`}
-                        onClick={() => handleSetSuccessesCount(num)}
-                        title="Click to manually toggle success count"
-                        className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold border transition-colors cursor-pointer ${
-                          num <= destructionSaves.successes 
-                            ? "bg-cyan-neon text-black border-cyan-300 shadow-[0_0_8px_rgba(0,255,255,0.5)]" 
-                            : "bg-slate-900 text-slate-400 border border-bridge-border hover:border-cyan-neon/50"
-                        }`}
-                      >
-                        {num <= destructionSaves.successes ? "✓" : num}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center text-[10px] font-mono pt-1.5 border-t border-bridge-border/40">
-                  <span className="text-red-400">Failures ({destructionSaves.failures}):</span>
-                  <div className="flex gap-1">
-                    {[1, 2, 3].map((num) => (
-                      <button
-                        key={`fail-${num}`}
-                        onClick={() => handleSetFailuresCount(num)}
-                        title="Click to manually toggle failure count"
-                        className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold border transition-colors cursor-pointer ${
-                          num <= destructionSaves.failures 
-                            ? "bg-red-600 text-white border-red-400 shadow-[0_0_8px_rgba(255,0,0,0.5)]" 
-                            : "bg-slate-900 text-slate-400 border border-bridge-border hover:border-red-500/50"
-                        }`}
-                      >
-                        {num <= destructionSaves.failures ? "✕" : num}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={handleRollDestructionSave}
-                  disabled={destructionSaves.isStable}
-                  className="w-full rounded border border-red-500/60 bg-red-500/20 py-2 text-[10px] font-bold text-red-300 hover:bg-red-500/30 disabled:opacity-30 tracking-wider font-mono shadow-[0_0_10px_rgba(255,0,0,0.3)] cursor-pointer"
-                >
-                  🎲 ROLL DESTRUCTION SAVE (d20)
-                </button>
-                {destructionSaves.lastRoll !== null && (
-                  <div className="text-[10px] font-mono text-center text-slate-200 bg-black/60 p-1.5 rounded border border-bridge-border/40">
-                    {destructionSaves.lastResultText}
-                  </div>
-                )}
-                {destructionSaves.lastRoll === null && (
-                  <div className="text-[9px] font-mono text-center text-muted-foreground bg-black/40 p-1.5 rounded border border-bridge-border/40">
-                    Tip: Click numbers directly to track physical dice rolls!
-                  </div>
-                )}
-              </div>
-            </div>
+        {availablePersonnel.length > 0 && onAssignCrew && (
+          <div className="flex items-center gap-1.5 self-end md:self-auto">
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Deploy:</span>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onAssignCrew(e.target.value, "defense")
+              }}
+              className="rounded bg-slate-950 border border-slate-700 px-2 py-0.5 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon cursor-pointer"
+            >
+              <option value="" disabled>+ Assign Defense Crew...</option>
+              {availablePersonnel.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({getCrewRole(p, manifest)})
+                </option>
+              ))}
+            </select>
           </div>
         )}
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* PRIMARY SHIELDS & REGENERATE ACTION */}
-          <div className="bg-black/50 p-4 rounded border border-bridge-border/60 flex flex-col justify-between">
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <h4 className="text-xs font-bold text-cyan-neon uppercase font-mono">Primary &amp; Temporary Shields</h4>
-                <div className={`text-xs font-mono font-bold ${totalEffectivePercent === 0 ? "text-red-400" : shipShields.temp > 0 ? "text-white" : regularPercent <= 60 ? "text-amber-300" : "text-cyan-neon"}`}>
-                  {shipShields.current} / {isLevel4Damage ? `${effectiveMaxShields} (Base ${fullMaxShields})` : fullMaxShields} SP {shipShields.temp > 0 && <span className="text-white font-extrabold">(+{shipShields.temp} Temp)</span>}
-                </div>
-              </div>
+      {/* 4. TOP-DECK MODULAR SNAPSHOT TILES (8 UNIFORM TILES) */}
+      <section className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 w-full">
+        {renderSnapshotCard(
+          "shields",
+          "Shield Grid",
+          `${shipShields.current}/${isLevel4Damage ? effectiveMaxShields : fullMaxShields} SP`,
+          shipShields.temp > 0 ? `+${shipShields.temp} Temp SP` : "Emitters Nominal",
+          <Shield className="w-3 h-3 text-cyan-neon" />,
+          shipShields.current === 0 && shipShields.temp === 0 ? "text-red-400 animate-pulse" : "text-cyan-neon"
+        )}
 
-              <div className="flex items-center gap-1.5 mb-3">
-                <button
-                  onClick={() => handleAdjustTotalShields(-5)}
-                  className="flex-1 rounded border border-red-500/40 bg-red-500/10 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 font-mono cursor-pointer"
-                  title="Damage: depletes Temp SP first, then regular SP, then overflows to Hull"
-                >
-                  -5 SP
-                </button>
-                <button
-                  onClick={() => handleAdjustTotalShields(-1)}
-                  className="flex-1 rounded border border-red-500/40 bg-red-500/10 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 font-mono cursor-pointer"
-                  title="Damage: depletes Temp SP first, then regular SP, then overflows to Hull"
-                >
-                  -1 SP
-                </button>
-                <button
-                  onClick={() => handleAdjustTotalShields(1)}
-                  className="flex-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 py-1 text-[10px] font-bold text-cyan-neon hover:bg-cyan-neon/20 font-mono cursor-pointer"
-                  title="Recharge: heals regular SP up to max"
-                >
-                  +1 SP
-                </button>
-                <button
-                  onClick={() => handleAdjustTotalShields(5)}
-                  className="flex-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 py-1 text-[10px] font-bold text-cyan-neon hover:bg-cyan-neon/20 font-mono cursor-pointer"
-                  title="Recharge: heals regular SP up to max"
-                >
-                  +5 SP
-                </button>
-              </div>
+        {renderSnapshotCard(
+          "hull",
+          "Hull Structure",
+          `${hull.current}/${isLevel4Damage ? effectiveMaxHull : fullMaxHull} HP`,
+          hull.current === 0 ? "Destruction Save" : "Plating Intact",
+          <Anchor className="w-3 h-3 text-emerald-400" />,
+          hull.current === 0 ? "text-red-500 animate-pulse" : "text-emerald-400"
+        )}
 
-              {/* TEMPORARY SHIELDS TOGGLES */}
-              <div className="flex items-center justify-between bg-black/40 px-3 py-1.5 rounded border border-bridge-border/40 mb-3 text-xs font-mono">
-                <span className="text-[10px] text-white uppercase font-bold flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_6px_#00ffff]" />
-                  Temporary SP: {shipShields.temp}
-                </span>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => {
-                      const newTemp = Math.max(0, shipShields.temp - 5)
-                      setShipShields(prev => ({ ...prev, temp: newTemp }))
-                      onShieldChange?.(shipShields.current, shipShields.max, newTemp)
-                    }}
-                    className="px-2 py-0.5 text-[9px] bg-slate-800 hover:bg-slate-700 rounded text-slate-200 cursor-pointer"
-                  >
-                    -5
-                  </button>
-                  <button
-                    onClick={() => {
-                      const newTemp = Math.max(0, shipShields.temp - 1)
-                      setShipShields(prev => ({ ...prev, temp: newTemp }))
-                      onShieldChange?.(shipShields.current, shipShields.max, newTemp)
-                    }}
-                    className="px-2 py-0.5 text-[9px] bg-slate-800 hover:bg-slate-700 rounded text-slate-200 cursor-pointer"
-                  >
-                    -1
-                  </button>
-                  <button
-                    onClick={() => {
-                      const newTemp = shipShields.temp + 1
-                      setShipShields(prev => ({ ...prev, temp: newTemp }))
-                      onShieldChange?.(shipShields.current, shipShields.max, newTemp)
-                    }}
-                    className="px-2 py-0.5 text-[9px] bg-cyan-950 hover:bg-cyan-900 border border-cyan-200/40 rounded text-white font-bold cursor-pointer"
-                  >
-                    +1
-                  </button>
-                  <button
-                    onClick={() => {
-                      const newTemp = shipShields.temp + 5
-                      setShipShields(prev => ({ ...prev, temp: newTemp }))
-                      onShieldChange?.(shipShields.current, shipShields.max, newTemp)
-                    }}
-                    className="px-2 py-0.5 text-[9px] bg-cyan-950 hover:bg-cyan-900 border border-cyan-200/40 rounded text-white font-bold cursor-pointer"
-                  >
-                    +5
-                  </button>
-                </div>
-              </div>
+        {renderSnapshotCard(
+          "armor",
+          "Armor & DR",
+          `AC ${dynamicAC} • DR ${damageReduction}`,
+          hasGravityWarpMishap ? "Warped (-2 AC)" : armorType.replace(" Armor", ""),
+          <ShieldAlert className="w-3 h-3 text-cyan-neon" />,
+          hasGravityWarpMishap ? "text-red-400" : "text-cyan-neon"
+        )}
 
-              {/* REGENERATE SHIELDS ACTION BLOCK */}
-              <div className="my-3 bg-cyan-950/20 p-3 rounded border border-cyan-neon/40 space-y-2.5">
-                <div className="flex justify-between items-center border-b border-cyan-neon/30 pb-1.5">
+        {renderSnapshotCard(
+          "systemDamage",
+          "System Damage",
+          `Level ${numericSystemDamageLevel} / 6`,
+          numericSystemDamageLevel === 0 ? "Nominal Ops" : `Penalties Active`,
+          <AlertOctagon className="w-3 h-3 text-amber-400" />,
+          numericSystemDamageLevel === 0 ? "text-emerald-400" : numericSystemDamageLevel <= 2 ? "text-amber-400" : "text-red-400 animate-pulse"
+        )}
+
+        {renderSnapshotCard(
+          "statuses",
+          "Conditions",
+          `${statuses.length} Condition${statuses.length === 1 ? "" : "s"}`,
+          statuses.length > 0 ? statuses[0].title : "Clear Grid",
+          <AlertTriangle className="w-3 h-3 text-amber-400" />,
+          statuses.length > 0 ? "text-amber-300" : "text-slate-400"
+        )}
+
+        {renderSnapshotCard(
+          "tacticalDefense",
+          "Tactical Grid",
+          invulnerabilityRounds > 0 ? `${invulnerabilityRounds} Rnds Invuln` : hasFeedbackShield ? "Feedback Ready" : "Standard",
+          hasInertialDampeners ? "Dampeners On" : "Tactical Modules",
+          <Zap className="w-3 h-3 text-purple-400" />,
+          invulnerabilityRounds > 0 ? "text-purple-300 animate-pulse" : "text-purple-300"
+        )}
+
+        {renderSnapshotCard(
+          "powerDice",
+          "Defense Power",
+          isDistributed ? `${currentStationDice}/2 Dice` : `${effectiveAvailable}/${effectiveMax} Dice`,
+          isHubAndSpoke ? `${sharedPoolDice}/2 Shared` : powerCoupling.replace(" Power Coupling", ""),
+          <Zap className="w-3 h-3 text-amber-400" />,
+          "text-amber-300"
+        )}
+
+        {renderSnapshotCard(
+          "telemetry",
+          "Telemetry",
+          `${shipShields.totalSD - spentShieldDice}/${shipShields.totalSD} SD`,
+          `${hull.totalHD - spentHullDice}/${hull.totalHD} HD`,
+          <Activity className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
+      </section>
+
+      {/* 5. EXPANDABLE DYNAMIC WORKSPACE GRID (RESPONSIVE 2-COLUMN) */}
+      {openCards.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
+          <Shield className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL DEFENSE CONSOLE DRAWERS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any of the status cards above or choose an operational preset.</p>
+        </div>
+      ) : (
+        <div
+          className={`grid gap-3.5 transition-all duration-300 ${
+            maximizedCard
+              ? "grid-cols-1"
+              : openCards.length === 1
+              ? "grid-cols-1"
+              : "grid-cols-1 lg:grid-cols-2"
+          }`}
+        >
+          {openCards.map((cardId) => {
+            if (maximizedCard && maximizedCard !== cardId) return null
+            const isMax = maximizedCard === cardId
+
+            return (
+              <div
+                key={cardId}
+                className="flex flex-col rounded-lg border border-cyan-neon/50 bg-bridge-panel p-3.5 shadow-[0_0_20px_rgba(0,255,255,0.06)] relative overflow-hidden transition-all duration-200"
+              >
+                {/* SUB-PANEL DRAWER HEADER */}
+                <div className="flex items-center justify-between border-b border-bridge-border pb-2 mb-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono font-bold text-cyan-neon uppercase tracking-wider">
-                      ⚡ Regenerate Shields (Action)
-                    </span>
+                    <span className="w-2 h-2 rounded-xs bg-cyan-neon shadow-[0_0_6px_#06b6d4]" />
+                    <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
+                      {cardId === "shields" && "Energy Shields & Regeneration Systems"}
+                      {cardId === "hull" && "Hull Integrity & Destruction Saves"}
+                      {cardId === "armor" && "Armor Class & Damage Reduction"}
+                      {cardId === "systemDamage" && "System Damage & Blackout Progression"}
+                      {cardId === "statuses" && "Active Conditions & Status Modifiers"}
+                      {cardId === "tacticalDefense" && "Active Tactical Defense Modules"}
+                      {cardId === "powerDice" && "Defense Power Coupling Matrix"}
+                      {cardId === "telemetry" && "Ship Core Telemetry & Defensive Reserves"}
+                    </h3>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-mono text-muted-foreground">DC: <strong className="text-cyan-neon">{targetDC}</strong> (Missing: {missingShieldPoints})</span>
-                    {hasRegeneratedThisTurn && (
-                      <button
-                        onClick={handleResetRegenTurn}
-                        className="text-[9px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30 hover:bg-amber-500/20 cursor-pointer"
-                        title="Reset once-per-turn limit"
-                      >
-                        Reset Turn
-                      </button>
-                    )}
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setMaximizedCard((prev) => (prev === cardId ? null : cardId))}
+                      className="p-1 rounded text-slate-400 hover:text-cyan-neon hover:bg-black/40 cursor-pointer"
+                      title={isMax ? "Restore Multi-Window" : "Maximize to Full-Width"}
+                    >
+                      {isMax ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleCard(cardId)}
+                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
+                      title="Collapse Drawer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-[10px] font-mono bg-black/40 px-2.5 py-1.5 rounded border border-bridge-border/40">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-200 font-bold uppercase">Boost</span>
-                    <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-cyan-neon/20 text-cyan-neon border border-cyan-neon/40 font-bold">
-                      P
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] text-muted-foreground">Str ({strModifier >= 0 ? `+${strModifier}` : strModifier}) + Prof (+{proficiencyBonus})</span>
-                    <span className="font-bold text-cyan-neon text-xs">+{boostCheckBonus}</span>
-                  </div>
-                </div>
+                {/* 1. SHIELDS WORKSPACE */}
+                {cardId === "shields" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-muted-foreground uppercase text-[10px]">
+                        Emitter Type: <strong className="text-cyan-neon">{currentShieldType}</strong>
+                      </span>
+                      <span className={`text-xs font-mono font-bold ${totalEffectivePercent === 0 ? "text-red-400" : shipShields.temp > 0 ? "text-white" : regularPercent <= 60 ? "text-amber-300" : "text-cyan-neon"}`}>
+                        {shipShields.current} / {isLevel4Damage ? `${effectiveMaxShields} (Base ${fullMaxShields})` : fullMaxShields} SP {shipShields.temp > 0 && <span className="text-white font-extrabold">(+{shipShields.temp} Temp)</span>}
+                      </span>
+                    </div>
 
-                {hasRegeneratedThisTurn ? (
-                  <div className="bg-black/60 p-2 rounded border border-bridge-border/40 text-[10px] font-mono text-amber-300 text-center">
-                    Action already taken this turn. {regenLog}
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => handleExecuteShieldRegeneration(false)}
-                        className="rounded border border-cyan-neon/60 bg-cyan-neon/20 py-1.5 text-[10px] font-bold text-cyan-neon hover:bg-cyan-neon/30 uppercase font-mono tracking-wide shadow-[0_0_8px_rgba(0,255,255,0.2)] cursor-pointer"
-                      >
-                        🎲 Auto Roll (d20 + {shipShields.sdType})
-                      </button>
-
-                      <div className="flex gap-1">
-                        <input
-                          type="number"
-                          placeholder={`Manual ${shipShields.sdType}`}
-                          value={manualRollInput}
-                          onChange={(e) => setManualRollInput(e.target.value)}
-                          className="w-full bg-black border border-bridge-border text-[10px] font-mono text-slate-200 rounded px-1.5 py-1 text-center"
+                    {/* Shield Gauge Bar */}
+                    <div className="space-y-1">
+                      <div className="relative h-2.5 w-full bg-slate-950 rounded-sm overflow-hidden border border-bridge-border/40 flex">
+                        <div
+                          className={`h-full transition-all duration-300 ${getBarColor(totalEffectivePercent)}`}
+                          style={{ width: `${regularPercent}%` }}
                         />
+                        {shipShields.temp > 0 && (
+                          <div
+                            className="h-full transition-all duration-300"
+                            style={{ 
+                              width: `${tempPercent}%`,
+                              backgroundColor: "#ffffff",
+                              boxShadow: "0 0 10px #ffffff, 0 0 4px #00ffff",
+                              borderLeft: "2px solid #00ffff"
+                            }}
+                          />
+                        )}
+                        {isLevel4Damage && (
+                          <div
+                            className="absolute right-0 top-0 bottom-0 pointer-events-none"
+                            style={{
+                              width: "50%",
+                              background: "repeating-linear-gradient(45deg, rgba(239, 68, 68, 0.4), rgba(239, 68, 68, 0.4) 4px, rgba(0, 0, 0, 0.8) 4px, rgba(0, 0, 0, 0.8) 8px)",
+                              borderLeft: "2px solid #ef4444"
+                            }}
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Shield Steppers */}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleAdjustTotalShields(-5)}
+                        className="flex-1 rounded border border-red-500/40 bg-red-500/10 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 font-mono cursor-pointer"
+                      >
+                        -5 SP
+                      </button>
+                      <button
+                        onClick={() => handleAdjustTotalShields(-1)}
+                        className="flex-1 rounded border border-red-500/40 bg-red-500/10 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 font-mono cursor-pointer"
+                      >
+                        -1 SP
+                      </button>
+                      <button
+                        onClick={() => handleAdjustTotalShields(1)}
+                        className="flex-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 py-1 text-[10px] font-bold text-cyan-neon hover:bg-cyan-neon/20 font-mono cursor-pointer"
+                      >
+                        +1 SP
+                      </button>
+                      <button
+                        onClick={() => handleAdjustTotalShields(5)}
+                        className="flex-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 py-1 text-[10px] font-bold text-cyan-neon hover:bg-cyan-neon/20 font-mono cursor-pointer"
+                      >
+                        +5 SP
+                      </button>
+                    </div>
+
+                    {/* Temp Shield Buttons */}
+                    <div className="flex items-center justify-between bg-black/40 px-3 py-1.5 rounded border border-bridge-border/40 text-xs font-mono">
+                      <span className="text-[10px] text-white uppercase font-bold flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_6px_#00ffff]" />
+                        Temp SP: {shipShields.temp}
+                      </span>
+                      <div className="flex gap-1">
                         <button
                           onClick={() => {
-                            const val = parseInt(manualRollInput, 10)
-                            if (!isNaN(val)) handleExecuteShieldRegeneration(true, val)
+                            const newTemp = Math.max(0, shipShields.temp - 5)
+                            setShipShields(prev => ({ ...prev, temp: newTemp }))
+                            onShieldChange?.(shipShields.current, shipShields.max, newTemp)
                           }}
-                          className="px-2 py-1 rounded border border-emerald-500/40 bg-emerald-500/10 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 uppercase font-mono cursor-pointer"
+                          className="px-2 py-0.5 text-[9px] bg-slate-800 hover:bg-slate-700 rounded text-slate-200 cursor-pointer"
                         >
-                          Apply
+                          -5
+                        </button>
+                        <button
+                          onClick={() => {
+                            const newTemp = Math.max(0, shipShields.temp - 1)
+                            setShipShields(prev => ({ ...prev, temp: newTemp }))
+                            onShieldChange?.(shipShields.current, shipShields.max, newTemp)
+                          }}
+                          className="px-2 py-0.5 text-[9px] bg-slate-800 hover:bg-slate-700 rounded text-slate-200 cursor-pointer"
+                        >
+                          -1
+                        </button>
+                        <button
+                          onClick={() => {
+                            const newTemp = shipShields.temp + 1
+                            setShipShields(prev => ({ ...prev, temp: newTemp }))
+                            onShieldChange?.(shipShields.current, shipShields.max, newTemp)
+                          }}
+                          className="px-2 py-0.5 text-[9px] bg-cyan-950 hover:bg-cyan-900 border border-cyan-200/40 rounded text-white font-bold cursor-pointer"
+                        >
+                          +1
+                        </button>
+                        <button
+                          onClick={() => {
+                            const newTemp = shipShields.temp + 5
+                            setShipShields(prev => ({ ...prev, temp: newTemp }))
+                            onShieldChange?.(shipShields.current, shipShields.max, newTemp)
+                          }}
+                          className="px-2 py-0.5 text-[9px] bg-cyan-950 hover:bg-cyan-900 border border-cyan-200/40 rounded text-white font-bold cursor-pointer"
+                        >
+                          +5
                         </button>
                       </div>
                     </div>
-                    <p className="text-[9px] font-mono text-muted-foreground leading-tight">
-                      *<strong>Two-part process:</strong> Strength (Boost) check vs DC {targetDC}. On success, roll Shield Die. On failure, roll twice and take lesser.{isLevel4Damage && " (All shield healing halved at Lvl 4 damage)."}
-                    </p>
-                  </div>
-                )}
-              </div>
 
-              {/* AUTO SHIELD REGENERATION SECTION */}
-              <div className="my-3 bg-black/60 p-3 rounded border border-bridge-border/60 space-y-3">
-                <div className="flex items-center justify-between border-b border-bridge-border/40 pb-2">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono font-bold text-cyan-neon uppercase tracking-wider block">
-                        Auto Shield Regeneration System
-                      </span>
-                      {isAttackFighterMastery && (
-                        <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 font-bold uppercase">
-                          2X RATE (ATTACK FIGHTER)
+                    {/* REGENERATE SHIELDS ACTION */}
+                    <div className="bg-cyan-950/20 p-2.5 rounded border border-cyan-neon/40 space-y-2">
+                      <div className="flex justify-between items-center border-b border-cyan-neon/30 pb-1">
+                        <span className="text-[10px] font-mono font-bold text-cyan-neon uppercase">
+                          ⚡ Regenerate Shields (Action)
                         </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[9px] text-muted-foreground">DC: <strong className="text-cyan-neon">{targetDC}</strong></span>
+                          {hasRegeneratedThisTurn && (
+                            <button
+                              onClick={handleResetRegenTurn}
+                              className="text-[8px] font-mono text-amber-400 bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/30 cursor-pointer"
+                            >
+                              Reset Turn
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {hasRegeneratedThisTurn ? (
+                        <div className="bg-black/60 p-1.5 rounded border border-bridge-border/40 text-[9px] font-mono text-amber-300 text-center">
+                          {regenLog}
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => handleExecuteShieldRegeneration(false)}
+                              className="rounded border border-cyan-neon/60 bg-cyan-neon/20 py-1 text-[10px] font-bold text-cyan-neon hover:bg-cyan-neon/30 uppercase font-mono cursor-pointer"
+                            >
+                              🎲 Auto Roll
+                            </button>
+                            <div className="flex gap-1">
+                              <input
+                                type="number"
+                                placeholder={`Manual ${shipShields.sdType}`}
+                                value={manualRollInput}
+                                onChange={(e) => setManualRollInput(e.target.value)}
+                                className="w-full bg-black border border-bridge-border text-[9px] font-mono text-slate-200 rounded px-1.5 py-0.5 text-center"
+                              />
+                              <button
+                                onClick={() => {
+                                  const val = parseInt(manualRollInput, 10)
+                                  if (!isNaN(val)) handleExecuteShieldRegeneration(true, val)
+                                }}
+                                className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-[9px] font-bold text-emerald-400 hover:bg-emerald-500/20 uppercase font-mono cursor-pointer"
+                              >
+                                Set
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
-                    <span className="text-[9px] font-mono text-muted-foreground block">
-                      Continuous background recharge sequence {isLevel4Damage ? "— Halved at Lvl 4 damage" : ""}
-                    </span>
                   </div>
-                  <div className="flex gap-1.5">
-                    <button
-                      onClick={() => setIsAutoRegenActive(true)}
-                      className={`px-2.5 py-1 rounded text-[10px] font-mono font-bold uppercase transition-all tracking-wider cursor-pointer ${
-                        isAutoRegenActive 
-                          ? "bg-emerald-500/30 text-emerald-300 border border-emerald-500 shadow-[0_0_10px_rgba(168,185,129,0.3)]" 
-                          : "bg-slate-900 text-slate-400 border border-bridge-border hover:border-emerald-500/50"
-                      }`}
-                    >
-                      Activate
-                    </button>
-                    <button
-                      onClick={() => setIsAutoRegenActive(false)}
-                      className={`px-2.5 py-1 rounded text-[10px] font-mono font-bold uppercase transition-all tracking-wider cursor-pointer ${
-                        !isAutoRegenActive 
-                          ? "bg-red-500/30 text-red-300 border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]" 
-                          : "bg-slate-900 text-slate-400 border border-bridge-border hover:border-red-500/50"
-                      }`}
-                    >
-                      Deactivate
-                    </button>
-                  </div>
-                </div>
+                )}
 
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-[10px] font-mono">
-                    <span className="text-slate-300">Activation Threshold:</span>
-                    <span className="text-cyan-neon font-bold">{regenThresholdPct}% SP</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="100"
-                    step="5"
-                    value={regenThresholdPct}
-                    onChange={(e) => setRegenThresholdPct(parseInt(e.target.value, 10))}
-                    className="w-full accent-cyan-neon cursor-pointer bg-slate-900 h-1.5 rounded"
-                  />
-                </div>
+                {/* 2. HULL WORKSPACE */}
+                {cardId === "hull" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-muted-foreground uppercase text-[10px]">
+                        Frame: <strong className="text-emerald-400">{shipConfig?.size || "Medium"}</strong>
+                      </span>
+                      <span className={`text-xs font-mono font-bold ${hullPercent === 0 ? "text-red-500" : hullPercent <= 60 ? "text-amber-400" : "text-emerald-400"}`}>
+                        {hull.current} / {isLevel4Damage ? `${effectiveMaxHull} (Base ${fullMaxHull})` : fullMaxHull} HP
+                      </span>
+                    </div>
 
-                {isAutoRegenActive && (
-                  <div className="bg-amber-950/40 border border-amber-500/50 p-2 rounded text-[9px] font-mono text-amber-300 leading-snug animate-pulse">
-                    ⚠️ <strong>WARNING:</strong> Auto-Regeneration active below {regenThresholdPct}% SP. Consumes 1 shield die per cycle {isLevel4Damage ? "(halved at Lvl 4 damage)" : ""}.
+                    <div className="space-y-1">
+                      <div className="relative h-2.5 w-full bg-slate-950 rounded-sm overflow-hidden border border-bridge-border/40 flex">
+                        <div
+                          className={`h-full transition-all duration-300 ${getHullBarColor(hullPercent)}`}
+                          style={{ width: `${hullPercent}%` }}
+                        />
+                        {isLevel4Damage && (
+                          <div
+                            className="absolute right-0 top-0 bottom-0 pointer-events-none"
+                            style={{
+                              width: "50%",
+                              background: "repeating-linear-gradient(45deg, rgba(239, 68, 68, 0.4), rgba(239, 68, 68, 0.4) 4px, rgba(0, 0, 0, 0.8) 4px, rgba(0, 0, 0, 0.8) 8px)",
+                              borderLeft: "2px solid #ef4444"
+                            }}
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleAdjustHull(-5)}
+                        className="flex-1 rounded border border-red-500/40 bg-red-500/10 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 font-mono cursor-pointer"
+                      >
+                        -5 HP
+                      </button>
+                      <button
+                        onClick={() => handleAdjustHull(-1)}
+                        className="flex-1 rounded border border-red-500/40 bg-red-500/10 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 font-mono cursor-pointer"
+                      >
+                        -1 HP
+                      </button>
+                      <button
+                        onClick={() => handleAdjustHull(1)}
+                        className="flex-1 rounded border border-emerald-500/40 bg-emerald-500/10 py-1 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 font-mono cursor-pointer"
+                      >
+                        +1 HP
+                      </button>
+                      <button
+                        onClick={() => handleAdjustHull(5)}
+                        className="flex-1 rounded border border-emerald-500/40 bg-emerald-500/10 py-1 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 font-mono cursor-pointer"
+                      >
+                        +5 HP
+                      </button>
+                    </div>
+
+                    {/* DESTRUCTION SAVES BLOCK */}
+                    {hull.current === 0 && (
+                      <div className="bg-red-950/40 border-2 border-red-500/70 p-3 rounded space-y-2 animate-pulse">
+                        <div className="flex justify-between items-center border-b border-red-500/30 pb-1">
+                          <span className="text-[10px] font-bold text-red-400 uppercase font-mono">
+                            Destruction Saves (0 HP)
+                          </span>
+                          <button
+                            onClick={handleResetDestructionSaves}
+                            className="text-[8px] font-mono text-slate-400 hover:text-slate-200 bg-black/40 px-1.5 py-0.2 rounded border border-bridge-border cursor-pointer"
+                          >
+                            Reset
+                          </button>
+                        </div>
+
+                        {hasHoldTogether && (
+                          <div className="text-[9px] font-mono text-emerald-300">
+                            ★ Hold Together Active: Make save instead of auto-failing on damage[cite: 12]!
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span>Successes: {destructionSaves.successes}/3</span>
+                          <span>Failures: {destructionSaves.failures}</span>
+                        </div>
+
+                        <button
+                          onClick={handleRollDestructionSave}
+                          disabled={destructionSaves.isStable}
+                          className="w-full rounded border border-red-500/60 bg-red-500/20 py-1.5 text-[9px] font-bold text-red-300 hover:bg-red-500/30 disabled:opacity-30 uppercase font-mono cursor-pointer"
+                        >
+                          🎲 Roll Destruction Save (10+)
+                        </button>
+
+                        {destructionSaves.lastRoll !== null && (
+                          <div className="text-[9px] text-center text-slate-200 font-mono">
+                            {destructionSaves.lastResultText}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. ARMOR & DR WORKSPACE */}
+                {cardId === "armor" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="bg-black/60 p-2.5 rounded border border-cyan-neon/40 flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded bg-cyan-neon/20 border border-cyan-neon flex items-center justify-center font-bold text-cyan-neon">
+                          {dynamicAC}
+                        </div>
+                        <div>
+                          <span className="font-bold text-slate-100 block">Armor Class</span>
+                          <span className="text-[9px] text-muted-foreground">{dexLimitLabel}</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-black/60 p-2.5 rounded border border-cyan-neon/40 flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded bg-cyan-neon/20 border border-cyan-neon flex items-center justify-center font-bold text-cyan-neon">
+                          {damageReduction}
+                        </div>
+                        <div>
+                          <span className="font-bold text-slate-100 block">Damage Reduction</span>
+                          <span className="text-[9px] text-muted-foreground">Threshold</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-[9px] font-mono text-cyan-300 space-y-1 bg-black/40 p-2 rounded border border-bridge-border/40">
+                      <p>• Base 10 + {appliedDexMod >= 0 ? `+${appliedDexMod}` : appliedDexMod} (Dex) + {tierACBonus} (Tier {shipTier}) {hasGravityWarpMishap ? "- 2 (Gravity Warp)" : ""} = <strong>{dynamicAC} AC</strong></p>
+                      {hasGravityWarpMishap && (
+                        <p className="text-red-400 font-bold">• ⚠️ Structural gravity warp active (-2 AC). Refit required to clear[cite: 1, 12].</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. SYSTEM DAMAGE WORKSPACE */}
+                {cardId === "systemDamage" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex justify-between items-center border-b border-bridge-border/40 pb-1.5">
+                      <div>
+                        <span className="text-xs font-bold text-white block">{currentDamageDefinition.title}</span>
+                        <span className="text-[9px] text-muted-foreground">Cumulative Failure Rating</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => onUpdateSystemDamageLevel?.((prev) => Math.max(0, (Number(prev) || 0) - 1))}
+                          disabled={numericSystemDamageLevel <= 0}
+                          className="w-7 h-7 rounded bg-black/60 border border-bridge-border text-xs font-bold font-mono text-slate-200 hover:text-cyan-neon disabled:opacity-30 cursor-pointer"
+                        >
+                          -1
+                        </button>
+                        <span className="w-8 text-center font-bold text-sm text-cyan-neon font-mono">
+                          {numericSystemDamageLevel}
+                        </span>
+                        <button
+                          onClick={() => onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 1))}
+                          disabled={numericSystemDamageLevel >= 6}
+                          className="w-7 h-7 rounded bg-black/60 border border-bridge-border text-xs font-bold font-mono text-slate-200 hover:text-red-400 disabled:opacity-30 cursor-pointer"
+                        >
+                          +1
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-2 rounded bg-black/40 border border-bridge-border/40 text-[10px] text-slate-300 leading-relaxed">
+                      {currentDamageDefinition.effect}
+                    </div>
+
+                    <div className="grid grid-cols-6 gap-1">
+                      {[1, 2, 3, 4, 5, 6].map((lvl) => (
+                        <span
+                          key={lvl}
+                          onClick={() => onUpdateSystemDamageLevel?.(lvl === numericSystemDamageLevel ? lvl - 1 : lvl)}
+                          className={`h-2 rounded-xs cursor-pointer transition-all ${
+                            lvl <= numericSystemDamageLevel
+                              ? lvl <= 2 ? "bg-amber-400" : "bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]"
+                              : "bg-slate-900 border border-bridge-border/40"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. STATUSES WORKSPACE */}
+                {cardId === "statuses" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {statuses.length > 0 ? (
+                        statuses.map((st) => (
+                          <div key={st.id} className="flex items-center justify-between bg-black/50 p-2 rounded border border-bridge-border/60 text-xs">
+                            <div>
+                              <span className="font-bold text-amber-300 uppercase block">{st.title}</span>
+                              <span className="text-[9px] text-slate-400 block">{st.duration}</span>
+                            </div>
+                            <button
+                              onClick={() => handleRemoveStatusLocal(st.id)}
+                              className="px-2 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-[9px] text-red-400 hover:bg-red-500/20 cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-muted-foreground py-2 text-center">No active conditions.</p>
+                      )}
+                    </div>
+
+                    {/* Apply Status Widget */}
+                    <div className="p-2 bg-black/40 rounded border border-bridge-border/60 flex flex-col gap-1.5">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <select
+                          value={selectedStatusId}
+                          onChange={(e) => setSelectedStatusId(e.target.value)}
+                          className="bg-black border border-bridge-border text-[9px] text-slate-200 rounded px-1.5 py-1 uppercase"
+                        >
+                          {SHIP_STATUS_OPTIONS.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.title}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          value={customDuration}
+                          onChange={(e) => setCustomDuration(e.target.value)}
+                          placeholder="Duration"
+                          className="bg-black border border-bridge-border text-[9px] text-slate-200 rounded px-1.5 py-1"
+                        />
+                      </div>
+                      <button
+                        onClick={handleAddStatusLocal}
+                        className="w-full py-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 text-[9px] font-bold text-cyan-neon hover:bg-cyan-neon/20 uppercase cursor-pointer"
+                      >
+                        + Apply Condition
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. TACTICAL DEFENSE WORKSPACE */}
+                {cardId === "tacticalDefense" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {hasFeedbackShield && (
+                        <div className="p-2.5 rounded border border-bridge-border bg-black/40 flex flex-col justify-between gap-1.5">
+                          <span className="font-bold text-cyan-neon uppercase">Feedback Shield</span>
+                          <p className="text-[9px] text-muted-foreground leading-relaxed">
+                            Reaction: Retaliate with {feedbackDie} damage matching attack type[cite: 12].
+                          </p>
+                          <button
+                            onClick={handleTriggerFeedbackShield}
+                            className="w-full py-1 rounded border border-cyan-neon bg-cyan-neon/20 hover:bg-cyan-neon/30 text-cyan-neon text-[9px] font-bold uppercase cursor-pointer"
+                          >
+                            ⚡ Retaliate ({feedbackDie})
+                          </button>
+                          {feedbackRollLog && (
+                            <span className="text-[8px] text-amber-300 font-mono">{feedbackRollLog}</span>
+                          )}
+                        </div>
+                      )}
+
+                      {hasInvulnerabilityDrive && (
+                        <div className="p-2.5 rounded border border-purple-500/40 bg-black/40 flex flex-col justify-between gap-1.5">
+                          <span className="font-bold text-purple-300 uppercase">Invulnerability Drive</span>
+                          <p className="text-[9px] text-muted-foreground leading-relaxed">
+                            Damage immunity for 1d4 rounds[cite: 12]. Halves flight speed, doubles turn speed[cite: 12].
+                          </p>
+                          {invulnerabilityRounds > 0 ? (
+                            <button
+                              onClick={handleEndInvulnerabilityDrive}
+                              className="w-full py-1 rounded border border-red-500 bg-red-500/20 text-red-300 text-[9px] font-bold uppercase cursor-pointer"
+                            >
+                              End Immunity &amp; Save
+                            </button>
+                          ) : (
+                            <button
+                              disabled={invulnerabilityUsed}
+                              onClick={handleActivateInvulnerabilityDrive}
+                              className="w-full py-1 rounded border border-purple-500 bg-purple-500/20 text-purple-300 text-[9px] font-bold uppercase cursor-pointer disabled:opacity-40"
+                            >
+                              {invulnerabilityUsed ? "Expended" : "Engage Immunity"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 7. POWER MATRIX WORKSPACE */}
+                {cardId === "powerDice" && (
+                  <div className="flex flex-col gap-3">
+                    <CombatResources 
+                      availablePowerDice={effectiveAvailable}
+                      maxPowerDice={effectiveMax}
+                      powerDieType={powerDieType}
+                      onConsumePowerDice={handleCustomConsume}
+                      standingByUsed={standingByUsed}
+                      onUseStandingBy={onUseStandingBy}
+                      shipTier={shipConfig?.tier ?? 0}
+                    />
+
+                    {isHubAndSpoke && (
+                      <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
+                          <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 w-full">
+                          {Array.from({ length: 2 }).map((_, i) => (
+                            <span
+                              key={i}
+                              className={`h-2.5 flex-1 rounded-xs inline-block ${
+                                i < sharedPoolDice 
+                                  ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
+                                  : "bg-black/80 border border-bridge-border"
+                              }`}
+                            />
+                          ))}
+                        </div>
+
+                        {!canSpendStation && canSpendShared && (
+                          <button
+                            type="button"
+                            onClick={() => handleCustomConsume(1)}
+                            className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
+                          >
+                            CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 8. TELEMETRY WORKSPACE */}
+                {cardId === "telemetry" && (
+                  <div className="flex flex-col gap-3">
+                    <ShipStats 
+                      shipConfig={shipConfig} 
+                      systemDamageLevel={numericSystemDamageLevel} 
+                      statuses={statuses}
+                    />
                   </div>
                 )}
               </div>
-
-              {/* SHIELD DICE TRACKER */}
-              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-bridge-border/40 text-xs font-mono">
-                <div>
-                  <span className="text-[10px] text-muted-foreground uppercase block mb-1">Shield Dice ({shipShields.sdType})</span>
-                  <div className="flex items-center justify-between bg-black/40 px-2.5 py-1.5 rounded border border-bridge-border/40">
-                    <span>Spent: {spentShieldDice} / {shipShields.totalSD}</span>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => {
-                          if (onSpentShieldDiceChange) {
-                            onSpentShieldDiceChange((prev: number) => Math.max(0, prev - 1))
-                          }
-                        }}
-                        className="px-1.5 py-0.5 text-[9px] bg-slate-800 hover:bg-slate-700 rounded text-slate-200 cursor-pointer"
-                      >
-                        -
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (onSpentShieldDiceChange) {
-                            onSpentShieldDiceChange((prev: number) => Math.min(shipShields.totalSD, prev + 1))
-                          }
-                        }}
-                        className="px-1.5 py-0.5 text-[9px] bg-slate-800 hover:bg-slate-700 rounded text-slate-200 cursor-pointer"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <span className="text-[10px] text-muted-foreground uppercase block mb-1">Shield Resistances</span>
-                  <div className="bg-black/40 px-2.5 py-1.5 rounded border border-bridge-border/40 text-[10px] text-cyan-300 font-mono">
-                    {shieldResistancesList.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {shieldResistancesList.map((res, i) => (
-                          <span key={i} className="px-1.5 py-0.5 bg-cyan-950/60 border border-cyan-500/40 rounded">
-                            {res}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">Standard (No Resistances)</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* STRUCTURAL HULL */}
-          <div className="bg-black/50 p-4 rounded border border-bridge-border/60 flex flex-col justify-between">
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <h4 className="text-xs font-bold text-cyan-neon uppercase font-mono">Hull Integrity</h4>
-                <span className={`text-xs font-mono font-bold ${hullPercent === 0 ? "text-red-500" : hullPercent <= 60 ? "text-amber-400" : "text-emerald-400"}`}>
-                  {hull.current} / {isLevel4Damage ? `${effectiveMaxHull} (Base ${fullMaxHull})` : fullMaxHull} HP
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5 mb-4">
-                <button
-                  onClick={() => handleAdjustHull(-5)}
-                  className="flex-1 rounded border border-red-500/40 bg-red-500/10 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 font-mono cursor-pointer"
-                  title="Direct Hull Damage (bypasses shields)"
-                >
-                  -5 HP
-                </button>
-                <button
-                  onClick={() => handleAdjustHull(-1)}
-                  className="flex-1 rounded border border-red-500/40 bg-red-500/10 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 font-mono cursor-pointer"
-                  title="Direct Hull Damage (bypasses shields)"
-                >
-                  -1 HP
-                </button>
-                <button
-                  onClick={() => handleAdjustHull(1)}
-                  className="flex-1 rounded border border-emerald-500/40 bg-emerald-500/10 py-1 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 font-mono cursor-pointer"
-                >
-                  +1 HP
-                </button>
-                <button
-                  onClick={() => handleAdjustHull(5)}
-                  className="flex-1 rounded border border-emerald-500/40 bg-emerald-500/10 py-1 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 font-mono cursor-pointer"
-                >
-                  +5 HP
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-bridge-border/40 text-xs font-mono">
-                <div>
-                  <span className="text-[10px] text-muted-foreground uppercase block mb-1">Hit Dice ({hull.hdType})</span>
-                  <div className="flex items-center justify-between bg-black/40 px-2.5 py-1.5 rounded border border-bridge-border/40">
-                    <span>Spent: {spentHullDice} / {hull.totalHD}</span>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => onSpentHullDiceChange?.(Math.max(0, spentHullDice - 1))}
-                        className="px-1.5 py-0.5 text-[9px] bg-slate-800 hover:bg-slate-700 rounded text-slate-200 cursor-pointer"
-                      >
-                        -
-                      </button>
-                      <button
-                        onClick={() => onSpentHullDiceChange?.(Math.min(hull.totalHD, spentHullDice + 1))}
-                        className="px-1.5 py-0.5 text-[9px] bg-slate-800 hover:bg-slate-700 rounded text-slate-200 cursor-pointer"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <span className="text-[10px] text-muted-foreground uppercase block mb-1">Hull Resistances</span>
-                  <div className="bg-black/40 px-2.5 py-1.5 rounded border border-bridge-border/40 text-[10px] text-emerald-300 font-mono">
-                    {hullResistancesList.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {hullResistancesList.map((res, i) => (
-                          <span key={i} className="px-1.5 py-0.5 bg-emerald-950/60 border border-emerald-500/40 rounded">
-                            {res}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">Standard (No Resistances)</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+            )
+          })}
         </div>
-      </section>
-
-      {/* 4. SHIP SYSTEM DAMAGE (LEVELS 0-6) & ACTIVE STATUSES */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* REVISED SYSTEM DAMAGE LEVEL COUNTER */}
-        <section className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-center mb-3 border-b border-bridge-border/60 pb-1">
-              <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
-                System Damage
-              </h3>
-              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border uppercase ${
-                numericSystemDamageLevel === 0
-                  ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
-                  : numericSystemDamageLevel <= 2
-                  ? "border-amber-400 bg-amber-500/20 text-amber-300"
-                  : "border-red-500 bg-red-500/20 text-red-300 animate-pulse"
-              }`}>
-                LEVEL {numericSystemDamageLevel} / 6
-              </span>
-            </div>
-
-            <div className="bg-black/50 p-4 rounded border border-bridge-border/60 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-base font-mono font-bold text-white block">
-                    {currentDamageDefinition.title}
-                  </span>
-                  <span className="text-[10px] font-mono text-muted-foreground">
-                    Cumulative system breakdown condition
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => onUpdateSystemDamageLevel?.((prev) => Math.max(0, (Number(prev) || 0) - 1))}
-                    disabled={numericSystemDamageLevel <= 0}
-                    className="w-9 h-9 rounded bg-black/60 border border-bridge-border text-base font-bold font-mono text-slate-200 hover:text-cyan-neon hover:border-cyan-neon disabled:opacity-30 cursor-pointer flex items-center justify-center"
-                    title="Repair / Decrease system damage level"
-                  >
-                    -1
-                  </button>
-                  <div className="w-10 h-9 rounded bg-black border border-cyan-neon/40 flex items-center justify-center font-mono font-black text-lg text-cyan-neon">
-                    {numericSystemDamageLevel}
-                  </div>
-                  <button
-                    onClick={() => onUpdateSystemDamageLevel?.((prev) => Math.min(6, (Number(prev) || 0) + 1))}
-                    disabled={numericSystemDamageLevel >= 6}
-                    className="w-9 h-9 rounded bg-black/60 border border-bridge-border text-base font-bold font-mono text-slate-200 hover:text-red-400 hover:border-red-500 disabled:opacity-30 cursor-pointer flex items-center justify-center"
-                    title="Incur / Increase system damage level"
-                  >
-                    +1
-                  </button>
-                </div>
-              </div>
-
-              <div className={`p-3 rounded border text-[11px] font-mono leading-relaxed ${
-                numericSystemDamageLevel === 0
-                  ? "bg-black/40 border-bridge-border/40 text-slate-300"
-                  : numericSystemDamageLevel <= 2
-                  ? "bg-amber-950/30 border-amber-500/40 text-amber-200"
-                  : "bg-red-950/40 border-red-500/60 text-red-200"
-              }`}>
-                {currentDamageDefinition.effect}
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex justify-between text-[9px] font-mono text-muted-foreground">
-                  <span>L0 (Nominal)</span>
-                  <span>L3 (Combat Penalties)</span>
-                  <span>L6 (Blackout)</span>
-                </div>
-                <div className="grid grid-cols-6 gap-1">
-                  {[1, 2, 3, 4, 5, 6].map((lvl) => (
-                    <span
-                      key={lvl}
-                      onClick={() => onUpdateSystemDamageLevel?.(lvl === numericSystemDamageLevel ? lvl - 1 : lvl)}
-                      title={`Click to set Level ${lvl}`}
-                      className={`h-2.5 rounded-sm cursor-pointer transition-all ${
-                        lvl <= numericSystemDamageLevel
-                          ? lvl <= 2
-                            ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]"
-                            : "bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]"
-                          : "bg-slate-900 border border-bridge-border/40 hover:border-cyan-neon/40"
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="text-[9px] font-mono text-muted-foreground italic border-t border-bridge-border/30 pt-2 mt-3">
-            *Levels are cumulative. Incurring damage while at Level 6 renders the vessel inoperable until full shipyard refit.
-          </div>
-        </section>
-
-        {/* SHIP STATUSES */}
-        <section className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-center mb-3 border-b border-bridge-border/60 pb-1">
-              <h3 className="text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase">
-                Active Statuses &amp; Modifiers
-              </h3>
-              <span className="text-[9px] font-mono text-muted-foreground">
-                {statuses.length} Active Condition{statuses.length === 1 ? "" : "s"}
-              </span>
-            </div>
-
-            <div className="space-y-2 mb-4 max-h-48 overflow-y-auto pr-1">
-              {statuses.length > 0 ? (
-                statuses.map((st) => (
-                  <div key={st.id} className="flex items-center justify-between bg-black/50 p-2.5 rounded border border-bridge-border/60">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-amber-300 uppercase font-mono">{st.title}</span>
-                        <span className="text-[9px] font-mono bg-bridge-border/40 px-1.5 py-0.5 rounded text-slate-300">
-                          {st.duration}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-300 font-mono leading-tight">{st.effect}</p>
-                    </div>
-                    <button
-                      onClick={() => handleRemoveStatusLocal(st.id)}
-                      className="rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-[9px] font-bold text-red-400 hover:bg-red-500/20 uppercase shrink-0 ml-2 font-mono cursor-pointer"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground font-mono py-4 text-center">No active status penalties or buffs.</p>
-              )}
-            </div>
-
-            <div className="bg-black/40 p-3 rounded border border-bridge-border/60 space-y-2.5">
-              <span className="text-[10px] font-mono text-cyan-neon uppercase block tracking-wider">
-                Apply Ship Status / Condition
-              </span>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <select
-                  value={selectedStatusId}
-                  onChange={(e) => setSelectedStatusId(e.target.value)}
-                  className="bg-black border border-bridge-border text-[10px] font-mono text-slate-200 rounded px-2 py-1.5 uppercase cursor-pointer"
-                >
-                  {SHIP_STATUS_OPTIONS.map((opt) => (
-                    <option key={opt.id} value={opt.id}>
-                      {opt.title}
-                    </option>
-                  ))}
-                </select>
-
-                <input
-                  type="text"
-                  value={customDuration}
-                  onChange={(e) => setCustomDuration(e.target.value)}
-                  placeholder="Duration (e.g., 1 Round)"
-                  className="bg-black border border-bridge-border text-[10px] font-mono text-slate-200 rounded px-2 py-1.5"
-                />
-              </div>
-
-              {currentSelectedStatusMeta && !currentSelectedStatusMeta.hasLevels && (
-                <p className="text-[10px] font-mono text-slate-300 bg-black/60 p-2 rounded border border-bridge-border/40 leading-snug">
-                  {currentSelectedStatusMeta.defaultEffect}
-                </p>
-              )}
-
-              {currentSelectedStatusMeta?.hasLevels && (
-                <div className="space-y-1.5 pt-1 border-t border-bridge-border/40">
-                  <p className="text-[10px] font-mono text-slate-300 bg-black/60 p-2 rounded border border-bridge-border/40 leading-snug">
-                    {currentSelectedStatusMeta.defaultEffect}
-                  </p>
-                  <div className="flex justify-between items-center text-[10px] font-mono text-amber-300 pt-1">
-                    <span>Slowed Severity Level:</span>
-                    <span className="text-slate-200 font-bold">Level {selectedSlowLevel}</span>
-                  </div>
-                  <div className="grid grid-cols-4 gap-1">
-                    {[1, 2, 3, 4].map((lvl) => (
-                      <button
-                        key={lvl}
-                        onClick={() => setSelectedSlowLevel(lvl)}
-                        className={`py-1 text-[10px] font-mono font-bold rounded border transition-colors cursor-pointer ${
-                          selectedSlowLevel === lvl
-                            ? "bg-amber-400 text-black border-amber-300"
-                            : "bg-black/50 text-slate-300 border-bridge-border hover:border-amber-400/50"
-                        }`}
-                      >
-                        Lvl {lvl}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] font-mono text-cyan-neon italic pt-1">
-                    Effect: {currentSelectedStatusMeta.levels?.[selectedSlowLevel as keyof typeof currentSelectedStatusMeta.levels]}
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={handleAddStatusLocal}
-                className="w-full mt-1 rounded border border-cyan-neon/40 bg-cyan-neon/10 py-1.5 text-[10px] font-bold text-cyan-neon hover:bg-cyan-neon/20 uppercase font-mono tracking-wider cursor-pointer"
-              >
-                + Apply Status to Ship
-              </button>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      {/* 5. INSTALLED STATION MODIFICATIONS */}
-      <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
-        <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase border-b border-bridge-border/60 pb-1">
-          Installed Station Modifications
-        </h3>
-        <StationModifications 
-          station="Defense" 
-          installedMods={installedMods} 
-          onRemoveMod={onRemoveMod} 
-        />
-      </section>
+      )}
     </div>
   )
 }
