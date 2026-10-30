@@ -75,6 +75,7 @@ interface FinanceStationProps {
   pendingOrdnanceCost?: number
   pendingOrdnanceItems?: PendingOrdnanceItem[]
   onPaymentSettlement?: (chartsIncluded: boolean, ordnanceIncluded?: boolean) => void
+  onRestockRations?: (qty: number) => void
 }
 
 export function FinanceStation({
@@ -104,6 +105,7 @@ export function FinanceStation({
   pendingOrdnanceCost = 0,
   pendingOrdnanceItems = [],
   onPaymentSettlement,
+  onRestockRations,
 }: FinanceStationProps) {
 
   // Financial State
@@ -332,11 +334,12 @@ export function FinanceStation({
     const settlementTimestamp = `Day ${currentDay}`
     const chartsWerePaid = includeCharts && pendingCharts > 0
     const ordnanceWasPaid = pendingOrdnanceCost > 0
+    const purchasedRationsQty = restockCreatures * restockDays
 
     if (onAddTransaction) {
       if (pendingRefit > 0) onAddTransaction({ date: settlementTimestamp, description: `Port Services: Refit Cost (${requiredDowntime} downtime)`, category: "Refit", amount: pendingRefit, type: "debit", id: `${Date.now()}-1` } as any)
       if (pendingRefuel > 0) onAddTransaction({ date: settlementTimestamp, description: `Port Services: Refuel Cost (${fuelSpent} units)`, category: "Supplies", amount: pendingRefuel, type: "debit", id: `${Date.now()}-2` } as any)
-      if (pendingRestock > 0) onAddTransaction({ date: settlementTimestamp, description: `Port Services: Restock Cost (${restockCreatures} creatures, ${restockDays} days)`, category: "Supplies", amount: pendingRestock, type: "debit", id: `${Date.now()}-3` } as any)
+      if (pendingRestock > 0) onAddTransaction({ date: settlementTimestamp, description: `Port Services: Restock Cost (${restockCreatures} creatures, ${restockDays} days - ${purchasedRationsQty} Rations)`, category: "Supplies", amount: pendingRestock, type: "debit", id: `${Date.now()}-3` } as any)
       if (pendingDocking > 0) onAddTransaction({ date: settlementTimestamp, description: `Port Services: Docking Fees (${dockDays} days)`, category: "Expense", amount: pendingDocking, type: "debit", id: `${Date.now()}-4` } as any)
       if (chartsWerePaid) onAddTransaction({ date: settlementTimestamp, description: `Port Services: Star Chart Fees & Astrogation Update`, category: "Supplies", amount: pendingCharts, type: "debit", id: `${Date.now()}-5` } as any)
       
@@ -355,6 +358,11 @@ export function FinanceStation({
       if (pendingRefit === 0) {
         onAddTransaction({ date: settlementTimestamp, description: `Standard Maintenance & Refit Completed`, category: "Refit", amount: 0, type: "debit", id: `${Date.now()}-7` } as any)
       }
+    }
+
+    // Restock ration units into the global cargo inventory
+    if (purchasedRationsQty > 0 && onRestockRations) {
+      onRestockRations(purchasedRationsQty)
     }
 
     // Overhaul settlement removes "Used" condition upon payment

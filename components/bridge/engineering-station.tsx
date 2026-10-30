@@ -11,28 +11,13 @@ import {
   Wrench, 
   Gauge, 
   Sliders, 
-  Anchor, 
   ArrowUp, 
   ArrowDown,
   RefreshCw,
-  ShieldCheck,
-  CheckCircle2,
-  AlertCircle,
-  Plus,
-  Minus,
   Sparkles,
-  Wind,
   BatteryCharging,
-  Fuel,
   Activity,
-  Radio,
-  Hexagon,
-  ShieldAlert,
   Users,
-  UserCheck,
-  UserPlus,
-  Lock,
-  Unlock,
   Clock,
   UserMinus,
   Flame,
@@ -43,7 +28,9 @@ import {
   Layers,
   Bookmark,
   Volume2,
-  VolumeX
+  VolumeX,
+  Lock,
+  Unlock
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { StationModifications, Modification } from "./ship-modifications"
@@ -132,7 +119,7 @@ export type EngineeringCardId =
   | "recharge"
   | "tacticalAux"
   | "mods"
-  | "telemetry"
+  | "ship_stats"
 
 interface CustomPreset {
   id: string
@@ -143,8 +130,8 @@ interface CustomPreset {
 const DEFAULT_PRESETS: CustomPreset[] = [
   { id: "power", name: "Power Routing", activeCards: ["reactor", "powerDice"] },
   { id: "combat", name: "Combat Maintenance", activeCards: ["boosts", "patch", "tacticalAux"] },
-  { id: "repair", name: "Damage Control", activeCards: ["patch", "recharge", "telemetry"] },
-  { id: "all", name: "All Systems", activeCards: ["reactor", "powerDice", "boosts", "patch", "recharge", "tacticalAux", "mods", "telemetry"] }
+  { id: "repair", name: "Damage Control", activeCards: ["patch", "recharge"] },
+  { id: "all", name: "All Systems", activeCards: ["reactor", "powerDice", "boosts", "patch", "recharge", "tacticalAux", "mods", "ship_stats"] }
 ]
 
 export interface RechargeResultPayload {
@@ -157,6 +144,8 @@ export interface RechargeResultPayload {
 interface EngineeringStationProps {
   isPoweredOn?: boolean
   onSetPoweredOn?: (powered: boolean) => void
+  autoCycleReactor?: boolean
+  onToggleAutoCycleReactor?: (enabled: boolean) => void
   maxPowerDice?: number
   availablePowerDice?: number
   powerDieType?: string
@@ -239,6 +228,8 @@ const getBaseDiceBySize = (size?: string): number => {
 export function EngineeringStation({
   isPoweredOn = true,
   onSetPoweredOn,
+  autoCycleReactor = false,
+  onToggleAutoCycleReactor,
   maxPowerDice,
   availablePowerDice = 4,
   powerDieType,
@@ -367,6 +358,12 @@ export function EngineeringStation({
     return manifest.filter((m) => m.location !== "engineering" && !m.isPassenger)
   }, [manifest])
 
+  const engineeringMods = useMemo(() => {
+    return installedMods.filter(
+      (m) => m.station?.toLowerCase() === "engineering"
+    )
+  }, [installedMods])
+
   const effectiveMaxPowerDice = shipConfig?.maxPowerDice ?? maxPowerDice ?? 0
   const effectivePowerDieType = shipConfig?.powerDieType ?? powerDieType ?? "d6"
   const effectiveRecoveryRate = shipConfig?.recoveryRate ?? recoveryRate ?? 1
@@ -399,8 +396,9 @@ export function EngineeringStation({
   const effectivePatchSkillMod = shipConfig?.skills?.patch ?? patchSkillMod ?? effectiveConstitutionMod
   const effectiveRegulationSkillMod = shipConfig?.skills?.regulation ?? regulationSkillMod ?? effectiveConstitutionMod
 
-  const shipSize = shipConfig?.size || "small"
-  const isMedium = shipSize.toLowerCase() === "medium"
+  const shipSize = (shipConfig?.size || "small").toLowerCase()
+  const isSmallOrTiny = shipSize === "small" || shipSize === "tiny"
+  const isMedium = shipSize === "medium"
   const shipTier = shipConfig?.tier ?? 0
   const tierUses = Math.max(1, shipTier)
   const baseChassisDice = getBaseDiceBySize(shipConfig?.size)
@@ -417,9 +415,8 @@ export function EngineeringStation({
   const maxSharedPool = isDirect ? effectiveMaxPowerDice : (isHubAndSpoke ? 2 : 0)
   const maxStationCapacity = isDistributed ? 2 : (isHubAndSpoke ? 1 : 0)
 
-  // --- STARTUP / SCRAM PROCEDURES MODAL STATE ---
+  // --- STARTUP / SHUTDOWN PROCEDURES MODAL STATE ---
   const [showStartupModal, setShowStartupModal] = useState<boolean>(false)
-  const [forcedStartupSafety, setForcedStartupSafety] = useState<boolean>(false)
   const [initiationProcedures, setInitiationProcedures] = useState<number>(isPoweredOn ? 10 : 0)
   const targetProcedures = 10
 
@@ -432,7 +429,7 @@ export function EngineeringStation({
   }, [isPoweredOn])
 
   const normalStartupTime = useMemo(() => {
-    switch (shipSize.toLowerCase()) {
+    switch (shipSize) {
       case "tiny": return "1 Minute"
       case "small": return "2 Minutes"
       case "medium": return "5 Minutes"
@@ -450,23 +447,21 @@ export function EngineeringStation({
   }, [currentActualHull, effectiveHullMax, currentActualShields, effectiveShieldMax])
 
   const defaultEngMod = shipConfig?.skills?.regulation ?? effectiveConstitutionMod
-  const [engModInput, setEngModInput] = useState<number>(defaultEngMod)
-  const [manualProcInput, setManualProcInput] = useState<string>("")
-  const [lastDuressRollLog, setLastDuressRollLog] = useState<string | null>(null)
+  const [engModInput] = useState<number>(defaultEngMod)
   const [mishapResultLog, setMishapResultLog] = useState<string | null>(null)
 
   const evaluateDuressCheck = (total: number): { gained: number; label: string } => {
-    if (total >= 30) return { gained: 5, label: "30+ : PERFECT (+5 Procedures)" }
-    if (total >= 26) return { gained: 4, label: "26-29 : MASTERFUL (+4 Procedures)" }
-    if (total >= 21) return { gained: 3, label: "21-25 : EXCELLENT (+3 Procedures)" }
-    if (total >= 16) return { gained: 2, label: "16-20 : BREAKTHROUGH (+2 Procedures)" }
-    if (total >= 10) return { gained: 1, label: "10-15 : ADEQUATE (+1 Procedure)" }
-    return { gained: 0, label: "≤ 9 : FAILED (0 Procedures)" }
+    if (total >= 30) return { gained: 5, label: "30+ : 5 Checklists Completed" }
+    if (total >= 26) return { gained: 4, label: "26-29 : 4 Checklists Completed" }
+    if (total >= 21) return { gained: 3, label: "21-25 : 3 Checklists Completed" }
+    if (total >= 16) return { gained: 2, label: "16-20 : 2 Checklists Completed" }
+    if (total >= 10) return { gained: 1, label: "10-15 : 1 Checklist Completed" }
+    return { gained: 0, label: "≤ 9 : No Progress" }
   }
 
   const handleRollDuressCheck = () => {
-    let rollA = Math.floor(Math.random() * 20) + 1
-    let rollB = Math.floor(Math.random() * 20) + 1
+    const rollA = Math.floor(Math.random() * 20) + 1
+    const rollB = Math.floor(Math.random() * 20) + 1
     let keptD20 = rollA
 
     if (duressCondition === "advantage") {
@@ -479,33 +474,15 @@ export function EngineeringStation({
     const evalResult = evaluateDuressCheck(total)
 
     setInitiationProcedures((prev) => Math.min(targetProcedures, prev + evalResult.gained))
-    setLastDuressRollLog(
+    setMishapResultLog(
       `Check: d20 [${duressCondition !== "normal" ? `${rollA}, ${rollB} -> Kept ${keptD20}` : keptD20}] + Mod (${engModInput >= 0 ? `+${engModInput}` : engModInput}) = ${total} (${evalResult.label})`
     )
   }
 
-  const handleApplyManualProcedures = (e: React.FormEvent) => {
-    e.preventDefault()
-    const val = parseInt(manualProcInput, 10)
-    if (!isNaN(val)) {
-      setInitiationProcedures((prev) => Math.min(targetProcedures, Math.max(0, prev + val)))
-      setManualProcInput("")
-    }
-  }
-
-  const handleResetStartup = () => {
-    setInitiationProcedures(0)
-    setLastDuressRollLog(null)
-    setMishapResultLog(null)
-    setForcedStartupSafety(false)
-    if (onSetPoweredOn) onSetPoweredOn(false)
-  }
-
   const handleShutdownShip = () => {
-    if (confirm("CONFIRM REACTOR SCRAM: Shut down main reactor and drop ship to cold & dark?")) {
+    if (confirm("EMERGENCY REACTOR SHUTDOWN: Shut down main reactor and drop ship to offline state?")) {
       setInitiationProcedures(0)
-      setMishapResultLog("🛑 REACTOR SCRAMMED: Vessel power grid offline.")
-      setForcedStartupSafety(false)
+      setMishapResultLog("🛑 Reactor shut down. Vessel power offline.")
       if (onSetPoweredOn) onSetPoweredOn(false)
       setShowStartupModal(false)
     }
@@ -516,19 +493,15 @@ export function EngineeringStation({
     let description = ""
 
     if (dieRoll === 20 && bonus === 0) {
-      description = "Natural 20 with 0 procedures! Ship is unscathed, but starts with 0 power dice available."
-      if (onUpdateSharedPool) onUpdateSharedPool(0)
-      if (onUpdateStationPools) {
-        onUpdateStationPools({ engines: 0, communications: 0, weapons: 0, sensors: 0, defense: 0 })
-      }
+      description = "Natural 20 with 0 checklists! Clean ignition, but starts with 0 power dice available."
     } else if (total >= 20) {
-      description = `Total ${total} (20+): Clean takeoff! The ship suffers no adverse consequences.`
+      description = `Total ${total} (20+): Clean ignition. Main systems online without consequences.`
     } else if (total >= 18) {
       description = `Total ${total} (18-19): Navcomputer is disabled until ship recharges.`
       onAddStatus?.({
         id: `navcomputer-disabled-${Date.now()}`,
         title: "NAVCOMPUTER DISABLED // OFFLINE",
-        effect: "Hyperspace calculations offline. Blind jumps without calculations risk catastrophic drift unless a Nat 20 is rolled.",
+        effect: "Hyperspace calculations offline until short recharge.",
         duration: "Until Ship Recharges",
       })
     } else if (total >= 15) {
@@ -573,18 +546,18 @@ export function EngineeringStation({
 
   const handleEngageStartup = () => {
     if (initiationProcedures >= targetProcedures) {
-      setMishapResultLog("✅ Optimal Start-Up: All 10 initiation procedures completed cleanly. Primary reactor online.")
+      setMishapResultLog("✅ Optimal Start-Up: All 10 ignition checklists completed cleanly. Primary reactor online.")
       if (onSetPoweredOn) onSetPoweredOn(true)
       return
     }
 
     const d20 = Math.floor(Math.random() * 20) + 1
     const resultText = resolveMishapTableRoll(d20, initiationProcedures)
-    setMishapResultLog(`⚠️ FORCED TAKEOFF (Roll ${d20} + ${initiationProcedures} proc): ${resultText}`)
+    setMishapResultLog(`⚠️ FORCED START (Roll ${d20} + ${initiationProcedures} proc): ${resultText}`)
     if (onSetPoweredOn) onSetPoweredOn(true)
   }
 
-  // --- MODIFICATION FEATURE DETECTION ---
+  // --- HARDWARE FEATURE DETECTION ---
   const hasPowerBackup = installedMods.some((m) => m.name.toUpperCase().includes("POWER BACKUP"))
   const hasEmergencyGenerator = installedMods.some((m) => m.name.toUpperCase().includes("EMERGENCY GENERATOR"))
   const hasDamageControl = installedMods.some((m) => m.name.toUpperCase().includes("DAMAGE CONTROL SYSTEM"))
@@ -607,10 +580,10 @@ export function EngineeringStation({
 
   const [priorityOrder, setPriorityOrder] = useState<StationKey[]>([
     "engines",
-    "communications",
+    "defense",
     "weapons",
     "sensors",
-    "defense",
+    "communications",
   ])
 
   const [reactorLog, setReactorLog] = useState<string | null>(null)
@@ -684,9 +657,7 @@ export function EngineeringStation({
         rollDescription = `Fuel Cell Reactor Cycle: Stable output = +1 Die.`
       }
 
-      let fullLog = ""
       let shieldRegenLog = ""
-
       if (autoShieldRegen && currentActualShields !== undefined && effectiveShieldMax > 0) {
         const currentPercent = (currentActualShields / effectiveShieldMax) * 100
         const threshold = shieldRegenThreshold
@@ -707,68 +678,14 @@ export function EngineeringStation({
         }
       }
 
-      if (generatedAmount <= 0) {
-        fullLog = `${rollDescription} Reactor cycle yielded 0 power dice — no power generated this round.${shieldRegenLog}`
-      } else {
-        let diceLeftToAllocate = generatedAmount
-        let routingNotes: string[] = []
-
-        let updatedShared = sharedPoolDice
-        const updatedStations = { ...stationPools }
-
-        if (isHubAndSpoke) {
-          const sharedSpace = maxSharedPool - updatedShared
-          const toShared = Math.min(diceLeftToAllocate, Math.max(0, sharedSpace))
-          if (toShared > 0) {
-            updatedShared += toShared
-            diceLeftToAllocate -= toShared
-            routingNotes.push(`+${toShared} to Shared Pool`)
-          }
-        }
-
-        if (isDistributed || isHubAndSpoke) {
-          for (const station of priorityOrder) {
-            if (diceLeftToAllocate <= 0) break
-            const spaceAtStation = maxStationCapacity - (updatedStations[station] ?? 0)
-            if (spaceAtStation > 0) {
-              const toAdd = Math.min(diceLeftToAllocate, spaceAtStation)
-              updatedStations[station] = (updatedStations[station] ?? 0) + toAdd
-              diceLeftToAllocate -= toAdd
-              routingNotes.push(`+${toAdd} to ${STATION_NAMES[station]}`)
-            }
-          }
-        } else {
-          const sharedSpace = effectiveMaxPowerDice - updatedShared
-          const toAdd = Math.min(diceLeftToAllocate, sharedSpace)
-          updatedShared += toAdd
-          diceLeftToAllocate -= toAdd
-          if (toAdd > 0) {
-            routingNotes.push(`+${toAdd} to Central Pool`)
-          }
-        }
-
-        if (diceLeftToAllocate > 0) {
-          routingNotes.push(`NOTICE: All systems full! ${diceLeftToAllocate} die lost.`)
-        }
-
-        if (onUpdateSharedPool) {
-          onUpdateSharedPool(updatedShared)
-        }
-        if (onUpdateStationPools) {
-          onUpdateStationPools(updatedStations)
-        }
-
-        fullLog = `${rollDescription} [Routing: ${routingNotes.join(" | ") || "Pools Full"} ]${shieldRegenLog}`
-      }
-
-      setReactorLog(fullLog)
+      setReactorLog(`${rollDescription}${shieldRegenLog}`)
 
       if (onCycleReactor) {
         onCycleReactor(generatedAmount)
       }
       
       setIsCycling(false)
-    }, 800)
+    }, 600)
   }
 
   const executeBoostCheck = (rollTotal: number) => {
@@ -778,7 +695,7 @@ export function EngineeringStation({
     setBoostActionUsed(true)
 
     if (!isSuccess) {
-      setBoostFeedback(`Check total (${rollTotal}) failed DC 10. Boost action failed!`)
+      setBoostFeedback(`Check total (${rollTotal}) failed DC 10. Boost action failed.`)
       return
     }
 
@@ -871,22 +788,23 @@ export function EngineeringStation({
     const total = d20 + effectivePatchSkillMod
     const isSuccess = total >= patchDC
 
-    const rollHullDie = () => Math.floor(Math.random() * 8) + 1
+    const dieSides = parseInt(effectiveHullDieType.replace(/[^0-9]/g, ""), 10) || 8
+    const rollHullDie = () => Math.floor(Math.random() * dieSides) + 1
 
     let restoredAmount = 0
     const autoProtocolsBonus = hasAutomatedProtocols ? Math.max(1, effectiveIntelligenceMod) : 0
 
     if (isSuccess) {
       restoredAmount = rollHullDie() + autoProtocolsBonus
-      setPatchFeedback(`Patch SUCCESS (Rolled ${total} vs DC ${patchDC}). Restored ${restoredAmount} Hull Integrity${autoProtocolsBonus > 0 ? ` (+${autoProtocolsBonus} Int Mod)` : ""}.`)
+      setPatchFeedback(`Patch SUCCESS (Rolled ${total} vs DC ${patchDC}). Restored ${restoredAmount} Hull Points (${effectiveHullDieType}${autoProtocolsBonus > 0 ? ` +${autoProtocolsBonus} Int` : ""}).`)
     } else {
       const die1 = rollHullDie()
       const die2 = rollHullDie()
       restoredAmount = Math.min(die1, die2) + autoProtocolsBonus
-      setPatchFeedback(`Patch FAILED (Rolled ${total} vs DC ${patchDC}). Took lesser of two hull dice: Restored ${restoredAmount} Hull Integrity${autoProtocolsBonus > 0 ? ` (+${autoProtocolsBonus} Int Mod)` : ""}.`)
+      setPatchFeedback(`Patch FAILED (Rolled ${total} vs DC ${patchDC}). Lesser of 2 ${effectiveHullDieType}: Restored ${restoredAmount} Hull Points${autoProtocolsBonus > 0 ? ` (+${autoProtocolsBonus} Int)` : ""}.`)
     }
 
-    if (onPatchHull) {
+    if (onPatchHull && restoredAmount > 0) {
       onPatchHull(restoredAmount)
     }
   }
@@ -919,7 +837,7 @@ export function EngineeringStation({
     const selfDamage = Math.floor(Math.random() * 8) + 1
     setBaffleUses((prev) => prev + 1)
     if (onPatchHull) onPatchHull(-selfDamage)
-    setTacticalFeedback(`Electronic Baffle Activated: Suffered ${selfDamage} direct hull damage. Blinded, Ionized, Shocked, or Stunned condition cleared!`)
+    setTacticalFeedback(`Electronic Baffle Activated: Suffered ${selfDamage} direct hull damage. Condition cleared!`)
   }
 
   const handleTriggerAltFuel = () => {
@@ -1013,9 +931,9 @@ export function EngineeringStation({
         </div>
 
         <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
-          <span>CONSOLE</span>
+          <span>PANEL</span>
           <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
-            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+            {isOpen ? "OPEN ▲" : "CLOSED ▼"}
           </span>
         </div>
       </button>
@@ -1043,7 +961,7 @@ export function EngineeringStation({
                 }`}
               >
                 <Flame className="h-3 w-3" />
-                <span>{isPoweredOn ? "Core: Online" : `Cold Start (${initiationProcedures}/10)`}</span>
+                <span>{isPoweredOn ? "Core: Online" : `Reactor Offline (${initiationProcedures}/10)`}</span>
               </button>
 
               {isPoweredOn && (
@@ -1051,10 +969,10 @@ export function EngineeringStation({
                   type="button"
                   onClick={handleShutdownShip}
                   className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border border-rose-500/50 bg-rose-950/30 text-rose-300 hover:bg-rose-900/50 transition cursor-pointer"
-                  title="Emergency SCRAM / Shutdown Ship"
+                  title="Emergency Reactor Shutdown"
                 >
                   <PowerOff className="h-3 w-3" />
-                  <span>SCRAM</span>
+                  <span>Shutdown</span>
                 </button>
               )}
             </div>
@@ -1062,7 +980,7 @@ export function EngineeringStation({
           <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
             {shipConfig?.name?.toUpperCase() || "VESSEL"} // {powerCoupling.toUpperCase()} //{" "}
             <span className={isPoweredOn ? "text-emerald-400 font-bold" : "text-amber-400 font-bold animate-pulse"}>
-              {isPoweredOn ? "REACTOR BUS ENERGIZED" : "COLD & DARK (AUX BATTERY)"}
+              {isPoweredOn ? "REACTOR BUS ENERGIZED" : "OFFLINE (AUXILIARY BATTERY)"}
             </span>
           </p>
         </div>
@@ -1077,7 +995,7 @@ export function EngineeringStation({
 
           <span className="rounded border border-cyan-neon/30 bg-cyan-neon/10 px-2 py-0.5 text-[9px] font-bold text-cyan-neon flex items-center gap-1">
             <Zap className="h-3 w-3 text-amber-400" />
-            {isDirect ? `CENTRAL: ${sharedPoolDice}/${maxSharedPool}` : isHubAndSpoke ? `SHARED: ${sharedPoolDice}/${maxSharedPool}` : "DISTRIBUTED MATRIX"}
+            {isDirect ? `CENTRAL: ${availablePowerDice}/${effectiveMaxPowerDice}` : isHubAndSpoke ? `SHARED: ${sharedPoolDice}/${maxSharedPool}` : "DISTRIBUTED MATRIX"}
           </span>
         </div>
       </header>
@@ -1109,9 +1027,18 @@ export function EngineeringStation({
           })}
           <button
             type="button"
+            onClick={() => applyPreset([])}
+            disabled={openCards.length === 0}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-slate-700 bg-black/40 text-slate-400 hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+            title="Collapse all open drawers"
+          >
+            Clear All
+          </button>
+          <button
+            type="button"
             onClick={handleSaveCustomPreset}
             className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
-            title="Save current layout to local browser"
+            title="Save layout view"
           >
             <Bookmark className="w-3 h-3" /> Save View
           </button>
@@ -1136,7 +1063,7 @@ export function EngineeringStation({
         </div>
       </div>
 
-      {/* 3. COMPACT CREW ROSTER HUD */}
+      {/* 3. PERSISTENT CREW ROSTER HUD */}
       <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
@@ -1225,7 +1152,7 @@ export function EngineeringStation({
           "reactor",
           "Reactor Core",
           getShortReactorDisplayName(rawReactorType),
-          isCycling ? "Cycling..." : "Spool Ready",
+          autoCycleReactor ? "Auto-Refresh ON" : isCycling ? "Cycling..." : "Cycle Ready",
           <Zap className="w-3 h-3 text-amber-400" />,
           "text-amber-300"
         )}
@@ -1233,7 +1160,7 @@ export function EngineeringStation({
         {renderSnapshotCard(
           "powerDice",
           "Power Matrix",
-          isDistributed ? "Local Pools" : `${sharedPoolDice}/${maxSharedPool} Dice`,
+          isDistributed ? "Local Pools" : `${availablePowerDice}/${effectiveMaxPowerDice} Dice`,
           powerCoupling.replace(" Power Coupling", ""),
           <Gauge className="w-3 h-3 text-cyan-neon" />,
           "text-cyan-neon"
@@ -1278,17 +1205,17 @@ export function EngineeringStation({
         {renderSnapshotCard(
           "mods",
           "Hardware",
-          `${installedMods.length} Mods`,
-          "Station Systems",
+          `${engineeringMods.length} Mods`,
+          "Engineering Mods",
           <Cpu className="w-3 h-3 text-purple-400" />,
           "text-purple-300"
         )}
 
         {renderSnapshotCard(
-          "telemetry",
-          "Telemetry",
-          `${currentActualHull}/${effectiveHullMax} HP`,
-          `${currentActualShields}/${effectiveShieldMax} SP`,
+          "ship_stats",
+          "Ship Stats",
+          `AC ${shipConfig?.armorClass ?? 12}`,
+          "Armor Class",
           <Activity className="w-3 h-3 text-cyan-neon" />,
           "text-cyan-neon"
         )}
@@ -1298,8 +1225,8 @@ export function EngineeringStation({
       {openCards.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
           <Cpu className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
-          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL ENGINEERING DRAWERS COLLAPSED</p>
-          <p className="text-[10px] mt-1 text-slate-500">Tap any of the status cards above or choose an operational preset.</p>
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL ENGINEERING PANELS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any status card above or select a preset to expand controls.</p>
         </div>
       ) : (
         <div
@@ -1332,7 +1259,7 @@ export function EngineeringStation({
                       {cardId === "recharge" && "Ship Recharge & Maintenance"}
                       {cardId === "tacticalAux" && "Auxiliary Tactical Systems"}
                       {cardId === "mods" && "Installed Engineering Hardware"}
-                      {cardId === "telemetry" && "Core Vessel Telemetry Snapshot"}
+                      {cardId === "ship_stats" && "Ship Ability Scores & Statistics"}
                     </h3>
                   </div>
 
@@ -1341,7 +1268,7 @@ export function EngineeringStation({
                       type="button"
                       onClick={() => setMaximizedCard((prev) => (prev === cardId ? null : cardId))}
                       className="p-1 rounded text-slate-400 hover:text-cyan-neon hover:bg-black/40 cursor-pointer"
-                      title={isMax ? "Restore Multi-Window" : "Maximize to Full-Width"}
+                      title={isMax ? "Restore Multi-Window" : "Maximize"}
                     >
                       {isMax ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                     </button>
@@ -1349,7 +1276,7 @@ export function EngineeringStation({
                       type="button"
                       onClick={() => toggleCard(cardId)}
                       className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
-                      title="Collapse Drawer"
+                      title="Collapse Panel"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1377,14 +1304,39 @@ export function EngineeringStation({
                       <div className="rounded border border-bridge-border p-2 bg-black/30">
                         <span className="text-[9px] text-muted-foreground uppercase block">Core State</span>
                         <span className={`font-bold block ${isPoweredOn ? "text-emerald-400" : "text-amber-400 animate-pulse"}`}>
-                          {isPoweredOn ? "ONLINE" : "DARK"}
+                          {isPoweredOn ? "ONLINE" : "OFFLINE"}
                         </span>
                       </div>
                     </div>
 
+                    {/* AUTOMATED TURN-END REFRESH SWITCH */}
+                    <div className="flex items-center justify-between p-2.5 rounded bg-black/60 border border-bridge-border text-xs gap-3">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-slate-200 uppercase text-[10px] flex items-center gap-1.5">
+                          <RefreshCw className={`w-3.5 h-3.5 ${autoCycleReactor ? "text-emerald-400 animate-spin" : "text-slate-400"}`} />
+                          Automated Turn-End Reactor Cycle
+                        </span>
+                        <span className="text-[9px] text-muted-foreground">
+                          Auto-cycles reactor immediately when all deployed PC crew check off their turn.
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => onToggleAutoCycleReactor?.(!autoCycleReactor)}
+                        className={`px-3 py-1 rounded text-[10px] font-bold uppercase transition border cursor-pointer shrink-0 ${
+                          autoCycleReactor
+                            ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.3)] animate-pulse"
+                            : "bg-slate-900 border-slate-700 text-slate-500 hover:text-white"
+                        }`}
+                      >
+                        {autoCycleReactor ? "AUTO: ON" : "MANUAL ONLY"}
+                      </button>
+                    </div>
+
                     <div className="p-3 rounded border border-amber-500/30 bg-amber-500/5 flex flex-col gap-2">
                       <p className="text-[10px] text-muted-foreground leading-relaxed">
-                        Spools up the main core, replenishing power dice according to reactor specifications, resetting movement budgets, clearing turn flags, and advancing boost durations.
+                        Cycle Reactor: Advances the combat round, replenishes station power dice, resets movement budgets, and unchecks crew turns.
                       </p>
                       <button
                         type="button"
@@ -1397,7 +1349,7 @@ export function EngineeringStation({
                         }`}
                       >
                         <RotateCw className={`h-4 w-4 ${isCycling ? "animate-spin" : ""}`} />
-                        {isCycling ? "Spooling Core..." : "Cycle Reactor (End of Round)"}
+                        {isCycling ? "Spooling Core..." : "Cycle Reactor (Manual Round End)"}
                       </button>
                     </div>
 
@@ -1607,7 +1559,7 @@ export function EngineeringStation({
                     </div>
 
                     <p className="text-[10px] text-muted-foreground leading-relaxed">
-                      Make a Constitution (Patch) check. Success: Roll Hull Die normally{hasAutomatedProtocols ? ` + ${Math.max(1, effectiveIntelligenceMod)} (Int Mod)` : ""}. Failure: Roll Hull Die twice, take lesser amount{hasAutomatedProtocols ? ` + ${Math.max(1, effectiveIntelligenceMod)} (Int Mod)` : ""}.
+                      Make a Constitution (Patch) check. Success: Roll {effectiveHullDieType} Hull Die{hasAutomatedProtocols ? ` + ${Math.max(1, effectiveIntelligenceMod)} (Int Mod)` : ""}. Failure: Roll {effectiveHullDieType} twice and take lesser{hasAutomatedProtocols ? ` + ${Math.max(1, effectiveIntelligenceMod)} (Int Mod)` : ""}.
                     </p>
 
                     <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -1650,8 +1602,8 @@ export function EngineeringStation({
                     {patchFeedback && (
                       <div className="p-2.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-300 flex flex-col gap-1">
                         <span>{patchFeedback}</span>
-                        <span className="text-[10px] text-amber-300 font-bold">
-                          📢 NOTIFY DEFENSE STATION: Manually update hull by this amount.
+                        <span className="text-[10px] text-emerald-400 font-bold">
+                          ✓ Hull Integrity automatically updated.
                         </span>
                       </div>
                     )}
@@ -1844,8 +1796,8 @@ export function EngineeringStation({
                   </div>
                 )}
 
-                {/* 8. CORE TELEMETRY SNAPSHOT WORKSPACE */}
-                {cardId === "telemetry" && (
+                {/* 8. SHIP ABILITY SCORES & STATISTICS WORKSPACE */}
+                {cardId === "ship_stats" && (
                   <div className="flex flex-col gap-3">
                     <ShipStats shipConfig={shipConfig} />
                   </div>
@@ -1857,18 +1809,18 @@ export function EngineeringStation({
       )}
 
       {/* 6. CHASSIS TACTICAL SURGES & REACTIONS (ALWAYS READY TRAY AT BOTTOM) */}
-      {(shipTier >= 3) && (
+      {shipTier >= 3 && (
         <section className="rounded-md border border-cyan-neon/40 bg-bridge-panel p-2.5 shadow-[0_0_12px_rgba(0,255,255,0.04)] flex flex-col gap-2">
           <div className="flex items-center justify-between border-b border-bridge-border/60 pb-1">
             <h3 className="text-[10px] font-bold tracking-[0.2em] text-cyan-neon uppercase flex items-center gap-1.5">
               <Sparkles className="h-3.5 w-3.5 text-cyan-neon" />
-              Tactical Surges &amp; Stances (Tier {shipTier})
+              Chassis Tactical Surges (Tier {shipTier})
             </h3>
             <span className="text-[8px] font-mono text-muted-foreground">COMBAT ACTIONS</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-            {shipTier >= 4 && (
+            {isSmallOrTiny && shipTier >= 4 && (
               <button
                 type="button"
                 disabled={standingByUsed}
@@ -1883,11 +1835,11 @@ export function EngineeringStation({
                   <span>Standing By</span>
                   <span>{standingByUsed ? "USED" : "READY"}</span>
                 </div>
-                <span className="text-[8px] text-slate-400 block mt-0.5">Push limits: +1 Extra Action</span>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: +1 Extra Action</span>
               </button>
             )}
 
-            {shipTier >= 5 && !isMedium && (
+            {isSmallOrTiny && shipTier >= 5 && (
               <button
                 type="button"
                 disabled={leafOnTheWindUsed}
@@ -1906,7 +1858,7 @@ export function EngineeringStation({
               </button>
             )}
 
-            {hasVersatileTransport && (
+            {isMedium && hasVersatileTransport && (
               <button
                 type="button"
                 disabled={versatileTransportUsed >= versatileMax}
@@ -1921,11 +1873,11 @@ export function EngineeringStation({
                   <span>Versatile Transport</span>
                   <span>{versatileMax - versatileTransportUsed}/{versatileMax}</span>
                 </div>
-                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Trigger Advantage</span>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Grant Advantage</span>
               </button>
             )}
 
-            {hasBestShip && (
+            {isMedium && hasBestShip && (
               <button
                 type="button"
                 disabled={bestShipInVerseUsed}
@@ -1940,7 +1892,7 @@ export function EngineeringStation({
                   <span>Best Ship in 'Verse</span>
                   <span>{bestShipInVerseUsed ? "EXP" : "READY"}</span>
                 </div>
-                <span className="text-[8px] text-slate-400 block mt-0.5">Action: Un-enhanced Resistance</span>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Action: Gain Resistance</span>
               </button>
             )}
           </div>
@@ -1955,7 +1907,7 @@ export function EngineeringStation({
               <div className="flex items-center gap-2">
                 <Flame className="h-4 w-4 text-amber-400" />
                 <h3 className="text-sm font-bold tracking-widest text-cyan-neon uppercase">
-                  Reactor Ignition &amp; Start-Up Protocol
+                  Reactor Ignition Protocol
                 </h3>
               </div>
               <button onClick={() => setShowStartupModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
@@ -1964,13 +1916,13 @@ export function EngineeringStation({
             </div>
 
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300">Warm-Up: <strong className="text-amber-300">{normalStartupTime}</strong></span>
+              <span className="text-slate-300">Nominal Warm-Up: <strong className="text-amber-300">{normalStartupTime}</strong></span>
               <span className="text-xs text-cyan-neon font-bold uppercase">{duressCondition}</span>
             </div>
 
             <div className="bg-black/60 p-3 rounded border border-bridge-border/60 flex flex-col gap-2">
               <div className="flex justify-between text-xs font-bold text-slate-200">
-                <span>Procedures Completed:</span>
+                <span>Checklists Completed:</span>
                 <span className="text-cyan-neon">{initiationProcedures} / {targetProcedures}</span>
               </div>
               <div className="h-2 w-full bg-slate-900 rounded-sm overflow-hidden">

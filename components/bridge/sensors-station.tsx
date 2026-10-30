@@ -8,14 +8,6 @@ import {
   Radio, 
   Trash2, 
   ShieldAlert, 
-  Eye, 
-  Flame, 
-  Bug, 
-  ZapOff, 
-  Compass, 
-  ShieldMinus, 
-  AlertOctagon, 
-  EyeOff, 
   Users, 
   CheckCircle2, 
   Clock, 
@@ -31,9 +23,10 @@ import {
   Zap,
   Cpu,
   Radar,
-  Sliders,
   Send,
-  Target
+  Target,
+  Sparkles,
+  AlertOctagon
 } from "lucide-react"
 import type { SensorContact } from "./gm-station"
 import type { ShipConfig } from "./ship-setup"
@@ -57,7 +50,9 @@ function playFlatGlassClick() {
   try {
     const ctx = getAudioContext()
     if (!ctx) return
-    if (ctx.state === "suspended") ctx.resume()
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {})
+    }
 
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -82,7 +77,9 @@ function playSubtleEngage() {
   try {
     const ctx = getAudioContext()
     if (!ctx) return
-    if (ctx.state === "suspended") ctx.resume()
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {})
+    }
 
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -120,7 +117,7 @@ export type SensorsCardId =
   | "contacts"
   | "tacticalModules"
   | "mods"
-  | "telemetry"
+  | "ship_stats"
 
 interface CustomPreset {
   id: string
@@ -129,11 +126,19 @@ interface CustomPreset {
 }
 
 const DEFAULT_PRESETS: CustomPreset[] = [
-  { id: "radar", name: "Radar & Contacts", activeCards: ["arrayStatus", "contacts", "powerDice"] },
+  { id: "radar", name: "Radar & Contacts", activeCards: ["arrayStatus", "contacts"] },
   { id: "recon", name: "Active Recon", activeCards: ["activeScan", "sensorProbe", "contacts"] },
   { id: "ew", name: "Tactical ECM", activeCards: ["tacticalModules", "powerDice", "arrayStatus"] },
-  { id: "all", name: "All Sensor Systems", activeCards: ["arrayStatus", "powerDice", "activeScan", "sensorProbe", "contacts", "tacticalModules", "mods", "telemetry"] }
+  { id: "all", name: "All Sensor Systems", activeCards: ["arrayStatus", "powerDice", "activeScan", "sensorProbe", "contacts", "tacticalModules", "mods", "ship_stats"] }
 ]
+
+export interface SensorsEcmState {
+  flares?: number
+  buzzDroids?: number
+  dampener?: number
+  disruptor?: number
+  threatTracker?: number
+}
 
 interface SensorsStationProps {
   availablePowerDice?: number
@@ -166,6 +171,8 @@ interface SensorsStationProps {
   manifest?: ManifestMember[]
   onAssignCrew?: (memberId: string, targetLocation: ShipCompartmentId) => void
   onToggleTurn?: (memberId: string) => void
+  ecmUses?: SensorsEcmState
+  onUpdateEcmUses?: (updater: SensorsEcmState | ((prev: SensorsEcmState) => SensorsEcmState)) => void
 }
 
 export function SensorsStation({
@@ -196,15 +203,17 @@ export function SensorsStation({
   onUseStandingBy,
   leafOnTheWindUsed = false,
   onUseLeafOnTheWind,
-  versatileTransportUsed,
+  versatileTransportUsed = 0,
   onUpdateVersatileTransportUsed,
-  bestShipInVerseUsed,
+  bestShipInVerseUsed = false,
   onUpdateBestShipInVerseUsed,
   systemDamageLevel = 0,
   isBlinded = false,
   manifest = [],
   onAssignCrew,
   onToggleTurn,
+  ecmUses: externalEcmUses,
+  onUpdateEcmUses,
 }: SensorsStationProps) {
   // --- MFD MODULAR DECK STATE (PER-CLIENT PERSISTENCE) ---
   const [openCards, setOpenCards] = useState<SensorsCardId[]>(() => {
@@ -270,8 +279,24 @@ export function SensorsStation({
     return manifest.filter((m) => m.location !== "sensors" && !m.isPassenger)
   }, [manifest])
 
+  const sensorsMods = useMemo(() => {
+    return installedMods.filter(
+      (m) => m.station?.toLowerCase() === "sensors"
+    )
+  }, [installedMods])
+
   const shipTier = typeof shipConfig?.tier === "number" ? shipConfig.tier : 0
+  const shipSize = (shipConfig?.size || "small").toLowerCase()
+  const isSmallOrTiny = shipSize === "small" || shipSize === "tiny"
+  const isMedium = shipSize === "medium"
   const tierUses = Math.max(1, shipTier)
+
+  // Chassis Surge Gating
+  const hasStandingBy = isSmallOrTiny && shipTier >= 4
+  const hasLeafOnTheWind = isSmallOrTiny && shipTier >= 5
+  const hasVersatileTransport = isMedium && shipTier >= 3
+  const versatileMaxUses = 2 * shipTier
+  const hasBestShip = isMedium && shipTier >= 5
 
   // Scan States & Mastery Choice workflow
   const [activeScan, setActiveScan] = useState(false)
@@ -300,7 +325,7 @@ export function SensorsStation({
   // Clear Contact Warning State
   const [clearingContactId, setClearingContactId] = useState<string | null>(null)
 
-  // --- SENSORS MODIFICATIONS DETECTION ---
+  // Hardware Feature Detection
   const hasScannerPremium = installedMods.some((m) => m.name.toUpperCase().includes("SCANNER, PREMIUM"))
   const hasScannerPrototype = installedMods.some((m) => m.name.toUpperCase().includes("SCANNER, PROTOTYPE"))
   const hasScannerRenowned = installedMods.some((m) => m.name.toUpperCase().includes("SCANNER, RENOWNED"))
@@ -313,12 +338,18 @@ export function SensorsStation({
   const hasActiveCamouflage = installedMods.some((m) => m.name.toUpperCase().includes("ACTIVE CAMOUFLAGE"))
   const hasCloakingDevice = installedMods.some((m) => m.name.toUpperCase().includes("CLOAKING DEVICE"))
 
-  // --- TACTICAL SENSOR CHARGE TRACKERS ---
-  const [flareUses, setFlareUses] = useState<number>(0)
-  const [buzzUses, setBuzzUses] = useState<number>(0)
-  const [dampenerUses, setDampenerUses] = useState<number>(0)
-  const [disruptorUses, setDisruptorUses] = useState<number>(0)
-  const [threatTrackerUses, setThreatTrackerUses] = useState<number>(0)
+  // Synchronized or Local Tactical Sensor Charge Trackers
+  const [localEcmUses, setLocalEcmUses] = useState<SensorsEcmState>({
+    flares: 0,
+    buzzDroids: 0,
+    dampener: 0,
+    disruptor: 0,
+    threatTracker: 0,
+  })
+
+  const currentEcmUses = externalEcmUses ?? localEcmUses
+  const updateEcmUses = onUpdateEcmUses ?? setLocalEcmUses
+
   const [stealthActive, setStealthActive] = useState<boolean>(false)
   const [tacticalFeedback, setTacticalFeedback] = useState<string | null>(null)
 
@@ -353,7 +384,7 @@ export function SensorsStation({
       return true
     }
 
-    return false
+    return !!onConsumePowerDice?.(amount)
   }
 
   const canSpendStation = effectiveAvailable > 0
@@ -482,7 +513,10 @@ export function SensorsStation({
 
   const handleManualScanSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (isBlinded) return
+    if (isBlinded) {
+      alert("Sensors Offline: Sight and scanner checks automatically fail while the vessel has the Blinded condition.")
+      return
+    }
     const parsedTotal = parseInt(manualScanInput, 10)
     if (isNaN(parsedTotal)) return
 
@@ -633,35 +667,40 @@ export function SensorsStation({
   }
 
   const handleTriggerFlares = () => {
-    if (flareUses >= tierUses) return
-    setFlareUses((prev) => prev + 1)
+    const current = currentEcmUses.flares ?? 0
+    if (current >= tierUses) return
+    updateEcmUses((prev) => ({ ...prev, flares: current + 1 }))
     setTacticalFeedback("Countermeasure Flares Deployed: Advantage granted on Dexterity saving throw against triggering attack or missile!")
   }
 
   const handleDeployBuzzDroids = () => {
-    if (buzzUses >= tierUses) return
-    setBuzzUses((prev) => prev + 1)
+    const current = currentEcmUses.buzzDroids ?? 0
+    if (current >= tierUses) return
+    updateEcmUses((prev) => ({ ...prev, buzzDroids: current + 1 }))
     setTacticalFeedback("Buzz Droid Cloud Deployed: 200-ft sphere created within 1,500 ft. Area is difficult terrain; deals 2d4 kinetic hull damage per 50 ft travelled!")
   }
 
   const handleTriggerSensorDampener = () => {
-    if (dampenerUses >= tierUses) return
-    setDampenerUses((prev) => prev + 1)
+    const current = currentEcmUses.dampener ?? 0
+    if (current >= tierUses) return
+    updateEcmUses((prev) => ({ ...prev, dampener: current + 1 }))
     const dc = 8 + interfereBonus
     setTacticalFeedback(`Sensor Dampener Engaged: Target within 1,000 ft must succeed on a DC ${dc} Wisdom saving throw or be blinded for 1 minute!`)
   }
 
   const handleTriggerShieldDisruptor = () => {
-    if (disruptorUses >= tierUses) return
-    setDisruptorUses((prev) => prev + 1)
+    const current = currentEcmUses.disruptor ?? 0
+    if (current >= tierUses) return
+    updateEcmUses((prev) => ({ ...prev, disruptor: current + 1 }))
     setTacticalFeedback(`Shield Disruptor Activated: Make Charisma (Interfere) check (+${interfereBonus}) contested by target's Constitution (Regulate) check. On failure, target shield capacity & regen rate are halved for 1 minute!`)
   }
 
   const handleTriggerThreatTracker = () => {
     const maxUses = Math.max(1, wisMod)
-    if (threatTrackerUses >= maxUses) return
-    setThreatTrackerUses((prev) => prev + 1)
-    setTacticalFeedback(`Threat Tracker Activated: Substituted Wisdom saving throw for Dexterity saving throw (${maxUses - (threatTrackerUses + 1)} uses remaining)!`)
+    const current = currentEcmUses.threatTracker ?? 0
+    if (current >= maxUses) return
+    updateEcmUses((prev) => ({ ...prev, threatTracker: current + 1 }))
+    setTacticalFeedback(`Threat Tracker Activated: Substituted Wisdom saving throw for Dexterity saving throw (${maxUses - (current + 1)} uses remaining)!`)
   }
 
   const handleToggleStealth = () => {
@@ -725,9 +764,9 @@ export function SensorsStation({
         </div>
 
         <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
-          <span>CONSOLE</span>
+          <span>PANEL</span>
           <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
-            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+            {isOpen ? "OPEN ▲" : "CLOSED ▼"}
           </span>
         </div>
       </button>
@@ -757,7 +796,7 @@ export function SensorsStation({
         <div className="flex items-center gap-2 flex-wrap text-xs">
           {isBlinded && (
             <span className="rounded border border-red-500/80 bg-red-950/60 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse">
-              ⚠️ BLINDED (AUTOFALL)
+              ⚠️ BLINDED
             </span>
           )}
 
@@ -814,9 +853,18 @@ export function SensorsStation({
           })}
           <button
             type="button"
+            onClick={() => applyPreset([])}
+            disabled={openCards.length === 0}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-slate-700 bg-black/40 text-slate-400 hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+            title="Collapse all active console drawers"
+          >
+            Clear All
+          </button>
+          <button
+            type="button"
             onClick={handleSaveCustomPreset}
             className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
-            title="Save current layout to local browser"
+            title="Save layout view"
           >
             <Bookmark className="w-3 h-3" /> Save View
           </button>
@@ -841,7 +889,7 @@ export function SensorsStation({
         </div>
       </div>
 
-      {/* 3. COMPACT CREW ROSTER HUD */}
+      {/* 3. PERSISTENT CREW ROSTER HUD */}
       <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
@@ -983,17 +1031,17 @@ export function SensorsStation({
         {renderSnapshotCard(
           "mods",
           "Hardware",
-          `${installedMods.length} Mods`,
-          "Sensors Station",
+          `${sensorsMods.length} Mods`,
+          "Sensors Hardware",
           <Cpu className="w-3 h-3 text-purple-400" />,
           "text-purple-300"
         )}
 
         {renderSnapshotCard(
-          "telemetry",
-          "Telemetry",
-          `${wisMod >= 0 ? `+${wisMod}` : wisMod} WIS`,
-          `${intMod >= 0 ? `+${intMod}` : intMod} INT`,
+          "ship_stats",
+          "Ship Stats",
+          `AC ${shipConfig?.armorClass ?? 12}`,
+          "Armor Class",
           <Activity className="w-3 h-3 text-cyan-neon" />,
           "text-cyan-neon"
         )}
@@ -1003,8 +1051,8 @@ export function SensorsStation({
       {openCards.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
           <Radar className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
-          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL SENSORS CONSOLE DRAWERS COLLAPSED</p>
-          <p className="text-[10px] mt-1 text-slate-500">Tap any of the status cards above or choose an operational preset.</p>
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL SENSORS CONSOLE PANELS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any status card above or choose an operational preset.</p>
         </div>
       ) : (
         <div
@@ -1037,7 +1085,7 @@ export function SensorsStation({
                       {cardId === "contacts" && "Detected Sector Contacts & Radar"}
                       {cardId === "tacticalModules" && "Active Tactical Sensor Countermeasures"}
                       {cardId === "mods" && "Installed Sensor Hardware Modifications"}
-                      {cardId === "telemetry" && "Core Ship Stats & Telemetry"}
+                      {cardId === "ship_stats" && "Ship Ability Scores & Statistics"}
                     </h3>
                   </div>
 
@@ -1054,7 +1102,7 @@ export function SensorsStation({
                       type="button"
                       onClick={() => toggleCard(cardId)}
                       className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
-                      title="Collapse Drawer"
+                      title="Collapse Panel"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1170,7 +1218,7 @@ export function SensorsStation({
                             onClick={() => setScanState(scanState === "manual" ? "idle" : "manual")}
                             className="rounded px-2.5 py-1 text-[10px] font-bold bg-black/60 text-cyan-neon border border-cyan-neon/40 hover:bg-cyan-neon/10 transition-all cursor-pointer"
                           >
-                            {scanState === "manual" ? "Cancel Manual" : "Manual Total"}
+                            {scanState === "manual" ? "Cancel Manual" : "Manual Roll Entry"}
                           </button>
                         )}
                         <button
@@ -1231,14 +1279,14 @@ export function SensorsStation({
                                 onClick={() => handleGrandMasteryScanRerollSpecific(0, "Rerolled Die 1")}
                                 className="rounded bg-cyan-neon/20 border border-cyan-neon/60 px-2 py-0.5 text-[10px] font-bold text-cyan-neon cursor-pointer"
                               >
-                                Reroll D1 ({scanDice[0]})
+                                Reroll Die 1 ({scanDice[0]})
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleGrandMasteryScanRerollSpecific(1, "Rerolled Die 2")}
                                 className="rounded bg-cyan-neon/20 border border-cyan-neon/60 px-2 py-0.5 text-[10px] font-bold text-cyan-neon cursor-pointer"
                               >
-                                Reroll D2 ({scanDice[1]})
+                                Reroll Die 2 ({scanDice[1]})
                               </button>
                               <button
                                 type="button"
@@ -1350,14 +1398,14 @@ export function SensorsStation({
                                 onClick={() => handleGrandMasteryRerollSpecific(0, "Rerolled Die 1")}
                                 className="rounded bg-amber-500/20 border border-amber-400/60 px-2 py-0.5 text-[10px] font-bold text-amber-300 cursor-pointer"
                               >
-                                Reroll D1 ({probeDice[0]})
+                                Reroll Die 1 ({probeDice[0]})
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleGrandMasteryRerollSpecific(1, "Rerolled Die 2")}
                                 className="rounded bg-amber-500/20 border border-amber-400/60 px-2 py-0.5 text-[10px] font-bold text-amber-300 cursor-pointer"
                               >
-                                Reroll D2 ({probeDice[1]})
+                                Reroll Die 2 ({probeDice[1]})
                               </button>
                               <button
                                 type="button"
@@ -1499,19 +1547,19 @@ export function SensorsStation({
                               <div className="flex justify-between items-center mb-0.5">
                                 <span className="font-bold text-amber-300 uppercase">Flare Pods</span>
                                 <span className="text-[8px] font-mono px-1 py-0.2 rounded border bg-amber-950/40 text-amber-300 border-amber-500/40 font-bold">
-                                  {tierUses - flareUses}/{tierUses}
+                                  {tierUses - (currentEcmUses.flares ?? 0)}/{tierUses}
                                 </span>
                               </div>
                               <p className="text-[9px] text-muted-foreground leading-relaxed">
-                                Reaction: Grant advantage on Dexterity saving throw.
+                                Reaction: Grant advantage on Dexterity saving throw. Recharges on maintenance refit.
                               </p>
                             </div>
                             <button
                               type="button"
-                              disabled={flareUses >= tierUses}
+                              disabled={(currentEcmUses.flares ?? 0) >= tierUses}
                               onClick={handleTriggerFlares}
                               className={`w-full py-1 rounded text-[9px] font-bold uppercase border cursor-pointer ${
-                                flareUses >= tierUses ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-amber-500/20 border-amber-400 text-amber-300 hover:bg-amber-500/30"
+                                (currentEcmUses.flares ?? 0) >= tierUses ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-amber-500/20 border-amber-400 text-amber-300 hover:bg-amber-500/30"
                               }`}
                             >
                               Fire Flares
@@ -1525,19 +1573,19 @@ export function SensorsStation({
                               <div className="flex justify-between items-center mb-0.5">
                                 <span className="font-bold text-rose-400 uppercase">Buzz Droids</span>
                                 <span className="text-[8px] font-mono px-1 py-0.2 rounded border bg-rose-950/40 text-rose-300 border-rose-500/40 font-bold">
-                                  {tierUses - buzzUses}/{tierUses}
+                                  {tierUses - (currentEcmUses.buzzDroids ?? 0)}/{tierUses}
                                 </span>
                               </div>
                               <p className="text-[9px] text-muted-foreground leading-relaxed">
-                                200-ft sphere (1500 ft): 2d4 hull kinetic damage per 50 ft.
+                                200-ft sphere (1500 ft): 2d4 hull kinetic damage per 50 ft. Recharges on maintenance refit.
                               </p>
                             </div>
                             <button
                               type="button"
-                              disabled={buzzUses >= tierUses}
+                              disabled={(currentEcmUses.buzzDroids ?? 0) >= tierUses}
                               onClick={handleDeployBuzzDroids}
                               className={`w-full py-1 rounded text-[9px] font-bold uppercase border cursor-pointer ${
-                                buzzUses >= tierUses ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-rose-500/20 border-rose-400 text-rose-300 hover:bg-rose-500/30"
+                                (currentEcmUses.buzzDroids ?? 0) >= tierUses ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-rose-500/20 border-rose-400 text-rose-300 hover:bg-rose-500/30"
                               }`}
                             >
                               Deploy Cloud
@@ -1551,19 +1599,19 @@ export function SensorsStation({
                               <div className="flex justify-between items-center mb-0.5">
                                 <span className="font-bold text-cyan-neon uppercase">Sensor Dampener</span>
                                 <span className="text-[8px] font-mono px-1 py-0.2 rounded border bg-cyan-950/40 text-cyan-300 border-cyan-500/40 font-bold">
-                                  {tierUses - dampenerUses}/{tierUses}
+                                  {tierUses - (currentEcmUses.dampener ?? 0)}/{tierUses}
                                 </span>
                               </div>
                               <p className="text-[9px] text-muted-foreground leading-relaxed">
-                                DC {8 + interfereBonus} Wis save: Target blinded 1 min.
+                                DC {8 + interfereBonus} Wis save: Target blinded 1 min. Recharges on maintenance refit.
                               </p>
                             </div>
                             <button
                               type="button"
-                              disabled={dampenerUses >= tierUses}
+                              disabled={(currentEcmUses.dampener ?? 0) >= tierUses}
                               onClick={handleTriggerSensorDampener}
                               className={`w-full py-1 rounded text-[9px] font-bold uppercase border cursor-pointer ${
-                                dampenerUses >= tierUses ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
+                                (currentEcmUses.dampener ?? 0) >= tierUses ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
                               }`}
                             >
                               Engage Dampener
@@ -1577,19 +1625,19 @@ export function SensorsStation({
                               <div className="flex justify-between items-center mb-0.5">
                                 <span className="font-bold text-cyan-300 uppercase">Shield Disruptor</span>
                                 <span className="text-[8px] font-mono px-1 py-0.2 rounded border bg-cyan-950/40 text-cyan-300 border-cyan-500/40 font-bold">
-                                  {tierUses - disruptorUses}/{tierUses}
+                                  {tierUses - (currentEcmUses.disruptor ?? 0)}/{tierUses}
                                 </span>
                               </div>
                               <p className="text-[9px] text-muted-foreground leading-relaxed">
-                                Contested Interfere vs Regulate: Halve target shield cap/regen 1 min.
+                                Contested Interfere vs Regulate: Halve target shield cap/regen 1 min. Recharges on maintenance refit.
                               </p>
                             </div>
                             <button
                               type="button"
-                              disabled={disruptorUses >= tierUses}
+                              disabled={(currentEcmUses.disruptor ?? 0) >= tierUses}
                               onClick={handleTriggerShieldDisruptor}
                               className={`w-full py-1 rounded text-[9px] font-bold uppercase border cursor-pointer ${
-                                disruptorUses >= tierUses ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
+                                (currentEcmUses.disruptor ?? 0) >= tierUses ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
                               }`}
                             >
                               Trigger Disruptor
@@ -1603,7 +1651,7 @@ export function SensorsStation({
                               <div className="flex justify-between items-center mb-0.5">
                                 <span className="font-bold text-slate-100 uppercase">Threat Tracker</span>
                                 <span className="text-[8px] font-mono px-1 py-0.2 rounded border bg-black/60 text-slate-300 border-bridge-border font-bold">
-                                  {Math.max(1, wisMod) - threatTrackerUses}/{Math.max(1, wisMod)}
+                                  {Math.max(1, wisMod) - (currentEcmUses.threatTracker ?? 0)}/{Math.max(1, wisMod)}
                                 </span>
                               </div>
                               <p className="text-[9px] text-muted-foreground leading-relaxed">
@@ -1612,10 +1660,10 @@ export function SensorsStation({
                             </div>
                             <button
                               type="button"
-                              disabled={threatTrackerUses >= Math.max(1, wisMod)}
+                              disabled={(currentEcmUses.threatTracker ?? 0) >= Math.max(1, wisMod)}
                               onClick={handleTriggerThreatTracker}
                               className={`w-full py-1 rounded text-[9px] font-bold uppercase border cursor-pointer ${
-                                threatTrackerUses >= Math.max(1, wisMod) ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
+                                (currentEcmUses.threatTracker ?? 0) >= Math.max(1, wisMod) ? "bg-slate-800 border-slate-700 text-slate-500" : "bg-cyan-500/20 border-cyan-neon text-cyan-neon hover:bg-cyan-500/30"
                               }`}
                             >
                               Swap to Wisdom Save
@@ -1679,8 +1727,8 @@ export function SensorsStation({
                   </div>
                 )}
 
-                {/* 8. TELEMETRY WORKSPACE */}
-                {cardId === "telemetry" && (
+                {/* 8. SHIP ABILITY SCORES & STATISTICS WORKSPACE */}
+                {cardId === "ship_stats" && (
                   <div className="flex flex-col gap-3">
                     <ShipStats shipConfig={shipConfig} proficiencyBonus={proficiencyBonus} systemDamageLevel={systemDamageLevel} />
                   </div>
@@ -1689,6 +1737,99 @@ export function SensorsStation({
             )
           })}
         </div>
+      )}
+
+      {/* 6. CHASSIS TACTICAL SURGES & REACTIONS (ALWAYS READY TRAY AT BOTTOM) */}
+      {shipTier >= 3 && (
+        <section className="rounded-md border border-cyan-neon/40 bg-bridge-panel p-2.5 shadow-[0_0_12px_rgba(0,255,255,0.04)] flex flex-col gap-2">
+          <div className="flex items-center justify-between border-b border-bridge-border/60 pb-1">
+            <h3 className="text-[10px] font-bold tracking-[0.2em] text-cyan-neon uppercase flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-cyan-neon" />
+              Chassis Tactical Surges (Tier {shipTier})
+            </h3>
+            <span className="text-[8px] font-mono text-muted-foreground">COMBAT ACTIONS</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            {isSmallOrTiny && shipTier >= 4 && (
+              <button
+                type="button"
+                disabled={standingByUsed}
+                onClick={onUseStandingBy}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  standingByUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-cyan-neon/50 text-cyan-neon hover:bg-cyan-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Standing By</span>
+                  <span>{standingByUsed ? "USED" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: +1 Extra Action</span>
+              </button>
+            )}
+
+            {isSmallOrTiny && shipTier >= 5 && (
+              <button
+                type="button"
+                disabled={leafOnTheWindUsed}
+                onClick={onUseLeafOnTheWind}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  leafOnTheWindUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-emerald-500/50 text-emerald-400 hover:bg-emerald-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Leaf on the Wind</span>
+                  <span>{leafOnTheWindUsed ? "USED" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Treat roll as Nat 20</span>
+              </button>
+            )}
+
+            {isMedium && hasVersatileTransport && (
+              <button
+                type="button"
+                disabled={versatileTransportUsed >= versatileMaxUses}
+                onClick={() => {
+                  onUpdateVersatileTransportUsed?.((prev) => Math.min(versatileMaxUses, (Number(prev) || 0) + 1))
+                }}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  versatileTransportUsed >= versatileMaxUses
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-cyan-400/50 text-cyan-300 hover:bg-cyan-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Versatile Transport</span>
+                  <span>{versatileMaxUses - versatileTransportUsed}/{versatileMaxUses}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Grant Advantage</span>
+              </button>
+            )}
+
+            {isMedium && hasBestShip && (
+              <button
+                type="button"
+                disabled={bestShipInVerseUsed}
+                onClick={() => onUpdateBestShipInVerseUsed?.(true)}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  bestShipInVerseUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-amber-400/50 text-amber-300 hover:bg-amber-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Best Ship in 'Verse</span>
+                  <span>{bestShipInVerseUsed ? "EXP" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Action: Gain Resistance</span>
+              </button>
+            )}
+          </div>
+        </section>
       )}
     </div>
   )

@@ -25,13 +25,8 @@ import {
   RotateCw,
   Compass,
   CalendarOff,
-  FastForward,
   Flame,
   BookOpen,
-  Lock,
-  Unlock,
-  X,
-  Zap,
   PowerOff,
   Crosshair,
   XCircle,
@@ -43,16 +38,16 @@ import {
   Sparkles,
   Radio,
   Sliders,
-  Gauge,
-  Activity,
   Maximize2,
   Minimize2,
-  Bookmark,
   Volume2,
   VolumeX,
   Cpu,
   Layers,
-  ChevronDown
+  ShieldAlert,
+  Activity,
+  X,
+  Zap
 } from "lucide-react"
 import {
   rollAttackD20,
@@ -135,7 +130,6 @@ function triggerTactilePulse(type: "tap" | "heavy" = "tap") {
 }
 
 export type SectionCardId =
-  | "stats"
   | "movement"
   | "resources"
   | "weapons"
@@ -143,6 +137,7 @@ export type SectionCardId =
   | "time"
   | "ftl"
   | "mods"
+  | "ship_stats"
 
 interface CustomPreset {
   id: string
@@ -152,9 +147,9 @@ interface CustomPreset {
 
 const DEFAULT_PRESETS: CustomPreset[] = [
   { id: "combat", name: "Tactical Combat", activeCards: ["movement", "weapons", "resources"] },
-  { id: "cruise", name: "Sublight Cruise", activeCards: ["movement", "fuel", "time"] },
-  { id: "transit", name: "Hyperspace Vector", activeCards: ["ftl", "fuel", "time"] },
-  { id: "all", name: "All Stations", activeCards: ["stats", "movement", "resources", "weapons", "fuel", "time", "ftl", "mods"] }
+  { id: "cruise", name: "Sublight Cruise", activeCards: ["fuel", "time"] },
+  { id: "transit", name: "Hyperspace Vector", activeCards: ["ftl", "time"] },
+  { id: "all", name: "All Panels", activeCards: ["movement", "resources", "weapons", "fuel", "time", "ftl", "mods", "ship_stats"] }
 ]
 
 type FlightEnvironment = "Space" | "Atmosphere" | "Underwater"
@@ -211,57 +206,57 @@ const PILOT_ACTIONS: PilotAction[] = [
   {
     name: "Detect",
     category: "Utility",
-    description: "When you take the Detect action, you devote your attention to finding something. Depending on the nature of your detection, the DM might have you make a Wisdom (Scan) check or an Intelligence (Probe) check."
+    description: "Devote your attention to finding something on sensors. The DM might have you make a Wisdom (Scan) check or an Intelligence (Probe) check."
   },
   {
     name: "Fire",
     category: "Combat & Movement",
-    description: "(if applicable) The most common action to take in combat is the Fire action. With this action, you can make an attack (or attacks) with one ship weapon. See the 'Making an Attack' section for the rules that govern attacks. The Fire action may be taken multiple times on a ship’s turn, but normally only once per weapon. A crewmember Firing from the helm has disadvantage on attack rolls with primary and secondary weapons."
+    description: "Make an attack with one ship weapon. Normal attacks with Primary and Secondary weapons made from the Helm suffer disadvantage unless performing an Attack Run or Dogfight."
   },
   {
     name: "Attack Run",
     category: "Combat & Movement",
-    description: "When you move at least 150 feet towards a target, you may declare an Attack Run as an action. You must have a clear path towards your target, and nothing should hinder your path (such as difficult terrain or obstacles). If you finish this movement within range of your target, you may follow it with one of these options:\n• Fire: Make a ship weapon attack from a forward-facing limited arc without normal disadvantage.\n• Ram: Make a Ram attempt with advantage on Strength (Ram).\n• Conceal: Make a Dexterity (Hide) check to conceal your ship following Chapter 7 hiding rules."
+    description: "Move at least 150 ft in a direct, unobstructed line towards an enemy. You may then fire a forward-facing weapon without normal helm disadvantage, Ram with advantage, or Conceal your vessel."
   },
   {
     name: "Dogfight",
     category: "Defense & Maneuvers",
-    description: "When you engage a single enemy, you duck and weave, vying for a good shot while avoiding theirs. Choose a target and make an opposed Dexterity (Maneuvering) check. On success, the next attack made against your ship by that target suffers disadvantage, but you grant the next attack made against your ship by a different target advantage. Additionally, you can perform a primary or tertiary weapon attack from a forward-facing limited firing arc against that ship without normal disadvantage."
+    description: "Engage an enemy within close quarters. Make an opposed Dexterity (Maneuvering) check. On success, the target's next attack against you suffers disadvantage, and you may attack with a forward weapon without helm disadvantage."
   },
   {
     name: "Evade",
     category: "Defense & Maneuvers",
-    description: "When you take the Evade action, you focus entirely on avoiding attacks. Until the start of your next turn, any attack roll made against you has disadvantage if you can see the attacker on your instruments, and you make Dexterity Saving Throws with advantage. This action affects your entire ship: any ability check or attack made by your ship or anyone on it has disadvantage until the end of your ship's next turn. Ends if Incapacitated or speed drops to 0."
+    description: "Focus entirely on defensive maneuvers. Until your next turn, attacks against your ship suffer disadvantage, and you gain advantage on Dexterity saving throws. Any attacks made by your ship also suffer disadvantage."
   },
   {
     name: "Fly",
     category: "Combat & Movement",
-    description: "When you take the Fly action, you gain extra Movement for the current turn equal to your speed after modifiers (e.g., 300 ft speed becomes 600 ft movement). Any increase or decrease to speed changes this additional movement by the same amount. Affects your ship's ability to stay on target: any ability check or attack made by your ship or anyone on it has disadvantage until the end of your ship's next turn."
+    description: "Gain extra tactical movement for the current turn equal to your modified flying speed (e.g., 300 ft becomes 600 ft). Attacks made from your ship suffer disadvantage until the end of next turn."
   },
   {
     name: "Harass",
     category: "Combat & Movement",
-    description: "You can harass an enemy and lock them into close-combat maneuvers to prevent escape. Make an opposed Dexterity (Maneuvering) check against a target within one size category of you and within normal range of at least one forward-facing primary weapon (which cannot be Fired this turn). On a success, if the target voluntarily leaves its square before your next turn, it takes damage as though it suffered a critical hit with the primary weapon used to harass."
+    description: "Lock an enemy in dogfighting maneuvers. Make an opposed Dexterity (Maneuvering) check. On success, if the enemy voluntarily moves away before your next turn, it suffers critical hit damage from your selected primary weapon."
   },
   {
     name: "Hard Turn",
     category: "Defense & Maneuvers",
-    description: "When you take the Hard Turn action, you coax your ship into a tight maneuver, turning your ship 90 degrees without expending any of your flying speed."
+    description: "Pivot your vessel 90 degrees instantly without expending any of your flying speed budget."
   },
   {
     name: "Ram",
     category: "Combat & Movement",
-    description: "You can attempt to ram another ship while flying through its space. Make a Strength (Ram) check opposed by the target's Dexterity (Maneuvering) check. On failure, the ram fails. On success, both you and the target take kinetic damage equal to two of your ship's Hull Dice + your ship's Strength modifier. If your ship has shield points remaining, your ship instead takes half this damage."
+    description: "Attempt to collide with another ship in its space. Make a Strength (Ram) check opposed by the target's Dexterity (Maneuvering) check. On success, both vessels take kinetic damage equal to 2 Hull Dice + STR mod."
   },
   {
     name: "Retro Thrusters",
     category: "Defense & Maneuvers",
-    description: "When an attacker that any crewmember can see deals damage to your ship with a weapon, they can use their reaction to immediately move the ship up to 50 feet in a direction of their choice, halving the damage your ship takes. The orientation of the ship does not change. Once this feature has been used, it can't be used again until the ship recharges."
+    description: "Reaction when damaged by a weapon: Move up to 50 ft in any direction and halve the incoming damage. Recharges on a short or full recharge."
   },
   {
     name: "Conceal",
     category: "Utility",
-    description: "When you take the Conceal action, you make a Dexterity (Hide) check in an attempt to Conceal your ship, following the rules in chapter 7 for hiding. If you succeed, you gain certain benefits, as described in the 'Unseen Attackers and Targets' section."
+    description: "Make a Dexterity (Hide) check using asteroid fields, nebulae, or debris to obscure your vessel and become an unseen attacker."
   }
 ]
 
@@ -451,24 +446,18 @@ export function EnginesStation({
     setMaximizedCard(null)
   }
 
-  const handleSaveCustomPreset = () => {
-    const name = window.prompt("Enter name for this custom cockpit layout:", "Custom Setup")
-    if (!name) return
-    if (typeof window !== "undefined") {
-      try {
-        const key = `sw5e_helm_preset_${Date.now()}`
-        localStorage.setItem(key, JSON.stringify({ id: key, name, activeCards: openCards }))
-        alert(`Preset '${name}' saved to this device!`)
-      } catch {}
-    }
-  }
+  const engineMods = useMemo(() => {
+    return installedMods.filter(
+      (m) => m.station?.toLowerCase() === "engines"
+    )
+  }, [installedMods])
 
   // --- HELM & ENGINE SUB-SYSTEM STATES ---
   const [showStartupModal, setShowStartupModal] = useState(false)
   const [showActionModal, setShowActionModal] = useState(false)
-  const [forcedStartupSafety, setForcedStartupSafety] = useState(false)
   const [awayMissionDaysInput, setAwayMissionDaysInput] = useState<string>("7")
   const [helmAttackType, setHelmAttackType] = useState<HelmAttackType>("standard")
+  const [dogfightCheckResult, setDogfightCheckResult] = useState<string | null>(null)
 
   const hasSecondaryTransponderMod = useMemo(() => {
     return installedMods.some((mod) => {
@@ -572,12 +561,23 @@ export function EnginesStation({
     })
   }, [installedMods, manifest])
 
-  const [localLauncherStates, setLocalLauncherStates] = useState<Record<string, LauncherLoadState>>({})
-
+  // Get launcher state directly from modification object (synchronized with database)
   const getLauncherState = (instanceKey: string, weapon: Modification): LauncherLoadState => {
-    if (localLauncherStates[instanceKey]) return localLauncherStates[instanceKey]
     const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === weapon.name.toLowerCase())
     const capacity = weapon.reload || catalogDef?.reload || 4
+    const syncedOrdnance = (weapon as any).loadedOrdnance
+
+    if (syncedOrdnance) {
+      return {
+        ordnanceId: syncedOrdnance.id ?? null,
+        ordnanceName: syncedOrdnance.name ?? null,
+        loadedCount: syncedOrdnance.loadedCount ?? 0,
+        maxCapacity: capacity,
+        damage: syncedOrdnance.damage ?? null,
+        damageType: syncedOrdnance.damageType ?? null,
+      }
+    }
+
     return {
       ordnanceId: null,
       ordnanceName: null,
@@ -599,18 +599,18 @@ export function EnginesStation({
     const state = getLauncherState(key, targetLauncher)
 
     if (state.ordnanceId && state.ordnanceId !== ordnance.id && state.loadedCount > 0) {
-      alert(`Cannot mix warheads! ${targetLauncher.name} already contains ${state.ordnanceName}.`)
+      alert(`Cannot mix warheads: ${targetLauncher.name} already contains ${state.ordnanceName}.`)
       return
     }
 
     if (ordnance.currentReserve <= 0) {
-      alert(`No ${ordnance.name} available in reserve!`)
+      alert(`No ${ordnance.name} available in ship cargo reserve.`)
       return
     }
 
     const needed = state.maxCapacity - state.loadedCount
     if (needed <= 0) {
-      alert(`${targetLauncher.name} is already at full capacity (${state.maxCapacity}/${state.maxCapacity}).`)
+      alert(`${targetLauncher.name} is at maximum capacity (${state.maxCapacity}/${state.maxCapacity}).`)
       return
     }
 
@@ -621,17 +621,16 @@ export function EnginesStation({
       prev.map((o) => (o.id === ordnance.id ? { ...o, currentReserve: o.currentReserve - transferAmount } : o))
     )
 
-    setLocalLauncherStates((prev) => ({
-      ...prev,
-      [key]: {
-        ordnanceId: ordnance.id,
-        ordnanceName: ordnance.name,
+    onUpdateMod?.(key, {
+      loadedOrdnance: {
+        id: ordnance.id,
+        name: ordnance.name,
         loadedCount: newLoadedTotal,
-        maxCapacity: state.maxCapacity,
         damage: ordnance.damage,
         damageType: ordnance.damageType,
       },
-    }))
+    } as any)
+
     setWeaponArmModal(null)
   }
 
@@ -646,17 +645,9 @@ export function EnginesStation({
       prev.map((o) => (o.id === ordnanceId ? { ...o, currentReserve: o.currentReserve + returnCount } : o))
     )
 
-    setLocalLauncherStates((prev) => ({
-      ...prev,
-      [instanceKey]: {
-        ordnanceId: null,
-        ordnanceName: null,
-        loadedCount: 0,
-        maxCapacity: state.maxCapacity,
-        damage: null,
-        damageType: null,
-      },
-    }))
+    onUpdateMod?.(instanceKey, {
+      loadedOrdnance: null,
+    } as any)
   }
 
   const specialization = shipConfig?.roleSpecialization
@@ -675,6 +666,10 @@ export function EnginesStation({
   const rawCon = shipConfig?.stats?.constitution ?? 10
   const conBoost = shipConfig?.tierStatBoosts?.constitution ?? 0
   const conScore = rawCon + conBoost
+
+  const rawDex = shipConfig?.stats?.dexterity ?? 10
+  const dexBoost = shipConfig?.tierStatBoosts?.dexterity ?? 0
+  const dexMod = Math.floor((rawDex + dexBoost - 10) / 2)
 
   const computeAttackModDisplay = (weaponProperties: string[] = [], isPrimary: boolean = true) => {
     const isSaturate = weaponProperties.some((p) => p.toLowerCase().includes("saturate"))
@@ -766,13 +761,13 @@ export function EnginesStation({
     if (isOrdnance) {
       const state = getLauncherState(key, w)
       if (state.loadedCount <= 0) {
-        alert(`${w.name} has no warheads loaded! Arm it with ordnance before engaging.`)
+        alert(`${w.name} has no warheads loaded. Arm it with ordnance before engaging.`)
         return
       }
     }
 
     if (helmAttackType === "attack_run" && tacticalMovement.spentFeet < 150) {
-      alert("Attack Run Requirement Unmet: An Attack Run requires moving at least 150 ft towards your target before firing. Spend movement first.")
+      alert("Attack Run Requirement: Must spend at least 150 ft moving towards the target before firing.")
       return
     }
 
@@ -829,23 +824,15 @@ export function EnginesStation({
     }
 
     if (isOrdnance) {
-      setLocalLauncherStates((prev) => {
-        const state = prev[key]
-        if (!state) return prev
-        const newCount = Math.max(0, state.loadedCount - 1)
-        return {
-          ...prev,
-          [key]: {
-            ...state,
-            loadedCount: newCount,
-            ordnanceId: newCount === 0 ? null : state.ordnanceId,
-            ordnanceName: newCount === 0 ? null : state.ordnanceName,
-            damage: newCount === 0 ? null : state.damage,
-            damageType: newCount === 0 ? null : state.damageType,
-          },
-        }
-      })
-      onUpdateMod?.(key, { firedThisRound: true } as any)
+      const state = getLauncherState(key, activeWizardWeapon)
+      const newCount = Math.max(0, state.loadedCount - 1)
+      onUpdateMod?.(key, {
+        firedThisRound: true,
+        loadedOrdnance: newCount === 0 ? null : {
+          ...state,
+          loadedCount: newCount,
+        },
+      } as any)
     } else {
       const currentHeat = (activeWizardWeapon as any).currentHeat || 0
       const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === activeWizardWeapon.name.toLowerCase())
@@ -858,7 +845,7 @@ export function EnginesStation({
     closeWizard()
   }
 
-  // Power Coupling Logic
+  // Power Coupling Cascading Consumption
   const powerCoupling = shipConfig?.powerCoupling ?? shipConfig?.couplingType ?? "Direct Power Coupling"
   const isDistributed = powerCoupling.toLowerCase().includes("distributed")
   const isHubAndSpoke = powerCoupling.toLowerCase().includes("hub") || powerCoupling.toLowerCase().includes("spoke")
@@ -904,14 +891,6 @@ export function EnginesStation({
     return baseSpeed
   }
 
-  const slowedReductionAmount = useMemo(() => {
-    if (effectiveSlowedLevel >= 4) return 9999
-    if (effectiveSlowedLevel === 3) return 300
-    if (effectiveSlowedLevel === 2) return 250
-    if (effectiveSlowedLevel === 1) return 150
-    return 0
-  }, [effectiveSlowedLevel])
-
   const handleCustomConsume = (amount: number = 1): boolean => {
     if (isDirect) {
       return !!onConsumePowerDice?.(amount)
@@ -925,13 +904,16 @@ export function EnginesStation({
         }))
       }
       return true
-    } else if (isHubAndSpoke && sharedPoolDice >= amount) {
+    }
+
+    if (isHubAndSpoke && sharedPoolDice >= amount) {
       if (onUpdateSharedPool) {
         onUpdateSharedPool((prev) => Math.max(0, prev - amount))
       }
       return true
     }
-    return false
+
+    return !!onConsumePowerDice?.(amount)
   }
 
   const canSpendStation = effectiveAvailable > 0
@@ -952,7 +934,6 @@ export function EnginesStation({
   const [environment, setEnvironment] = useState<FlightEnvironment>("Space")
   const fuelMax = maxFuel ?? 30
   const [fuelRemaining, setFuelRemaining] = useState<number>(currentFuel ?? 30)
-  const [totalFuelUsed, setTotalFuelUsed] = useState<number>(0)
 
   useEffect(() => {
     if (currentFuel !== undefined) setFuelRemaining(currentFuel)
@@ -962,13 +943,16 @@ export function EnginesStation({
   const daysElapsedSinceSync = Math.max(0, currentDay - syncDay)
 
   const [selectedPilotAction, setSelectedPilotAction] = useState<PilotAction>(PILOT_ACTIONS[0])
-  const [lastBurnedDay, setLastBurnedDay] = useState<number | null>(null)
-  const [hasBurnedInitialJump, setHasBurnedInitialJump] = useState<boolean>(false)
 
   const shipTier = typeof shipConfig?.tier === "number" ? shipConfig.tier : 0
   const shipSize = (shipConfig?.size || "small").toLowerCase()
+  const isSmallOrTiny = shipSize === "small" || shipSize === "tiny"
+  const isMedium = shipSize === "medium"
 
-  const hasPinpointStrike = shipSize === "small" && shipTier >= 1
+  // Chassis Surge Tier Gating: Tier 0 ships have NO unlocked surges
+  const hasPinpointStrike = isSmallOrTiny && shipTier >= 1
+  const hasRetroThrusters = isSmallOrTiny && shipTier >= 2
+  const hasVersatileSnubfighter = isSmallOrTiny && shipTier >= 3
 
   const getPinpointDie = (tier: number): { type: string; maxRoll: number } => {
     if (tier >= 5) return { type: "d12", maxRoll: 12 }
@@ -989,20 +973,17 @@ export function EnginesStation({
   const [lastPinpointRoll, setLastPinpointRoll] = useState<number | null>(null)
   const [isRollingPinpoint, setIsRollingPinpoint] = useState<boolean>(false)
 
-  const hasRetroThrusters = shipSize === "small" && shipTier >= 2
   const [localRetroUsed, setLocalRetroUsed] = useState<boolean>(false)
   const isRetroUsed = externalRetroThrustersUsed !== undefined
     ? externalRetroThrustersUsed
     : localRetroUsed
 
-  const hasVersatileSnubfighter = shipSize === "small" && shipTier >= 3
   const versatileMaxUses = shipTier
   const [localVersatileUsed, setLocalVersatileUsed] = useState<number>(0)
   const currentVersatileUses = externalVersatileUsed !== undefined
     ? externalVersatileUsed
     : localVersatileUsed
 
-  const isMedium = shipSize === "medium"
   const hasEvasiveManeuvers = isMedium && shipTier >= 1
   const evasiveMax = 2 * shipTier
   const evasiveDieInfo = getPinpointDie(shipTier)
@@ -1041,23 +1022,21 @@ export function EnginesStation({
   }, [currentHull, maxHull, currentShields, maxShields])
 
   const defaultPilotMod = shipConfig?.skills?.maneuver ?? 2
-  const [pilotModInput, setPilotModInput] = useState<number>(defaultPilotMod)
-  const [manualProcInput, setManualProcInput] = useState<string>("")
-  const [lastDuressRollLog, setLastDuressRollLog] = useState<string | null>(null)
+  const [pilotModInput] = useState<number>(defaultPilotMod)
   const [mishapResultLog, setMishapResultLog] = useState<string | null>(null)
 
   const evaluateDuressCheck = (total: number): { gained: number; label: string } => {
-    if (total >= 30) return { gained: 5, label: "30+ : PERFECT (+5 Procedures)" }
-    if (total >= 26) return { gained: 4, label: "26-29 : MASTERFUL (+4 Procedures)" }
-    if (total >= 21) return { gained: 3, label: "21-25 : EXCELLENT (+3 Procedures)" }
-    if (total >= 16) return { gained: 2, label: "16-20 : BREAKTHROUGH (+2 Procedures)" }
-    if (total >= 10) return { gained: 1, label: "10-15 : ADEQUATE (+1 Procedure)" }
-    return { gained: 0, label: "≤ 9 : FAILED (0 Procedures)" }
+    if (total >= 30) return { gained: 5, label: "30+ : 5 Checklists Completed" }
+    if (total >= 26) return { gained: 4, label: "26-29 : 4 Checklists Completed" }
+    if (total >= 21) return { gained: 3, label: "21-25 : 3 Checklists Completed" }
+    if (total >= 16) return { gained: 2, label: "16-20 : 2 Checklists Completed" }
+    if (total >= 10) return { gained: 1, label: "10-15 : 1 Checklist Completed" }
+    return { gained: 0, label: "≤ 9 : No Progress" }
   }
 
   const handleRollDuressCheck = () => {
-    let rollA = Math.floor(Math.random() * 20) + 1
-    let rollB = Math.floor(Math.random() * 20) + 1
+    const rollA = Math.floor(Math.random() * 20) + 1
+    const rollB = Math.floor(Math.random() * 20) + 1
     let keptD20 = rollA
 
     if (duressCondition === "advantage") {
@@ -1070,33 +1049,15 @@ export function EnginesStation({
     const evalResult = evaluateDuressCheck(total)
 
     setInitiationProcedures((prev) => Math.min(targetProcedures, prev + evalResult.gained))
-    setLastDuressRollLog(
+    setMishapResultLog(
       `Check: d20 [${duressCondition !== "normal" ? `${rollA}, ${rollB} -> Kept ${keptD20}` : keptD20}] + Mod (${pilotModInput >= 0 ? `+${pilotModInput}` : pilotModInput}) = ${total} (${evalResult.label})`
     )
   }
 
-  const handleApplyManualProcedures = (e: React.FormEvent) => {
-    e.preventDefault()
-    const val = parseInt(manualProcInput, 10)
-    if (!isNaN(val)) {
-      setInitiationProcedures((prev) => Math.min(targetProcedures, Math.max(0, prev + val)))
-      setManualProcInput("")
-    }
-  }
-
-  const handleResetStartup = () => {
-    setInitiationProcedures(0)
-    setLastDuressRollLog(null)
-    setMishapResultLog(null)
-    setForcedStartupSafety(false)
-    if (onSetPoweredOn) onSetPoweredOn(false)
-  }
-
   const handleShutdownShip = () => {
-    if (confirm("CONFIRM REACTOR SCRAM: Shut down main reactor and drop ship to cold & dark?")) {
+    if (confirm("EMERGENCY REACTOR SHUTDOWN: Cut main power and drop consoles offline?")) {
       setInitiationProcedures(0)
-      setMishapResultLog("🛑 REACTOR SCRAMMED: Power offline.")
-      setForcedStartupSafety(false)
+      setMishapResultLog("🛑 Main reactor shut down. Auxiliary battery online.")
       if (onSetPoweredOn) onSetPoweredOn(false)
       setShowStartupModal(false)
     }
@@ -1104,12 +1065,12 @@ export function EnginesStation({
 
   const handleEngageStartup = () => {
     if (initiationProcedures >= targetProcedures) {
-      setMishapResultLog("✅ Optimal Start-Up: Clean ignition.")
+      setMishapResultLog("✅ Startup sequence complete. Main reactor online.")
       if (onSetPoweredOn) onSetPoweredOn(true)
       return
     }
     const d20 = Math.floor(Math.random() * 20) + 1
-    setMishapResultLog(`⚠️ Forced start triggered. (Roll: ${d20})`)
+    setMishapResultLog(`⚠️ Forced reactor ignition engaged. (Check: ${d20})`)
     if (onSetPoweredOn) onSetPoweredOn(true)
   }
 
@@ -1148,12 +1109,6 @@ export function EnginesStation({
     if (isRetroUsed) return
     if (onUpdateRetroThrustersUsed) onUpdateRetroThrustersUsed(true)
     else setLocalRetroUsed(true)
-  }
-
-  const handleUseVersatileSnubfighter = () => {
-    if (currentVersatileUses >= versatileMaxUses) return
-    if (onUpdateVersatileSnubfighterUsed) onUpdateVersatileSnubfighterUsed((prev) => Math.min(versatileMaxUses, prev + 1))
-    else setLocalVersatileUsed((prev) => Math.min(versatileMaxUses, prev + 1))
   }
 
   const handleShipRecharge = () => {
@@ -1227,7 +1182,6 @@ export function EnginesStation({
       const newFuel = Math.max(0, fuelRemaining - finalBurnCost)
       setFuelRemaining(newFuel)
       onFuelChange?.(newFuel)
-      setTotalFuelUsed((prev) => prev + finalBurnCost)
     }
   }
 
@@ -1236,7 +1190,6 @@ export function EnginesStation({
     const newFuel = Math.min(fuelMax, fuelRemaining + finalRefund)
     setFuelRemaining(newFuel)
     onFuelChange?.(newFuel)
-    setTotalFuelUsed((prev) => Math.max(0, prev - finalRefund))
   }
 
   const journeyStart = activeJourney 
@@ -1271,6 +1224,13 @@ export function EnginesStation({
 
   const astrogationStatus = getAstrogationStatus(daysElapsedSinceSync)
 
+  const handleRollDogfightContest = () => {
+    const d20 = Math.floor(Math.random() * 20) + 1
+    const manMod = shipConfig?.skills?.maneuver ?? 2
+    const total = d20 + manMod
+    setDogfightCheckResult(`Maneuvering Check: d20 (${d20}) + ${manMod} = ${total}`)
+  }
+
   // RENDER DOCKED CARD TILE
   const renderSnapshotCard = (
     id: SectionCardId,
@@ -1293,12 +1253,12 @@ export function EnginesStation({
         }`}
       >
         <div className="flex items-center justify-between w-full">
-          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 group-hover:text-cyan-neon flex items-center gap-1.5">
+          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 group-hover:text-cyan-neon flex items-center gap-1.5 truncate">
             {icon}
             {title}
           </span>
           <span
-            className={`w-2 h-2 rounded-full transition-all ${
+            className={`w-2 h-2 rounded-full transition-all shrink-0 ${
               isOpen
                 ? "bg-cyan-neon shadow-[0_0_8px_#06b6d4] scale-125"
                 : "bg-slate-700 group-hover:bg-cyan-neon/50"
@@ -1307,7 +1267,7 @@ export function EnginesStation({
         </div>
 
         <div className="my-1.5">
-          <span className={`text-sm md:text-base font-bold font-mono tracking-tight block ${accentColor}`}>
+          <span className={`text-sm md:text-base font-bold font-mono tracking-tight block truncate ${accentColor}`}>
             {value}
           </span>
           <span className="text-[9px] text-muted-foreground uppercase tracking-widest block truncate">
@@ -1316,9 +1276,9 @@ export function EnginesStation({
         </div>
 
         <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
-          <span>CONSOLE</span>
+          <span>PANEL</span>
           <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
-            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+            {isOpen ? "OPEN ▲" : "CLOSED ▼"}
           </span>
         </div>
       </button>
@@ -1345,7 +1305,7 @@ export function EnginesStation({
                 }`}
               >
                 <Flame className="h-3 w-3" />
-                <span>{isPoweredOn ? "Reactor: Online" : `Cold Start (${initiationProcedures}/10)`}</span>
+                <span>{isPoweredOn ? "Reactor: Online" : `Reactor Offline (${initiationProcedures}/10)`}</span>
               </button>
 
               {isPoweredOn && (
@@ -1353,10 +1313,10 @@ export function EnginesStation({
                   type="button"
                   onClick={handleShutdownShip}
                   className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border border-rose-500/50 bg-rose-950/30 text-rose-300 hover:bg-rose-900/50 transition cursor-pointer"
-                  title="Emergency SCRAM"
+                  title="Emergency Reactor Shutdown"
                 >
                   <PowerOff className="h-3 w-3" />
-                  <span>SCRAM</span>
+                  <span>Shutdown</span>
                 </button>
               )}
 
@@ -1373,7 +1333,7 @@ export function EnginesStation({
           <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
             {shipConfig?.name?.toUpperCase() || "VESSEL"} // HELM CONSOLE //{" "}
             <span className={isPoweredOn ? "text-emerald-400 font-bold" : "text-amber-400 font-bold animate-pulse"}>
-              {isPoweredOn ? "MAIN REACTOR ACTIVE" : "COLD & DARK (AUX BATTERY)"}
+              {isPoweredOn ? "MAIN REACTOR ONLINE" : "OFFLINE (AUXILIARY BATTERY)"}
             </span>
           </p>
         </div>
@@ -1392,7 +1352,7 @@ export function EnginesStation({
                     : "text-slate-400 hover:text-amber-200"
                 }`}
               >
-                CRUISE (+50 FT)
+                LOCKED (+50 FT, -2 ATK)
               </button>
               <button
                 type="button"
@@ -1403,14 +1363,14 @@ export function EnginesStation({
                     : "text-slate-400 hover:text-cyan-200"
                 }`}
               >
-                ATK (+1)
+                ATTACK (+1 ATK)
               </button>
             </div>
           )}
 
           {isEngineBoosted && (
             <span className="rounded border border-amber-400 bg-amber-500/20 px-2 py-0.5 text-[9px] font-bold text-amber-300 animate-pulse">
-              ⚡ BOOST (+50 FT)
+              ⚡ SPEED BOOST (+50 FT)
             </span>
           )}
 
@@ -1461,11 +1421,12 @@ export function EnginesStation({
           })}
           <button
             type="button"
-            onClick={handleSaveCustomPreset}
-            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
-            title="Save current layout to local browser"
+            onClick={() => applyPreset([])}
+            disabled={openCards.length === 0}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-slate-700 bg-black/40 text-slate-400 hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+            title="Collapse all open drawers"
           >
-            <Bookmark className="w-3 h-3" /> Save View
+            Clear All
           </button>
         </div>
 
@@ -1488,17 +1449,93 @@ export function EnginesStation({
         </div>
       </div>
 
-      {/* 3. TOP-DECK MODULAR SNAPSHOT CARDS (8 UNIFORM TILES) */}
-      <section className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 w-full">
-        {renderSnapshotCard(
-          "stats",
-          "Ship Stats",
-          `${currentHull}/${maxHull} HP`,
-          `${currentShields}/${maxShields} SP`,
-          <Activity className="w-3 h-3 text-cyan-neon" />,
-          "text-cyan-neon"
-        )}
+      {/* 3. PERSISTENT CREW ROSTER HUD */}
+      <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
+            <Users className="h-3.5 w-3.5" />
+            <span>Manned Helm:</span>
+          </div>
 
+          {assignedCrew.length === 0 ? (
+            <span className="text-xs text-amber-300 italic px-2 py-0.5 border border-amber-500/30 bg-amber-950/20 rounded">
+              Console Uncrewed — Assign Pilot
+            </span>
+          ) : (
+            assignedCrew.map((member, idx) => {
+              const isLead = idx === 0
+              return (
+                <div
+                  key={member.id}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs ${
+                    member.hasTakenTurnThisRound
+                      ? "bg-slate-900/60 border-slate-800 text-slate-400"
+                      : "bg-slate-950 border-cyan-500/40 text-slate-100"
+                  }`}
+                >
+                  <span
+                    className={`text-[8px] font-bold px-1 rounded border uppercase ${
+                      isLead
+                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                        : idx === 1
+                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                        : "bg-sky-500/20 text-sky-400 border-sky-500/40"
+                    }`}
+                  >
+                    {isLead ? "Pilot" : idx === 1 ? "Copilot" : "Support"}
+                  </span>
+                  <span className="font-bold text-xs">{member.name}</span>
+
+                  <button
+                    type="button"
+                    onClick={() => onToggleTurn && onToggleTurn(member.id)}
+                    className="cursor-pointer ml-0.5"
+                    title={member.hasTakenTurnThisRound ? "Action Taken" : "Action Pending"}
+                  >
+                    {member.hasTakenTurnThisRound ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                    ) : (
+                      <Clock className="h-3.5 w-3.5 text-amber-400" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onAssignCrew && onAssignCrew(member.id, "crew_quarters")}
+                    className="text-slate-500 hover:text-rose-400 transition ml-0.5 cursor-pointer"
+                    title="Relieve from Station"
+                  >
+                    <UserMinus className="h-3 w-3" />
+                  </button>
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        {availablePersonnel.length > 0 && onAssignCrew && (
+          <div className="flex items-center gap-1.5 self-end md:self-auto">
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Deploy:</span>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onAssignCrew(e.target.value, "helm")
+              }}
+              className="rounded bg-slate-950 border border-slate-700 px-2 py-0.5 text-xs text-cyan-300 focus:outline-none focus:border-cyan-neon cursor-pointer"
+            >
+              <option value="" disabled>+ Assign Crew...</option>
+              {availablePersonnel.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({getCrewRole(p, manifest)})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* 4. TOP-DECK MODULAR SNAPSHOT TILES (8 UNIFORM TILES) */}
+      <section className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 w-full">
         {renderSnapshotCard(
           "movement",
           "Movement",
@@ -1521,7 +1558,7 @@ export function EnginesStation({
           "weapons",
           "Weapons",
           `${forwardWeapons.length} Forward`,
-          helmAttackType === "attack_run" ? "Attack Run" : "Standard Fire",
+          helmAttackType === "attack_run" ? "Attack Run" : helmAttackType === "dogfight" ? "Dogfight" : "Standard Fire",
           <Crosshair className="w-3 h-3 text-cyan-neon" />,
           "text-cyan-neon"
         )}
@@ -1556,19 +1593,28 @@ export function EnginesStation({
         {renderSnapshotCard(
           "mods",
           "Hardware",
-          `${installedMods.length} Mods`,
-          "Station Systems",
+          `${engineMods.length} Mods`,
+          "Engine Hardware",
           <Cpu className="w-3 h-3 text-purple-400" />,
           "text-purple-300"
         )}
+
+        {renderSnapshotCard(
+          "ship_stats",
+          "Ship Stats",
+          `AC ${shipConfig?.armorClass ?? 12}`,
+          "Armor Class",
+          <Activity className="w-3 h-3 text-cyan-neon" />,
+          "text-cyan-neon"
+        )}
       </section>
 
-      {/* 4. EXPANDABLE DYNAMIC WORKSPACE GRID (RESPONSIVE 2-COLUMN) */}
+      {/* 5. EXPANDABLE DYNAMIC WORKSPACE GRID (RESPONSIVE 2-COLUMN) */}
       {openCards.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
           <Sliders className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
-          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL CONSOLE DRAWERS COLLAPSED</p>
-          <p className="text-[10px] mt-1 text-slate-500">Tap any of the 8 status cards above or choose a preset to expand sub-systems.</p>
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL CONSOLE PANELS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any card above or select a preset to expand controls.</p>
         </div>
       ) : (
         <div
@@ -1594,7 +1640,6 @@ export function EnginesStation({
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-xs bg-cyan-neon shadow-[0_0_6px_#06b6d4]" />
                     <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
-                      {cardId === "stats" && "Hull & Ability Telemetry"}
                       {cardId === "movement" && "Tactical Movement & Gyro"}
                       {cardId === "resources" && "Station & Shared Combat Power"}
                       {cardId === "weapons" && "Forward Hardpoint Fire Array"}
@@ -1602,6 +1647,7 @@ export function EnginesStation({
                       {cardId === "time" && "Campaign Time & Shore Leave"}
                       {cardId === "ftl" && "Hyperdrive Vector & Astrogation"}
                       {cardId === "mods" && "Installed Engine Hardware"}
+                      {cardId === "ship_stats" && "Ship Ability Scores & Statistics"}
                     </h3>
                   </div>
 
@@ -1610,7 +1656,7 @@ export function EnginesStation({
                       type="button"
                       onClick={() => setMaximizedCard((prev) => (prev === cardId ? null : cardId))}
                       className="p-1 rounded text-slate-400 hover:text-cyan-neon hover:bg-black/40 cursor-pointer"
-                      title={isMax ? "Restore Multi-Window" : "Maximize to Full-Width"}
+                      title={isMax ? "Restore Multi-Window" : "Maximize"}
                     >
                       {isMax ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                     </button>
@@ -1618,21 +1664,14 @@ export function EnginesStation({
                       type="button"
                       onClick={() => toggleCard(cardId)}
                       className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
-                      title="Collapse Drawer"
+                      title="Collapse Panel"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
 
-                {/* 1. STATS WORKSPACE */}
-                {cardId === "stats" && (
-                  <div className="flex flex-col gap-3">
-                    <ShipStats shipConfig={shipConfig} proficiencyBonus={proficiencyBonus} />
-                  </div>
-                )}
-
-                {/* 2. MOVEMENT & HEADING WORKSPACE */}
+                {/* 1. MOVEMENT & HEADING WORKSPACE */}
                 {cardId === "movement" && (
                   <div className="flex flex-col justify-between gap-3 h-full">
                     <div className="flex flex-col gap-2 bg-black/50 p-2.5 rounded border border-bridge-border/60">
@@ -1663,22 +1702,24 @@ export function EnginesStation({
 
                       <div className="flex flex-col gap-0.5 pt-1">
                         <div className="flex justify-between text-[9px] text-slate-300">
-                          <span>Throttle Slider:</span>
+                          <span>Movement Adjuster:</span>
                           <span className="text-cyan-neon font-bold">{currentSpentMovement} ft spent</span>
                         </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max={maxAvailableMovement}
-                          step="25"
-                          value={currentSpentMovement}
-                          onChange={(e) => {
-                            const targetVal = parseInt(e.target.value, 10) || 0
-                            const delta = targetVal - currentSpentMovement
-                            onSpendMovement?.(delta)
-                          }}
-                          className="w-full accent-cyan-neon cursor-pointer bg-slate-900 h-1.5 rounded"
-                        />
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="range"
+                            min="0"
+                            max={maxAvailableMovement}
+                            step="25"
+                            value={currentSpentMovement}
+                            onChange={(e) => {
+                              const targetVal = parseInt(e.target.value, 10) || 0
+                              const delta = targetVal - currentSpentMovement
+                              onSpendMovement?.(delta)
+                            }}
+                            className="w-full accent-cyan-neon cursor-pointer bg-slate-900 h-1.5 rounded"
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -1733,7 +1774,7 @@ export function EnginesStation({
                   </div>
                 )}
 
-                {/* 3. COMBAT RESOURCES WORKSPACE */}
+                {/* 2. COMBAT RESOURCES WORKSPACE */}
                 {cardId === "resources" && (
                   <div className="flex flex-col gap-3">
                     <CombatResources 
@@ -1786,7 +1827,7 @@ export function EnginesStation({
                   </div>
                 )}
 
-                {/* 4. WEAPONS WORKSPACE */}
+                {/* 3. WEAPONS WORKSPACE */}
                 {cardId === "weapons" && (
                   <div className="flex flex-col gap-3">
                     <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-bridge-border/40">
@@ -1802,7 +1843,7 @@ export function EnginesStation({
                             : "bg-black/60 border-slate-800 text-slate-400"
                         }`}
                       >
-                        Standard (Disadv)
+                        Standard Fire
                       </button>
                       <button
                         type="button"
@@ -1827,6 +1868,27 @@ export function EnginesStation({
                         Dogfight
                       </button>
                     </div>
+
+                    {helmAttackType === "dogfight" && (
+                      <div className="flex items-center justify-between p-2 rounded bg-purple-950/30 border border-purple-500/40 text-xs">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-bold text-purple-300 uppercase">Dogfight Maneuvering Contest:</span>
+                          <span className="text-[9px] text-slate-400">Roll opposed check vs target ship</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleRollDogfightContest}
+                            className="px-2 py-1 rounded bg-purple-500/20 border border-purple-400 text-purple-300 text-[10px] font-bold uppercase hover:bg-purple-500/30 cursor-pointer"
+                          >
+                            Roll Maneuvering
+                          </button>
+                          {dogfightCheckResult && (
+                            <span className="text-xs font-mono font-bold text-purple-200">{dogfightCheckResult}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto pr-1">
                       {forwardWeapons.map((w) => {
@@ -2013,7 +2075,7 @@ export function EnginesStation({
                   </div>
                 )}
 
-                {/* 5. FUEL & PROPULSION WORKSPACE */}
+                {/* 4. FUEL & PROPULSION WORKSPACE */}
                 {cardId === "fuel" && (
                   <div className="flex flex-col gap-3">
                     <div className="flex justify-between items-center border-b border-bridge-border/40 pb-1.5">
@@ -2069,7 +2131,7 @@ export function EnginesStation({
                   </div>
                 )}
 
-                {/* 6. TIMELINE WORKSPACE */}
+                {/* 5. TIMELINE WORKSPACE */}
                 {cardId === "time" && (
                   <div className="flex flex-col gap-3">
                     <div className="flex items-center justify-between bg-black/40 p-2.5 rounded border border-bridge-border/40">
@@ -2120,7 +2182,7 @@ export function EnginesStation({
                   </div>
                 )}
 
-                {/* 7. FTL VECTOR WORKSPACE */}
+                {/* 6. FTL VECTOR WORKSPACE */}
                 {cardId === "ftl" && (
                   <div className="flex flex-col gap-3">
                     <div className="bg-black/40 p-3 rounded border border-bridge-border/40 flex flex-col gap-2">
@@ -2159,7 +2221,7 @@ export function EnginesStation({
                   </div>
                 )}
 
-                {/* 8. HARDWARE MODIFICATIONS WORKSPACE */}
+                {/* 7. HARDWARE MODIFICATIONS WORKSPACE */}
                 {cardId === "mods" && (
                   <div className="flex flex-col gap-2">
                     <StationModifications 
@@ -2169,14 +2231,21 @@ export function EnginesStation({
                     />
                   </div>
                 )}
+
+                {/* 8. SHIP ABILITY SCORES & STATISTICS WORKSPACE */}
+                {cardId === "ship_stats" && (
+                  <div className="flex flex-col gap-3">
+                    <ShipStats shipConfig={shipConfig} proficiencyBonus={proficiencyBonus} />
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
       )}
 
-      {/* 5. TACTICAL CHASSIS MANEUVERS (ALWAYS READY TRAY AT BOTTOM) */}
-      {(hasPinpointStrike || hasRetroThrusters || hasVersatileSnubfighter || hasEvasiveManeuvers || hasAdaptiveArmor) && (
+      {/* 6. TACTICAL CHASSIS MANEUVERS (ALWAYS READY TRAY AT BOTTOM) */}
+      {shipTier >= 1 && (hasPinpointStrike || hasRetroThrusters || hasVersatileSnubfighter || hasEvasiveManeuvers || hasAdaptiveArmor) && (
         <section className="rounded-md border border-cyan-neon/40 bg-bridge-panel p-2.5 shadow-[0_0_12px_rgba(0,255,255,0.04)] flex flex-col gap-2">
           <div className="flex justify-between items-center border-b border-bridge-border/60 pb-1">
             <h3 className="text-[10px] font-bold tracking-[0.2em] text-cyan-neon uppercase">
@@ -2262,7 +2331,7 @@ export function EnginesStation({
               <div className="flex items-center gap-2">
                 <Flame className="h-4 w-4 text-amber-400" />
                 <h3 className="text-sm font-bold tracking-widest text-cyan-neon uppercase">
-                  Ship Start-Up &amp; Initiation Protocol
+                  Reactor Start-Up Protocol
                 </h3>
               </div>
               <button onClick={() => setShowStartupModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
@@ -2271,13 +2340,13 @@ export function EnginesStation({
             </div>
 
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300">Warm-Up: <strong className="text-amber-300">{normalStartupTime}</strong></span>
+              <span className="text-slate-300">Nominal Warm-Up: <strong className="text-amber-300">{normalStartupTime}</strong></span>
               <span className="text-xs text-cyan-neon font-bold uppercase">{duressCondition}</span>
             </div>
 
             <div className="bg-black/60 p-3 rounded border border-bridge-border/60 flex flex-col gap-2">
               <div className="flex justify-between text-xs font-bold text-slate-200">
-                <span>Procedures Completed:</span>
+                <span>Checklists Completed:</span>
                 <span className="text-cyan-neon">{initiationProcedures} / {targetProcedures}</span>
               </div>
               <div className="h-2 w-full bg-slate-900 rounded-sm overflow-hidden">
@@ -2360,8 +2429,6 @@ export function EnginesStation({
       {/* MODAL 3: ARM ORDNANCE */}
       {weaponArmModal && (() => {
         const weapon = weaponArmModal.weapon
-        const key = weapon.instanceId || weapon.id
-        const state = getLauncherState(key, weapon)
         const family = getLauncherFamily(weapon.name)
         const availableOptions = ordnanceList.filter((o) => o.category === family && o.currentReserve > 0)
 
@@ -2395,9 +2462,7 @@ export function EnginesStation({
         )
       })()}
 
-      {/* ========================================================================= */}
-      {/* MODAL 4: FULL-FIDELITY 4-STEP FIRE CONTROL ATTACK WIZARD                 */}
-      {/* ========================================================================= */}
+      {/* MODAL 4: 4-STEP FIRE CONTROL ATTACK WIZARD */}
       {activeWizardWeapon && (() => {
         const instanceKey = activeWizardWeapon.instanceId || activeWizardWeapon.id
         const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === activeWizardWeapon.name.toLowerCase())
@@ -2436,7 +2501,6 @@ export function EnginesStation({
         const hasDire = props.some((p: string) => p.includes("dire"))
         const hasPiercing = props.some((p: string) => p.includes("piercing"))
         const hasMelt = props.some((p: string) => p.includes("melt"))
-        const hasHeavy = props.some((p: string) => p.includes("heavy"))
         const hasSaturate = props.some((p: string) => p.includes("saturate"))
         const keenProp = props.find((p: string) => p.includes("keen"))
         const keenRating = keenProp ? parseInt(keenProp.replace(/[^0-9]/g, ""), 10) || 1 : 0
@@ -2446,31 +2510,16 @@ export function EnginesStation({
         const sFoilsAtkDelta = hasSFoils && !isOrdnance ? (activeSFoilsMode === "locked" ? -2 : 1) : 0
         let attackMod = baseAttackAbilityMod + (isAttackFighter ? 1 : 0) + sFoilsAtkDelta
 
-        const attackBreakdownParts: string[] = [
-          `${baseAttackAbilityMod >= 0 ? `+${baseAttackAbilityMod}` : baseAttackAbilityMod} from ${hasSaturate ? "Strength/Wisdom" : "Wisdom"} Modifier`,
-        ]
-        if (isAttackFighter) attackBreakdownParts.push("+1 from Attack Fighter Role Spec")
-        if (sFoilsAtkDelta !== 0) {
-          attackBreakdownParts.push(`${sFoilsAtkDelta > 0 ? `+${sFoilsAtkDelta}` : sFoilsAtkDelta} from S-Foils (${activeSFoilsMode === "locked" ? "Closed / Cruise" : "Attack Position"})`)
-        }
-
-        if (togglePiercing) {
-          attackMod += 1
-          attackBreakdownParts.push("+1 from Piercing Stance")
-        }
-        if (toggleDire) {
-          attackMod -= 1
-          attackBreakdownParts.push("-1 from Dire Stance")
-        }
-        if (toggleMelt) {
-          attackMod -= proficiencyBonus
-          attackBreakdownParts.push(`-${proficiencyBonus} from Melt Stance`)
-        }
+        if (togglePiercing) attackMod += 1
+        if (toggleDire) attackMod -= 1
+        if (toggleMelt) attackMod -= proficiencyBonus
 
         const saveDC = 8 + attackMod
 
-        const isHelmDisadvantage = helmAttackType === "standard"
-        const hasDisadvantage = rangeBracket === "long" || failsCon || (effectiveSlowedLevel >= 3) || isHelmDisadvantage
+        // SW5e Rules: Helm disadvantage applies only to Primary & Secondary weapons (Tertiary & Ordnance exempt)
+        const isTertiary = (activeWizardWeapon.category || "").toLowerCase().includes("tertiary")
+        const isHelmDisadvantaged = helmAttackType === "standard" && !isTertiary && !isOrdnance
+        const hasDisadvantage = rangeBracket === "long" || failsCon || (effectiveSlowedLevel >= 3) || isHelmDisadvantaged
         const hasAdvantage = isWeaponsBoosted
         const netRollMode = resolveAdvantageMode(hasAdvantage, hasDisadvantage)
 
@@ -2487,20 +2536,9 @@ export function EnginesStation({
         if (firingMode === "rapid") diceString = `${diceString} + ${diceString}`
 
         let dynamicFlat = dmgDetails.flatTotal
-        const damageBreakdownParts: string[] = [...(dmgDetails.sourceBreakdown || [])]
-
-        if (toggleDire) {
-          dynamicFlat += 1
-          damageBreakdownParts.push("+1 from Dire Stance")
-        }
-        if (togglePiercing) {
-          dynamicFlat -= 1
-          damageBreakdownParts.push("-1 from Piercing Stance")
-        }
-        if (toggleMelt) {
-          dynamicFlat += proficiencyBonus
-          damageBreakdownParts.push(`+${proficiencyBonus} from Melt Stance`)
-        }
+        if (toggleDire) dynamicFlat += 1
+        if (togglePiercing) dynamicFlat -= 1
+        if (toggleMelt) dynamicFlat += proficiencyBonus
 
         let finalDmgFormula = diceString
         if (dynamicFlat > 0) finalDmgFormula = `${diceString} + ${dynamicFlat}`
@@ -2554,7 +2592,7 @@ export function EnginesStation({
                     </h3>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[10px] text-muted-foreground uppercase">
-                        Mode: {helmAttackType === "attack_run" ? "Attack Run" : helmAttackType === "dogfight" ? "Dogfight" : "Standard Helm Fire"} • Step {wizardStep} of 4
+                        Mode: {helmAttackType === "attack_run" ? "Attack Run" : helmAttackType === "dogfight" ? "Dogfight" : "Standard Fire"} • Step {wizardStep} of 4
                       </span>
                     </div>
                   </div>
@@ -2582,19 +2620,9 @@ export function EnginesStation({
                 </div>
               )}
 
-              {isHelmDisadvantage && (
+              {isHelmDisadvantaged && (
                 <div className="p-2 rounded bg-amber-950/40 border border-amber-500/50 text-[10px] text-amber-300">
-                  ⚠️ Firing from the Helm without an Attack Run or Dogfight imposes disadvantage on the attack roll[cite: 8].
-                </div>
-              )}
-              {helmAttackType === "attack_run" && (
-                <div className="p-2 rounded bg-cyan-950/40 border border-cyan-neon/50 text-[10px] text-cyan-300">
-                  ✓ Attack Run: 150+ ft forward movement completed. Disadvantage removed[cite: 8].
-                </div>
-              )}
-              {helmAttackType === "dogfight" && (
-                <div className="p-2 rounded bg-purple-950/40 border border-purple-500/50 text-[10px] text-purple-300">
-                  ★ Dogfight: Disadvantage removed[cite: 8]. On a successful Maneuvering check, notify GM that target has disadvantage on their next attack[cite: 8].
+                  ⚠️ Firing primary/secondary weapons from the Helm without an Attack Run or Dogfight imposes disadvantage.
                 </div>
               )}
 
@@ -2617,9 +2645,7 @@ export function EnginesStation({
                     </div>
                   )}
 
-                  <p className="text-xs text-slate-300">
-                    Select the firing profile for this helm maneuver:
-                  </p>
+                  <p className="text-xs text-slate-300">Select the firing profile for this shot:</p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <button
@@ -2707,11 +2733,11 @@ export function EnginesStation({
               {wizardStep === 2 && (
                 <div className="flex flex-col gap-4 py-2">
                   <div className="flex justify-between items-center bg-black/50 p-2.5 rounded border border-bridge-border">
-                    <span className="text-xs text-muted-foreground">Calibrated Weapon Range:</span>
+                    <span className="text-xs text-muted-foreground">Weapon Range:</span>
                     <span className="text-xs font-bold text-cyan-neon">{normalRange} ft (Normal) / {maxRange} ft (Maximum)</span>
                   </div>
 
-                  <p className="text-xs text-slate-300">Target Range Bracket:</p>
+                  <p className="text-xs text-slate-300">Select target distance:</p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <button
@@ -2887,10 +2913,10 @@ export function EnginesStation({
                         </div>
 
                         <div className="flex flex-col justify-between gap-1">
-                          <span className="text-[10px] text-muted-foreground uppercase">Tabletop Roll Total</span>
+                          <span className="text-[10px] text-muted-foreground uppercase">Manual Roll Entry</span>
                           <input
                             type="number"
-                            placeholder="Final Roll Total"
+                            placeholder="Roll Total"
                             value={manualAttackInput}
                             onChange={(e) => setManualAttackInput(e.target.value)}
                             className="w-28 rounded bg-black border border-slate-700 px-2 py-1 text-xs text-cyan-300 font-bold focus:outline-none focus:border-cyan-neon"
@@ -2948,12 +2974,12 @@ export function EnginesStation({
                               {attackOutcome === "crit" ? (
                                 <>
                                   <Sparkles className="w-4 h-4 text-amber-400" />
-                                  Critical Hit Confirmed! {shipConfig?.useBrutalCriticals ? "(Brutal Critical Formula Active)" : "(Standard 5e Critical)"}
+                                  Critical Hit!
                                 </>
                               ) : (
                                 <>
                                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                                  Hit Confirmed! Report Damage to GM:
+                                  Hit Confirmed:
                                 </>
                               )}
                             </span>
@@ -3052,7 +3078,7 @@ export function EnginesStation({
                       {attackOutcome === "failed" && (
                         <div className="bg-emerald-950/30 border border-emerald-500/60 p-3.5 rounded flex flex-col gap-2.5">
                           <span className="text-xs font-bold text-emerald-400 uppercase">
-                            Failed Save! Report Damage to GM:
+                            Failed Save — Report Damage:
                           </span>
                           <div className="flex flex-col gap-1">
                             <span className="text-lg font-bold font-mono text-cyan-neon">

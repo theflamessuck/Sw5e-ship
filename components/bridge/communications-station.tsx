@@ -30,7 +30,9 @@ import {
   VolumeX,
   Activity,
   MessageSquare,
-  ShieldCheck
+  ShieldCheck,
+  Dices,
+  RotateCcw
 } from "lucide-react"
 
 // --- FLAT AVIONICS SOUND SYNTHESIZER & HAPTICS (NO ASSETS REQUIRED) ---
@@ -113,7 +115,7 @@ export type CommunicationsCardId =
   | "broadcast"
   | "yachtProtocols"
   | "mods"
-  | "telemetry"
+  | "ship_stats"
 
 interface CustomPreset {
   id: string
@@ -125,7 +127,7 @@ const DEFAULT_PRESETS: CustomPreset[] = [
   { id: "ew", name: "Electronic Warfare", activeCards: ["electronicWarfare", "interfere", "powerDice"] },
   { id: "social", name: "Social & Comms", activeCards: ["commsLink", "broadcast", "yachtProtocols"] },
   { id: "combat", name: "Tactical Combat", activeCards: ["powerDice", "electronicWarfare", "interfere"] },
-  { id: "all", name: "All Systems", activeCards: ["commsLink", "powerDice", "electronicWarfare", "interfere", "broadcast", "yachtProtocols", "mods", "telemetry"] }
+  { id: "all", name: "All Systems", activeCards: ["commsLink", "powerDice", "electronicWarfare", "interfere", "broadcast", "yachtProtocols", "mods", "ship_stats"] }
 ]
 
 interface CommunicationsStationProps {
@@ -185,9 +187,9 @@ export function CommunicationsStation({
   onUseStandingBy,
   leafOnTheWindUsed = false,
   onUseLeafOnTheWind,
-  versatileTransportUsed,
+  versatileTransportUsed = 0,
   onUpdateVersatileTransportUsed,
-  bestShipInVerseUsed,
+  bestShipInVerseUsed = false,
   onUpdateBestShipInVerseUsed,
   systemDamageLevel = 0,
   isDisabled = false,
@@ -259,7 +261,16 @@ export function CommunicationsStation({
     return manifest.filter((m) => m.location !== "communications" && !m.isPassenger)
   }, [manifest])
 
+  const commsMods = useMemo(() => {
+    return installedMods.filter(
+      (m) => m.station?.toLowerCase() === "communications"
+    )
+  }, [installedMods])
+
   const shipTier = typeof shipConfig?.tier === "number" ? shipConfig.tier : 0
+  const shipSize = (shipConfig?.size || "small").toLowerCase()
+  const isSmallOrTiny = shipSize === "small" || shipSize === "tiny"
+  const isMedium = shipSize === "medium"
   const tierUses = Math.max(1, shipTier)
   const proficiencyBonus = shipConfig?.proficiencyBonus ?? 2
 
@@ -268,6 +279,9 @@ export function CommunicationsStation({
 
   const rawStrength = (shipConfig as any)?.stats?.strength ?? 10
   const strMod = Math.floor((rawStrength - 10) / 2)
+
+  const rawIntelligence = (shipConfig as any)?.stats?.intelligence ?? 10
+  const intMod = Math.floor((rawIntelligence - 10) / 2)
 
   const powerCoupling = shipConfig?.powerCoupling ?? shipConfig?.couplingType ?? "Direct Power Coupling"
   const isDistributed = powerCoupling.toLowerCase().includes("distributed")
@@ -292,11 +306,16 @@ export function CommunicationsStation({
   const hasCommsPrototype = installedMods.some((m) => m.name.toUpperCase().includes("COMMUNICATIONS PACKAGE, PROTOTYPE"))
   const hasCommsRenowned = installedMods.some((m) => m.name.toUpperCase().includes("COMMUNICATIONS PACKAGE, RENOWNED"))
 
+  const hasVersatileTransport = isMedium && shipTier >= 3
+  const versatileMax = 2 * shipTier
+  const hasBestShip = isMedium && shipTier >= 5
+
   const [dischargerUses, setDischargerUses] = useState<number>(0)
   const [empUses, setEmpUses] = useState<number>(0)
   const [scramblerUses, setScramblerUses] = useState<number>(0)
   const [slicerUses, setSlicerUses] = useState<number>(0)
   const [tacticalFeedback, setTacticalFeedback] = useState<string | null>(null)
+  const [interfereRollResult, setInterfereRollResult] = useState<string | null>(null)
 
   const handleCustomConsume = (amount: number = 1) => {
     if (isDirect) {
@@ -318,11 +337,8 @@ export function CommunicationsStation({
       return true
     }
 
-    return false
+    return onConsumePowerDice(amount)
   }
-
-  const canSpendStation = effectiveAvailable > 0
-  const canSpendShared = isHubAndSpoke && sharedPoolDice > 0
 
   const handleTriggerElectricalDischarge = () => {
     if (dischargerUses >= tierUses) return
@@ -349,8 +365,37 @@ export function CommunicationsStation({
   const handleTriggerShipSlicer = () => {
     if (slicerUses >= tierUses || !shipSlicerMod) return
     setSlicerUses((prev) => prev + 1)
-    const dc = 8 + proficiencyBonus + chaMod
+    const dc = 8 + proficiencyBonus + intMod
     setTacticalFeedback(`${shipSlicerMod.name} Executed: Target must make a DC ${dc} Intelligence saving throw! (${shipSlicerMod.description})`)
+  }
+
+  const handleRollInterfere = () => {
+    const d20 = Math.floor(Math.random() * 20) + 1
+    const mod = interfereMod ?? 0
+    const total = d20 + mod
+    setInterfereRollResult(`Interfere Check: d20 (${d20}) ${mod >= 0 ? `+ ${mod}` : `${mod}`} = ${total}`)
+  }
+
+  const handleResetEwUses = () => {
+    setDischargerUses(0)
+    setEmpUses(0)
+    setScramblerUses(0)
+    setSlicerUses(0)
+    setTacticalFeedback("Tactical EW module charges reset.")
+  }
+
+  const handleUseVersatileTransport = () => {
+    if (versatileTransportUsed >= versatileMax) return
+    if (onUpdateVersatileTransportUsed) {
+      onUpdateVersatileTransportUsed((prev) => Math.min(versatileMax, prev + 1))
+    }
+  }
+
+  const handleUseBestShip = () => {
+    if (bestShipInVerseUsed) return
+    if (onUpdateBestShipInVerseUsed) {
+      onUpdateBestShipInVerseUsed(true)
+    }
   }
 
   // RENDER DOCKED SNAPSHOT CARD TILE
@@ -398,9 +443,9 @@ export function CommunicationsStation({
         </div>
 
         <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
-          <span>CONSOLE</span>
+          <span>PANEL</span>
           <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
-            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+            {isOpen ? "OPEN ▲" : "CLOSED ▼"}
           </span>
         </div>
       </button>
@@ -421,7 +466,7 @@ export function CommunicationsStation({
           <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
             {shipConfig?.name?.toUpperCase() || "VESSEL"} // COMMS &amp; ELECTRONIC WARFARE //{" "}
             <span className={isDisabled ? "text-red-400 font-bold animate-pulse" : "text-emerald-400 font-bold"}>
-              {isDisabled ? "LINK RESTRICTED (<1000 FT)" : "NETWORK SECURE"}
+              {isDisabled ? "TRANSCEIVER RESTRICTED (<1000 FT)" : "NETWORK SECURE"}
             </span>
           </p>
         </div>
@@ -487,6 +532,15 @@ export function CommunicationsStation({
           })}
           <button
             type="button"
+            onClick={() => applyPreset([])}
+            disabled={openCards.length === 0}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-slate-700 bg-black/40 text-slate-400 hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+            title="Collapse all open drawers"
+          >
+            Clear All
+          </button>
+          <button
+            type="button"
             onClick={handleSaveCustomPreset}
             className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
             title="Save current layout to local browser"
@@ -514,7 +568,7 @@ export function CommunicationsStation({
         </div>
       </div>
 
-      {/* 3. COMPACT CREW ROSTER HUD */}
+      {/* 3. PERSISTENT CREW ROSTER HUD */}
       <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
@@ -603,7 +657,7 @@ export function CommunicationsStation({
           "commsLink",
           "Array Link",
           isDisabled ? "Restricted" : hasCommsRenowned ? "Galaxy-Wide" : hasCommsPrototype ? "Territory" : "Standard",
-          isDisabled ? "< 1,000 Ft Only" : "Broadband Online",
+          isDisabled ? "< 1,000 Ft Cap" : "Broadband Online",
           <Radio className="w-3 h-3 text-cyan-neon" />,
           isDisabled ? "text-red-400" : "text-cyan-neon"
         )}
@@ -656,17 +710,17 @@ export function CommunicationsStation({
         {renderSnapshotCard(
           "mods",
           "Hardware",
-          `${installedMods.length} Mods`,
-          "Comms Systems",
+          `${commsMods.length} Mods`,
+          "Comms Hardware",
           <Cpu className="w-3 h-3 text-purple-400" />,
           "text-purple-300"
         )}
 
         {renderSnapshotCard(
-          "telemetry",
-          "Telemetry",
-          `${(shipConfig as any)?.stats?.charisma ?? 10} CHA`,
-          `DC ${8 + proficiencyBonus + chaMod} Save`,
+          "ship_stats",
+          "Ship Stats",
+          `AC ${shipConfig?.armorClass ?? 12}`,
+          "Armor Class",
           <Activity className="w-3 h-3 text-cyan-neon" />,
           "text-cyan-neon"
         )}
@@ -676,8 +730,8 @@ export function CommunicationsStation({
       {openCards.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
           <Radio className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
-          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL COMMUNICATIONS DRAWERS COLLAPSED</p>
-          <p className="text-[10px] mt-1 text-slate-500">Tap any of the status cards above or choose an operational preset.</p>
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL COMMUNICATIONS PANELS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any status card above or choose an operational preset.</p>
         </div>
       ) : (
         <div
@@ -710,7 +764,7 @@ export function CommunicationsStation({
                       {cardId === "broadcast" && "Hail & Social Broadcast Channels"}
                       {cardId === "yachtProtocols" && "Yacht Diplomatic Protocols"}
                       {cardId === "mods" && "Installed Communications Hardware"}
-                      {cardId === "telemetry" && "Vessel Charisma & Core Telemetry"}
+                      {cardId === "ship_stats" && "Ship Ability Scores & Statistics"}
                     </h3>
                   </div>
 
@@ -727,7 +781,7 @@ export function CommunicationsStation({
                       type="button"
                       onClick={() => toggleCard(cardId)}
                       className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
-                      title="Collapse Drawer"
+                      title="Collapse Panel"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -740,7 +794,7 @@ export function CommunicationsStation({
                     {isDisabled && (
                       <div className="p-2.5 rounded border border-red-500/80 bg-red-950/60 text-xs text-red-200 flex items-center gap-2">
                         <AlertOctagon className="w-4 h-4 text-red-400 shrink-0" />
-                        <span>DISABLED VESSEL: External communications restricted to within 1,000 feet.</span>
+                        <span>Vessel Disabled: High-gain transceiver offline. Local transmission range capped at 1,000 ft.</span>
                       </div>
                     )}
 
@@ -925,7 +979,7 @@ export function CommunicationsStation({
                                 </span>
                               </div>
                               <p className="text-[9px] text-muted-foreground leading-relaxed truncate" title={shipSlicerMod.description}>
-                                DC {8 + proficiencyBonus + chaMod} Int save.
+                                DC {8 + proficiencyBonus + intMod} Int save.
                               </p>
                             </div>
                             <button
@@ -963,18 +1017,26 @@ export function CommunicationsStation({
                       </div>
                     )}
 
-                    {tacticalFeedback && (
-                      <div className="p-2 rounded bg-black/60 border border-bridge-border text-xs text-cyan-neon font-mono">
-                        {tacticalFeedback}
-                      </div>
-                    )}
+                    <div className="flex items-center justify-between pt-1 border-t border-bridge-border/40">
+                      <button
+                        type="button"
+                        onClick={handleResetEwUses}
+                        className="px-2 py-0.5 rounded border border-bridge-border bg-slate-900 text-slate-400 hover:text-white text-[9px] font-bold uppercase flex items-center gap-1 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Reset Charges
+                      </button>
+
+                      {tacticalFeedback && (
+                        <span className="text-[10px] text-cyan-neon font-mono truncate max-w-xs">{tacticalFeedback}</span>
+                      )}
+                    </div>
                   </div>
                 )}
 
                 {/* 4. INTERFERE WORKSPACE */}
                 {cardId === "interfere" && (
                   <div className="flex flex-col gap-3">
-                    <div className="bg-black/40 border border-bridge-border/60 p-3 rounded flex flex-col justify-between gap-2">
+                    <div className="bg-black/40 border border-bridge-border/60 p-3 rounded flex flex-col justify-between gap-2.5">
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-cyan-neon text-sm uppercase">Interfere Check</span>
                         <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${
@@ -988,12 +1050,31 @@ export function CommunicationsStation({
                       <p className="text-[11px] text-slate-300 leading-relaxed">
                         Contested Charisma (Interfere) check against target's Wisdom (Scan). On success, subject has disadvantage on its next ability check or attack roll before the start of your next turn.
                       </p>
-                      <div className="flex items-center justify-between border-t border-bridge-border/40 pt-2 text-xs">
-                        <span className="text-muted-foreground">Interfere Modifier:</span>
-                        <span className="font-bold text-amber-300 font-mono text-sm">
-                          {interfereMod !== undefined ? (interfereMod >= 0 ? `+${interfereMod}` : `${interfereMod}`) : "+0"}
-                        </span>
+
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-t border-bridge-border/40 pt-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Modifier:</span>
+                          <span className="font-bold text-amber-300 font-mono text-sm">
+                            {interfereMod !== undefined ? (interfereMod >= 0 ? `+${interfereMod}` : `${interfereMod}`) : "+0"}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleRollInterfere}
+                            className="px-3 py-1 rounded bg-cyan-neon/20 hover:bg-cyan-neon/30 border border-cyan-neon/60 text-cyan-neon text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Dices className="w-3.5 h-3.5" /> Roll Interfere
+                          </button>
+                        </div>
                       </div>
+
+                      {interfereRollResult && (
+                        <div className="p-2 rounded bg-black/60 border border-cyan-neon/40 text-xs font-mono font-bold text-cyan-neon mt-1">
+                          {interfereRollResult}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1078,8 +1159,8 @@ export function CommunicationsStation({
                   </div>
                 )}
 
-                {/* 8. CORE TELEMETRY WORKSPACE */}
-                {cardId === "telemetry" && (
+                {/* 8. SHIP ABILITY SCORES & STATISTICS WORKSPACE */}
+                {cardId === "ship_stats" && (
                   <div className="flex flex-col gap-3">
                     <ShipStats shipConfig={shipConfig} systemDamageLevel={systemDamageLevel} />
                   </div>
@@ -1088,6 +1169,97 @@ export function CommunicationsStation({
             )
           })}
         </div>
+      )}
+
+      {/* 6. CHASSIS TACTICAL SURGES & REACTIONS (ALWAYS READY TRAY AT BOTTOM) */}
+      {shipTier >= 3 && (
+        <section className="rounded-md border border-cyan-neon/40 bg-bridge-panel p-2.5 shadow-[0_0_12px_rgba(0,255,255,0.04)] flex flex-col gap-2">
+          <div className="flex items-center justify-between border-b border-bridge-border/60 pb-1">
+            <h3 className="text-[10px] font-bold tracking-[0.2em] text-cyan-neon uppercase flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-cyan-neon" />
+              Chassis Tactical Surges (Tier {shipTier})
+            </h3>
+            <span className="text-[8px] font-mono text-muted-foreground">COMBAT ACTIONS</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            {isSmallOrTiny && shipTier >= 4 && (
+              <button
+                type="button"
+                disabled={standingByUsed}
+                onClick={onUseStandingBy}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  standingByUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-cyan-neon/50 text-cyan-neon hover:bg-cyan-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Standing By</span>
+                  <span>{standingByUsed ? "USED" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: +1 Extra Action</span>
+              </button>
+            )}
+
+            {isSmallOrTiny && shipTier >= 5 && (
+              <button
+                type="button"
+                disabled={leafOnTheWindUsed}
+                onClick={onUseLeafOnTheWind}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  leafOnTheWindUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-emerald-500/50 text-emerald-400 hover:bg-emerald-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Leaf on the Wind</span>
+                  <span>{leafOnTheWindUsed ? "USED" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Treat roll as Nat 20</span>
+              </button>
+            )}
+
+            {isMedium && hasVersatileTransport && (
+              <button
+                type="button"
+                disabled={versatileTransportUsed >= versatileMax}
+                onClick={handleUseVersatileTransport}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  versatileTransportUsed >= versatileMax
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-cyan-400/50 text-cyan-300 hover:bg-cyan-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Versatile Transport</span>
+                  <span>{versatileMax - versatileTransportUsed}/{versatileMax}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Grant Advantage</span>
+              </button>
+            )}
+
+            {isMedium && hasBestShip && (
+              <button
+                type="button"
+                disabled={bestShipInVerseUsed}
+                onClick={handleUseBestShip}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  bestShipInVerseUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-amber-400/50 text-amber-300 hover:bg-amber-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Best Ship in 'Verse</span>
+                  <span>{bestShipInVerseUsed ? "EXP" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Action: Gain Resistance</span>
+              </button>
+            )}
+          </div>
+        </section>
       )}
     </div>
   )

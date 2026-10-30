@@ -12,19 +12,18 @@ import {
   type GalacticRegion,
 } from "@/lib/travel-matrix"
 import type { ActiveStatus } from "./defense-station"
+import type { ShipConfig } from "./ship-setup"
 import { 
   Rocket, 
   Clock, 
   CheckCircle2, 
   Navigation, 
-  Compass, 
   AlertTriangle, 
-  Dices, 
-  Coins, 
-  Package, 
   X,
   ShieldCheck,
-  ShieldAlert
+  ShieldAlert,
+  Fuel,
+  Info
 } from "lucide-react"
 
 export interface JourneyData {
@@ -57,6 +56,7 @@ interface NavcomputerStationProps {
   onRemoveMod?: (instanceId: string) => void
   onAddStatus?: (status: ActiveStatus) => void
   onApplyDirectHullDamage?: (amount: number) => void
+  shipConfig?: ShipConfig
 }
 
 const ALL_REGIONS: GalacticRegion[] = [
@@ -102,6 +102,7 @@ export function NavcomputerStation({
   onRemoveMod,
   onAddStatus,
   onApplyDirectHullDamage,
+  shipConfig,
 }: NavcomputerStationProps) {
   // -------------------------------------------------------------
   // 1. HYPERDRIVE DETECTION & CLASS EXTRACTION
@@ -131,6 +132,8 @@ export function NavcomputerStation({
 
   const primaryClass = useMemo(() => {
     if (!installedHyperdrive) return 1.0
+    const explicitClass = (installedHyperdrive as any).class ?? (installedHyperdrive as any).hyperdriveClass
+    if (typeof explicitClass === "number") return explicitClass
     const match = installedHyperdrive.name.match(/class\s*([0-9]+(?:\.[0-9]+)?)/i)
     if (match) {
       return parseFloat(match[1])
@@ -155,15 +158,53 @@ export function NavcomputerStation({
     }
   }, [useBackupHyperdrive, hasBackupHyperdrive, primaryClass])
 
+  // Ship hull scaling calculation helpers
+  const actualBaseHull = shipConfig?.baseHull ?? (shipConfig as any)?.hullMax ?? 40
+  const actualHullDieSides = useMemo(() => {
+    const rawDie = (shipConfig as any)?.hullDiceType ?? (shipConfig as any)?.hull?.hdType
+    if (typeof rawDie === "string") {
+      const parsed = parseInt(rawDie.replace(/[^0-9]/g, ""), 10)
+      if (!isNaN(parsed) && parsed > 0) return parsed
+    }
+    const size = (shipConfig?.size || "medium").toLowerCase()
+    switch (size) {
+      case "tiny": return 4
+      case "small": return 6
+      case "medium": return 8
+      case "large": return 10
+      case "huge": return 12
+      case "gargantuan": return 20
+      default: return 8
+    }
+  }, [shipConfig])
+
+  // Fuel multiplier for jump burn preview
+  const rawReactorType = shipConfig?.reactorType ?? "Fuel Cell Reactor"
+  const fuelMultiplier = rawReactorType.toLowerCase().includes("ionization") 
+    ? 0.5 
+    : rawReactorType.toLowerCase().includes("power core") 
+    ? 1.5 
+    : 1.0
+
   // -------------------------------------------------------------
-  // 2. PLANET SELECTION & ELEVATED STATE SYNC
+  // 2. PLANET SELECTION & CUSTOM/DEEP SPACE PRESERVATION
   // -------------------------------------------------------------
   const [originSearch, setOriginSearch] = useState<string>(currentLocationPlanet)
   const [selectedOrigin, setSelectedOrigin] = useState<PlanetRecord | null>(() => {
-    return (
-      PLANETS_DATA.find((p) => p.name.toLowerCase() === currentLocationPlanet.toLowerCase()) ||
-      PLANETS_DATA[0]
-    )
+    const found = PLANETS_DATA.find((p) => p.name.toLowerCase() === currentLocationPlanet.toLowerCase())
+    if (found) return found
+    if (currentLocationPlanet.toLowerCase().includes("deep space")) {
+      return {
+        name: currentLocationPlanet,
+        region: "Outer Rim Territories",
+        sector: "Transit Corridor",
+        system: "Interstellar Space",
+        inhabitants: "None",
+        capitalCity: "None",
+        gridCoordinates: "Unknown",
+      }
+    }
+    return PLANETS_DATA[0]
   })
   const [isOriginDropdownOpen, setIsOriginDropdownOpen] = useState<boolean>(false)
 
@@ -185,7 +226,19 @@ export function NavcomputerStation({
       const found = PLANETS_DATA.find(
         (p) => p.name.toLowerCase() === currentLocationPlanet.toLowerCase()
       )
-      if (found) setSelectedOrigin(found)
+      if (found) {
+        setSelectedOrigin(found)
+      } else if (currentLocationPlanet.toLowerCase().includes("deep space")) {
+        setSelectedOrigin({
+          name: currentLocationPlanet,
+          region: "Outer Rim Territories",
+          sector: "Transit Corridor",
+          system: "Interstellar Space",
+          inhabitants: "None",
+          capitalCity: "None",
+          gridCoordinates: "Unknown",
+        })
+      }
     }
   }, [currentLocationPlanet])
 
@@ -227,7 +280,7 @@ export function NavcomputerStation({
   }, [])
 
   // -------------------------------------------------------------
-  // 3. INTRA-SYSTEM SUBLIGHT FLIGHT (1d12 HOURS REALSPACE)
+  // 3. INTRA-SYSTEM SUBLIGHT FLIGHT
   // -------------------------------------------------------------
   const [systemTransitCache, setSystemTransitCache] = useState<Record<string, number>>({})
   const [sublightArrivalLog, setSublightArrivalLog] = useState<string | null>(null)
@@ -273,7 +326,7 @@ export function NavcomputerStation({
     setDestSearch("")
 
     setSublightArrivalLog(
-      `Arrived at ${destName}! Sublight transit completed in ${hours} hour${hours > 1 ? "s" : ""} via realspace thrusters.`
+      `Arrived at ${destName}. Sublight transit completed in ${hours} hour${hours > 1 ? "s" : ""} via realspace thrusters.`
     )
 
     setEquationsCompleted(0)
@@ -326,7 +379,7 @@ export function NavcomputerStation({
   }
 
   // -------------------------------------------------------------
-  // 5. MID-TRIP REROUTE PROMPT (ASK DM REGION)
+  // 5. MID-TRIP REROUTE PROMPT
   // -------------------------------------------------------------
   const [rerouteModalOpen, setRerouteModalOpen] = useState<boolean>(false)
   const [selectedRerouteRegion, setSelectedRerouteRegion] = useState<GalacticRegion>("Outer Rim Territories")
@@ -444,6 +497,21 @@ export function NavcomputerStation({
     }
   }, [selectedOrigin, selectedDest, isIntraSystemFlight, activeHyperdriveClass, modifierChoice])
 
+  const estimatedFuelBurn = useMemo(() => {
+    if (!travelDuration || travelDuration.isUnknown || travelDuration.days === null) {
+      return null
+    }
+    // SW5e Rules: 1 unit per jump to hyperspace + 1 unit per day of flight in hyperspace
+    const days = Math.max(1, Math.ceil(travelDuration.days))
+    const totalUnits = (1 + days) * fuelMultiplier
+    return {
+      days,
+      totalUnits: Math.round(totalUnits * 10) / 10,
+      jumpCost: 1 * fuelMultiplier,
+      dailyCost: days * fuelMultiplier
+    }
+  }, [travelDuration, fuelMultiplier])
+
   const evaluateRoll = (total: number) => {
     if (total >= 30) return { successes: 5, label: "PERFECT (+5 Equations)" }
     if (total >= 26) return { successes: 4, label: "MASTERFUL (+4 Equations)" }
@@ -525,7 +593,7 @@ export function NavcomputerStation({
     if (!hasHyperdrive) {
       setJumpResult({
         type: "error",
-        message: "Engagement Aborted: No functional hyperdrive module detected on this vessel. Install or repair hyperdrive before jumping.",
+        message: "Jump Aborted: No functional hyperdrive module detected on this vessel.",
       })
       return
     }
@@ -533,7 +601,7 @@ export function NavcomputerStation({
     if (!selectedOrigin || !selectedDest) {
       setJumpResult({
         type: "error",
-        message: "Engagement Aborted: Origin and Destination vectors must be established.",
+        message: "Jump Aborted: Origin and Destination vectors must be established.",
       })
       return
     }
@@ -575,67 +643,64 @@ export function NavcomputerStation({
         roll: d20,
         mod: equationsCompleted,
         total,
-        message: `Natural 20 on a Blind Jump! The starship drops out of hyperspace completely unscathed, but in a completely unknown and uncharted location: ${destName}.`,
+        message: `Natural 20 on a Blind Jump! The starship drops out of hyperspace completely unscathed, but in an uncharted sector: ${destName}.`,
       })
       return
     }
 
     if (total <= 2) {
-      message = "Catastrophic failure: Hyperdrive rendered unusable until refitted by pressing the Execute Payment Settlement button at a repair facility."
+      message = "Catastrophic failure: Hyperdrive rendered unusable until repaired at a shipyard during maintenance settlement."
       onAddStatus?.({
         id: `mishap-hyperdrive-${Date.now()}`,
-        title: "HYPERDRIVE CATASTROPHIC FAILURE // UNUSABLE",
-        effect: "Hyperdrive motivator fractured. All hyperspace jumps locked until refitted at a shipyard.",
-        duration: "Until Refit (Payment Settlement)",
+        title: "HYPERDRIVE OFFLINE // UNUSABLE",
+        effect: "Hyperdrive motivator fractured. All hyperspace jumps locked until repaired at a shipyard.",
+        duration: "Until Shipyard Settlement",
       })
     } else if (total <= 5) {
-      message = "Debris collision: Hull takes 1/10th max Hull Points damage and shields regenerate at half rate until refitted by pressing the Execute Payment Settlement button at a repair facility."
-      const baseHull = 40
-      const collisionDmg = Math.max(1, Math.ceil(baseHull / 10))
+      const collisionDmg = Math.max(1, Math.ceil(actualBaseHull / 10))
+      message = `Debris collision: Hull takes ${collisionDmg} direct damage (1/10th max HP) and shield regeneration rate is halved until repaired at a shipyard during maintenance settlement.`
       onApplyDirectHullDamage?.(collisionDmg)
       onAddStatus?.({
         id: `mishap-debris-${Date.now()}`,
         title: "SHIELD REGEN HALVED // DEBRIS COLLISION",
-        effect: `Hull took -${collisionDmg} direct HP damage. Shield regeneration rate is halved until refitted at a shipyard.`,
-        duration: "Until Refit (Payment Settlement)",
+        effect: `Hull took -${collisionDmg} direct HP damage. Shield regeneration rate is halved until repaired at a shipyard.`,
+        duration: "Until Shipyard Settlement",
       })
     } else if (total <= 8) {
-      message = "Gravity warp: Structural integrity warped (Armor Class reduced by 2 until refitted by pressing the Execute Payment Settlement button at a repair facility)."
+      message = "Gravity warp: Structural integrity warped (Armor Class reduced by 2 until repaired at a shipyard during maintenance settlement)."
       onAddStatus?.({
         id: `mishap-warp-${Date.now()}`,
         title: "GRAVITY WARP // AC -2",
-        effect: "Vessel armor class reduced by 2 due to hyperspace shear until refitted at a shipyard.",
-        duration: "Until Refit (Payment Settlement)",
+        effect: "Vessel armor class reduced by 2 due to hyperspace shear until repaired at a shipyard.",
+        duration: "Until Shipyard Settlement",
       })
     } else if (total <= 11) {
-      message = "Gravity field: Unexpected gravitational turbulence. Maneuver checks suffer disadvantage until refitted by pressing the Execute Payment Settlement button at a repair facility."
+      message = "Gravity field: Unexpected gravitational turbulence. Maneuver checks suffer disadvantage until repaired at a shipyard during maintenance settlement."
       onAddStatus?.({
         id: `mishap-field-${Date.now()}`,
         title: "GRAVITY FIELD // MANEUVER DISADVANTAGE",
-        effect: "Disadvantage on all Dexterity (Maneuvering) checks until refitted at a shipyard.",
-        duration: "Until Refit (Payment Settlement)",
+        effect: "Disadvantage on all Dexterity (Maneuvering) checks until repaired at a shipyard.",
+        duration: "Until Shipyard Settlement",
       })
     } else if (total <= 14) {
-      message = "Supernova radiation: Computer sub-processors scorched. Intelligence checks have disadvantage until refitted by pressing the Execute Payment Settlement button at a repair facility."
+      message = "Supernova radiation: Computer sub-processors scorched. Intelligence checks suffer disadvantage until repaired at a shipyard during maintenance settlement."
       onAddStatus?.({
         id: `mishap-radiation-${Date.now()}`,
         title: "SUPERNOVA RADIATION // INT DISADVANTAGE",
-        effect: "Disadvantage on all Intelligence checks until refitted at a shipyard.",
-        duration: "Until Refit (Payment Settlement)",
+        effect: "Disadvantage on all Intelligence checks until repaired at a shipyard.",
+        duration: "Until Shipyard Settlement",
       })
     } else if (total <= 17) {
-      message = "Dust cloud: Sensors clogged. Scan and Probe checks suffer disadvantage until refitted by pressing the Execute Payment Settlement button at a repair facility."
+      message = "Dust cloud: Sensors clogged. Scan and Probe checks suffer disadvantage until repaired at a shipyard during maintenance settlement."
       onAddStatus?.({
         id: `mishap-dust-${Date.now()}`,
         title: "DUST CLOUD // SENSORS CLOGGED",
-        effect: "Disadvantage on Wisdom (Scan) and Intelligence (Probe) checks until refitted at a shipyard.",
-        duration: "Until Refit (Payment Settlement)",
+        effect: "Disadvantage on Wisdom (Scan) and Intelligence (Probe) checks until repaired at a shipyard.",
+        duration: "Until Shipyard Settlement",
       })
     } else if (total <= 19) {
-      message = "The ship encounters dumped cargo, setting off a collision alarm! A DC 15 Constitution saving throw is required."
-      // Trigger interactive dumped cargo modal
-      const shipHitDieSides = 8
-      const dmgRoll = rollDiceFormula(3, shipHitDieSides)
+      message = "Collision alarm: Encountered dumped cargo containers adrift in space. A DC 15 Constitution saving throw is required."
+      const dmgRoll = rollDiceFormula(3, actualHullDieSides)
       const halfDmg = Math.max(1, Math.floor(dmgRoll.total / 2))
 
       const tonsRoll = rollDiceFormula(10, 10).total
@@ -644,7 +709,7 @@ export function NavcomputerStation({
 
       setCargoMishapModal({
         open: true,
-        hitDieType: shipHitDieSides,
+        hitDieType: actualHullDieSides,
         cargoTons: tonsRoll,
         valuePerTon: valueMultiplierRoll,
         totalCargoValue,
@@ -653,7 +718,7 @@ export function NavcomputerStation({
         resolved: false,
       })
     } else {
-      message = "Narrow escape! The starship suffers no adverse consequences despite incomplete calculations."
+      message = "Narrow escape! The starship drops into hyperspace without consequences despite incomplete calculations."
     }
 
     setJumpResult({
@@ -694,7 +759,7 @@ export function NavcomputerStation({
     setLastRollResult(null)
     setJumpResult({
       type: "success",
-      message: `Re-entered realspace at ${activeJourney.destination}. Sublight drives engaged. Coordinates updated.`,
+      message: `Re-entered realspace at ${activeJourney.destination}. Sublight drives engaged.`,
     })
   }
 
@@ -765,7 +830,11 @@ export function NavcomputerStation({
                 : "bg-cyan-neon/10 text-cyan-neon border-cyan-neon/40"
             }`}
           >
-            DATA: {astrogationAdvantage.toUpperCase()}
+            {astrogationAdvantage === "advantage"
+              ? "STAR CHARTS: CURRENT (ADVANTAGE)"
+              : astrogationAdvantage === "disadvantage"
+              ? "STAR CHARTS: OUTDATED (DISADVANTAGE)"
+              : "STAR CHARTS: SYNCHRONIZED"}
           </span>
 
           {onBackToEngines && (
@@ -778,6 +847,18 @@ export function NavcomputerStation({
           )}
         </div>
       </div>
+
+      {/* OUTDATED CHARTS REMINDER ALERT */}
+      {astrogationAdvantage === "disadvantage" && (
+        <section className="rounded-md border border-amber-500/60 bg-amber-950/30 p-3 shadow-[0_0_12px_rgba(251,191,36,0.15)] flex items-center justify-between font-mono text-xs">
+          <div className="flex items-center gap-2.5 text-amber-300">
+            <Info className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>Outdated Navigational Charts:</strong> Over 7 days since last astrogation sync. All astrogation checks suffer disadvantage. Purchase updated charts at any port or the Finance station for 150 cr.
+            </span>
+          </div>
+        </section>
+      )}
 
       {/* SUBLIGHT ARRIVAL BANNER */}
       {sublightArrivalLog && (
@@ -802,11 +883,11 @@ export function NavcomputerStation({
           <div className="flex items-center gap-2.5">
             <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
             <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-red-300">
-              CRITICAL HARDWARE WARNING: HYPERDRIVE OFFLINE / NOT INSTALLED
+              HARDWARE ALERT: NO HYPERDRIVE INSTALLED
             </h4>
           </div>
           <p className="mt-1.5 text-[11px] font-mono text-slate-300 leading-relaxed">
-            This vessel is not currently fitted with an operational hyperdrive. Trajectory routes can still be simulated, but hyperdrive jump sequences cannot be engaged until a drive is installed.
+            This vessel is not fitted with an operational hyperdrive. Trajectory routes can be plotted, but jump sequences cannot be engaged until a drive is installed.
           </p>
         </section>
       )}
@@ -819,12 +900,12 @@ export function NavcomputerStation({
               Route Planner
             </h3>
             <p className="text-[10px] text-muted-foreground">
-              Select origin and destination planets to calculate region-to-region travel duration adjusted for hyperdrive class.
+              Select origin and destination planets to calculate travel time adjusted for hyperdrive class.
             </p>
           </div>
 
           <div className="flex items-center gap-2 font-mono text-[9px]">
-            <span className="text-muted-foreground uppercase">Flight Regime:</span>
+            <span className="text-muted-foreground uppercase">Travel Mode:</span>
             <span className={`rounded border px-2 py-0.5 font-bold uppercase ${
               isIntraSystemFlight
                 ? "border-emerald-400/60 bg-emerald-950/40 text-emerald-300"
@@ -1036,7 +1117,7 @@ export function NavcomputerStation({
             <div className="mt-4 p-3.5 rounded bg-black/70 border border-cyan-neon/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 font-mono">
               <div>
                 <span className="text-[9px] uppercase tracking-wider text-muted-foreground block">
-                  Calculated Transit Trajectory ({selectedOrigin.region} &rarr; {selectedDest.region})
+                  Estimated Travel Time ({selectedOrigin.region} &rarr; {selectedDest.region})
                 </span>
                 <span className="text-sm font-bold text-cyan-neon">
                   {selectedOrigin.name} &rarr; {selectedDest.name}
@@ -1060,6 +1141,17 @@ export function NavcomputerStation({
                   <div className="flex flex-col text-right border-l border-bridge-border/40 pl-3">
                     <span className="text-[8px] uppercase tracking-wider text-muted-foreground">Weeks</span>
                     <span className="text-sm font-bold text-emerald-400">{travelDuration.displayWeeks}</span>
+                  </div>
+                  <div className="flex flex-col text-right border-l border-bridge-border/40 pl-3">
+                    <span className="text-[8px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                      <Fuel className="h-3 w-3 text-amber-400" /> Fuel Burn
+                    </span>
+                    <span className="text-sm font-bold text-amber-400 font-mono" title={`Jump entry (${estimatedFuelBurn?.jumpCost}u) + ${estimatedFuelBurn?.days} days transit (${estimatedFuelBurn?.dailyCost}u)`}>
+                      {estimatedFuelBurn ? `${estimatedFuelBurn.totalUnits} Units` : `${fuelMultiplier} Unit`}
+                    </span>
+                    <span className="text-[8px] text-muted-foreground font-mono">
+                      (1 Jump + {estimatedFuelBurn?.days ?? 1}D)
+                    </span>
                   </div>
                 </div>
               )}
@@ -1155,7 +1247,7 @@ export function NavcomputerStation({
         </section>
       )}
 
-      {/* EQUATION COMPLETION & ENGAGE HYPERDRIVE (ONLY FOR INTERSTELLAR FTL) */}
+      {/* EQUATION COMPLETION & ENGAGE HYPERDRIVE */}
       {!isIntraSystemFlight ? (
         <Panel title="Astrogation Calculation Status" code="NAV // EXECUTION">
           <div className="flex flex-col gap-4 p-2">
@@ -1205,10 +1297,10 @@ export function NavcomputerStation({
                   }`}
                 >
                   {!hasHyperdrive
-                    ? "ENGAGE HYPERDRIVE (NO DRIVE DETECTED)"
+                    ? "JUMP TO HYPERSPACE (NO DRIVE DETECTED)"
                     : equationsCompleted >= targetEquations
-                    ? "ENGAGE HYPERDRIVE (OPTIMAL VECTOR)"
-                    : "ENGAGE HYPERDRIVE (INCOMPLETE EQUATIONS)"}
+                    ? "JUMP TO HYPERSPACE"
+                    : "RISKY JUMP (CALCULATIONS INCOMPLETE)"}
                 </button>
               </div>
             </div>
@@ -1245,7 +1337,7 @@ export function NavcomputerStation({
         </Panel>
       ) : null}
 
-      {/* ROUTING PARAMETERS & ROLL SIMULATOR (ONLY FOR INTERSTELLAR FTL) */}
+      {/* ROUTING PARAMETERS & ROLL SIMULATOR */}
       {!isIntraSystemFlight && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col justify-between">
@@ -1326,14 +1418,14 @@ export function NavcomputerStation({
                   }`}
                 >
                   {astrogationAdvantage === "advantage"
-                    ? "Data: Advantage"
+                    ? "Charts: Advantage"
                     : astrogationAdvantage === "disadvantage"
-                    ? "Data: Disadvantage"
-                    : "Data: Current"}
+                    ? "Charts: Disadvantage"
+                    : "Charts: Current"}
                 </span>
               </div>
               <p className="text-[10px] text-muted-foreground mb-3">
-                Chart sync state applies <strong>{astrogationAdvantage.toUpperCase()}</strong>. Total modifier: {totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod}.
+                Total modifier applied to roll: <strong>{totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod}</strong>.
               </p>
 
               <div className="flex gap-2 mb-3">
@@ -1479,7 +1571,7 @@ export function NavcomputerStation({
         </div>
       )}
 
-      {/* REROUTE / EMERGENCY DROP-OUT (ASK DM REGION) MODAL */}
+      {/* REROUTE / EMERGENCY DROP-OUT MODAL */}
       {rerouteModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="flex w-full max-w-md flex-col rounded-lg border border-red-500/80 bg-black/95 p-5 shadow-[0_0_25px_rgba(239,68,68,0.3)]">
@@ -1513,7 +1605,7 @@ export function NavcomputerStation({
                 onClick={() => setRerouteModalOpen(false)}
                 className="rounded border border-bridge-border px-3 py-1.5 text-xs font-mono text-muted-foreground hover:text-white cursor-pointer"
               >
-                CANCEL (REMAIN IN FTL)
+                CANCEL (REMAIN IN HYPERSPACE)
               </button>
               <button
                 onClick={handleConfirmReroute}
@@ -1526,7 +1618,7 @@ export function NavcomputerStation({
         </div>
       )}
 
-      {/* DUMPED CARGO COLLISION ALARM MODAL (18-19 MISHAP) */}
+      {/* DUMPED CARGO COLLISION ALARM MODAL */}
       {cargoMishapModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 font-mono">
           <div className="w-full max-w-lg rounded-lg border-2 border-amber-500 bg-slate-950 p-5 shadow-[0_0_35px_rgba(245,158,11,0.35)] flex flex-col gap-4 text-xs">
@@ -1534,7 +1626,7 @@ export function NavcomputerStation({
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-amber-400 animate-pulse" />
                 <h3 className="text-sm font-bold text-amber-300 uppercase tracking-widest">
-                  Collision Warning: Dumped Cargo Container
+                  Collision Warning: Dumped Cargo Adrift
                 </h3>
               </div>
               {cargoMishapModal.resolved && (
@@ -1619,7 +1711,7 @@ export function NavcomputerStation({
         </div>
       )}
 
-      {/* INSTALLED STATION MODIFICATIONS (BOTTOM) */}
+      {/* INSTALLED STATION MODIFICATIONS */}
       <section className="rounded-md border border-bridge-border bg-bridge-panel p-4">
         <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-cyan-neon uppercase border-b border-bridge-border/60 pb-1">
           Installed Station Modifications

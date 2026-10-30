@@ -18,7 +18,6 @@ import {
   Clock,
   ShieldAlert,
   ShieldCheck,
-  Lock,
   Sparkles,
   Flame,
   X,
@@ -30,7 +29,6 @@ import {
   VolumeX,
   Activity,
   Zap,
-  Gauge,
   Cpu
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
@@ -66,7 +64,9 @@ function playFlatGlassClick() {
   try {
     const ctx = getAudioContext()
     if (!ctx) return
-    if (ctx.state === "suspended") ctx.resume()
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {})
+    }
 
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -91,7 +91,9 @@ function playSubtleEngage() {
   try {
     const ctx = getAudioContext()
     if (!ctx) return
-    if (ctx.state === "suspended") ctx.resume()
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {})
+    }
 
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -129,7 +131,7 @@ export type WeaponsCardId =
   | "stances"
   | "chassisSurges"
   | "mods"
-  | "telemetry"
+  | "ship_stats"
 
 interface CustomPreset {
   id: string
@@ -141,7 +143,7 @@ const DEFAULT_PRESETS: CustomPreset[] = [
   { id: "gunnery", name: "Battery Gunnery", activeCards: ["masterArm", "batteries", "powerDice"] },
   { id: "ordnance", name: "Ordnance & Silos", activeCards: ["batteries", "ordnance", "powerDice"] },
   { id: "combat", name: "Combat Stations", activeCards: ["masterArm", "batteries", "stances", "chassisSurges"] },
-  { id: "all", name: "All Weapons Systems", activeCards: ["masterArm", "powerDice", "batteries", "ordnance", "stances", "chassisSurges", "mods", "telemetry"] }
+  { id: "all", name: "All Weapons Systems", activeCards: ["masterArm", "powerDice", "batteries", "ordnance", "stances", "chassisSurges", "mods", "ship_stats"] }
 ]
 
 type LauncherFamily = "Missile launcher" | "Cluster pod" | "Torpedo launcher" | "Quaternary Ammunition"
@@ -320,6 +322,12 @@ export function WeaponsStation({
     return manifest.filter((m) => !m.isPassenger)
   }, [manifest])
 
+  const weaponsMods = useMemo(() => {
+    return installedMods.filter(
+      (m) => m.station?.toLowerCase() === "weapons"
+    )
+  }, [installedMods])
+
   const hasSFoils = installedMods.some((m) => m.name.toUpperCase().trim() === "S-FOILS")
 
   const powerCoupling = shipConfig?.powerCoupling ?? shipConfig?.couplingType ?? "Direct Power Coupling"
@@ -332,34 +340,28 @@ export function WeaponsStation({
   const rawAvailable = isDirect ? availablePowerDice : currentStationDice
   const effectiveAvailable = Math.min(rawAvailable, effectiveMax)
 
-  // --- STRICT CHASSIS & TIER IDENTIFICATION ---
+  // --- STRICT CHASSIS & TIER GATING (TIER 0 UNLOCKS NO SURGES) ---
   const shipSize = (shipConfig?.size || "medium").toLowerCase()
-  const isSmall = shipSize === "small"
+  const isSmallOrTiny = shipSize === "small" || shipSize === "tiny"
   const isMedium = shipSize === "medium"
   const shipTier = typeof shipConfig?.tier === "number" ? shipConfig.tier : 0
 
-  // Small Ship Progression
-  const hasStandingBy = isSmall && shipTier >= 4
-  const hasLeafOnTheWind = isSmall && shipTier >= 5
+  // Small/Tiny Ship Progression
+  const hasStandingBy = isSmallOrTiny && shipTier >= 4
+  const hasLeafOnTheWind = isSmallOrTiny && shipTier >= 5
 
   // Medium Ship Progression
   const hasVersatileTransport = isMedium && shipTier >= 3
   const versatileMaxUses = 2 * shipTier
   const hasBestShip = isMedium && shipTier >= 5
 
-  const hasAnyChassisSurge = hasStandingBy || hasLeafOnTheWind || hasVersatileTransport || hasBestShip
+  const hasAnyChassisSurge = shipTier >= 1 && (hasStandingBy || hasLeafOnTheWind || hasVersatileTransport || hasBestShip)
 
   const specialization = shipConfig?.roleSpecialization
-  const mastery = shipConfig?.roleMastery
-  
   const isAttackFighter = specialization === "Attack Fighter"
   const isBomber = specialization === "Bomber"
   const isGunshipSpec = specialization === "Gunship"
-  const isMissileBoatSpec = specialization === "Missile Boat"
-  
-  const hasBomberRoleMastery = mastery === "Bomber"
-  const isGunshipMastery = mastery === "Gunship"
-  const isMissileBoatMastery = mastery === "Missile Boat"
+  const isMissileBoatMastery = shipConfig?.roleMastery === "Missile Boat"
 
   const rawWis = shipConfig?.stats?.wisdom ?? 10
   const wisBoost = shipConfig?.tierStatBoosts?.wisdom ?? 0
@@ -400,17 +402,12 @@ export function WeaponsStation({
       return true
     }
 
-    return false
+    return onConsumePowerDice(amount)
   }
-
-  const canSpendStation = effectiveAvailable > 0
-  const canSpendShared = isHubAndSpoke && sharedPoolDice > 0
 
   const mountedWeapons = installedMods.filter(
     (m) => m.category === "Weapon System" && m.name !== "Fixed Hardpoint" && m.name !== "Turret Hardpoint"
   )
-
-  const [launcherStates, setLauncherStates] = useState<Record<string, LauncherLoadState>>({})
 
   const [localOrdnanceList, setLocalOrdnanceList] = useState<OrdnanceItem[]>(() =>
     STARSHIP_AMMUNITION.map((ammo) => ({
@@ -448,10 +445,23 @@ export function WeaponsStation({
     return manifest.find((m) => m.location === turretCompartmentId && !m.isPassenger) || null
   }
 
+  // Synchronized launcher state directly from modification object
   const getLauncherState = (instanceKey: string, weapon: Modification): LauncherLoadState => {
-    if (launcherStates[instanceKey]) return launcherStates[instanceKey]
     const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === weapon.name.toLowerCase())
     const capacity = weapon.reload || catalogDef?.reload || 4
+    const syncedOrdnance = (weapon as any).loadedOrdnance
+
+    if (syncedOrdnance) {
+      return {
+        ordnanceId: syncedOrdnance.id ?? null,
+        ordnanceName: syncedOrdnance.name ?? null,
+        loadedCount: syncedOrdnance.loadedCount ?? 0,
+        maxCapacity: capacity,
+        damage: syncedOrdnance.damage ?? null,
+        damageType: syncedOrdnance.damageType ?? null,
+      }
+    }
+
     return {
       ordnanceId: null,
       ordnanceName: null,
@@ -497,25 +507,25 @@ export function WeaponsStation({
       prev.map((o) => (o.id === ordnance.id ? { ...o, currentReserve: o.currentReserve - transferAmount } : o))
     )
 
-    setLauncherStates((prev) => ({
-      ...prev,
-      [key]: {
-        ordnanceId: ordnance.id,
-        ordnanceName: ordnance.name,
+    onUpdateMod?.(key, {
+      loadedOrdnance: {
+        id: ordnance.id,
+        name: ordnance.name,
         loadedCount: newLoadedTotal,
-        maxCapacity: state.maxCapacity,
         damage: ordnance.damage,
         damageType: ordnance.damageType,
       },
-    }))
+    } as any)
 
     setWeaponArmModal(null)
     setOrdnanceArmModal(null)
   }
 
   const handleDisarmLauncher = (instanceKey: string) => {
-    const state = launcherStates[instanceKey]
-    if (!state || !state.ordnanceId || state.loadedCount <= 0) return
+    const targetWeapon = mountedWeapons.find((w) => (w.instanceId || w.id) === instanceKey)
+    if (!targetWeapon) return
+    const state = getLauncherState(instanceKey, targetWeapon)
+    if (!state.ordnanceId || state.loadedCount <= 0) return
 
     const ordnanceId = state.ordnanceId
     const returnCount = state.loadedCount
@@ -524,17 +534,9 @@ export function WeaponsStation({
       prev.map((o) => (o.id === ordnanceId ? { ...o, currentReserve: o.currentReserve + returnCount } : o))
     )
 
-    setLauncherStates((prev) => ({
-      ...prev,
-      [instanceKey]: {
-        ordnanceId: null,
-        ordnanceName: null,
-        loadedCount: 0,
-        maxCapacity: state.maxCapacity,
-        damage: null,
-        damageType: null,
-      },
-    }))
+    onUpdateMod?.(instanceKey, {
+      loadedOrdnance: null,
+    } as any)
 
     setOrdnanceDisarmModal(null)
   }
@@ -708,23 +710,15 @@ export function WeaponsStation({
     }
 
     if (isOrdnance) {
-      setLauncherStates((prev) => {
-        const state = prev[key]
-        if (!state) return prev
-        const newCount = Math.max(0, state.loadedCount - 1)
-        return {
-          ...prev,
-          [key]: {
-            ...state,
-            loadedCount: newCount,
-            ordnanceId: newCount === 0 ? null : state.ordnanceId,
-            ordnanceName: newCount === 0 ? null : state.ordnanceName,
-            damage: newCount === 0 ? null : state.damage,
-            damageType: newCount === 0 ? null : state.damageType,
-          },
-        }
-      })
-      onUpdateMod?.(key, { firedThisRound: true } as any)
+      const state = getLauncherState(key, activeWizardWeapon)
+      const newCount = Math.max(0, state.loadedCount - 1)
+      onUpdateMod?.(key, {
+        firedThisRound: true,
+        loadedOrdnance: newCount === 0 ? null : {
+          ...state,
+          loadedCount: newCount,
+        },
+      } as any)
     } else {
       const currentHeat = (activeWizardWeapon as any).currentHeat ?? 0
       const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === activeWizardWeapon.name.toLowerCase())
@@ -793,9 +787,9 @@ export function WeaponsStation({
         </div>
 
         <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
-          <span>CONSOLE</span>
+          <span>PANEL</span>
           <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
-            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+            {isOpen ? "OPEN ▲" : "CLOSED ▼"}
           </span>
         </div>
       </button>
@@ -824,7 +818,7 @@ export function WeaponsStation({
               {isArmed ? (
                 <>
                   <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-                  <span>DISARM (SAFE)</span>
+                  <span>SET TO SAFE</span>
                 </>
               ) : (
                 <>
@@ -837,7 +831,7 @@ export function WeaponsStation({
           <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
             {shipConfig?.name?.toUpperCase() || "VESSEL"} // GUNNERY &amp; FIRE DIRECTORS //{" "}
             <span className={isArmed ? "text-red-alert font-bold animate-pulse" : "text-emerald-400 font-bold"}>
-              {isArmed ? "CIRCUITS HOT (ARMED)" : "CIRCUITS SAFE (DISARMED)"}
+              {isArmed ? "WEAPONS ARMED" : "WEAPONS SAFE"}
             </span>
           </p>
         </div>
@@ -885,7 +879,7 @@ export function WeaponsStation({
           <span className={`rounded-sm border px-2.5 py-0.5 text-[9px] font-bold tracking-wider ${
             isArmed ? "border-red-alert/80 bg-red-alert/20 text-red-alert animate-pulse" : "border-emerald-500/80 bg-emerald-950/40 text-emerald-400"
           }`}>
-            WEAPONS: {isArmed ? "HOT" : "SAFE"}
+            WEAPONS: {isArmed ? "ARMED" : "SAFE"}
           </span>
         </div>
       </header>
@@ -915,11 +909,20 @@ export function WeaponsStation({
               </button>
             )
           })}
+         <button
+            type="button"
+            onClick={() => applyPreset([])}
+            disabled={openCards.length === 0}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-slate-700 bg-black/40 text-slate-400 hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+            title="Collapse all open drawers"
+          >
+            Clear All
+          </button>
           <button
             type="button"
             onClick={handleSaveCustomPreset}
             className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
-            title="Save current layout to local browser"
+            title="Save layout view"
           >
             <Bookmark className="w-3 h-3" /> Save View
           </button>
@@ -944,7 +947,7 @@ export function WeaponsStation({
         </div>
       </div>
 
-      {/* 3. COMPACT CREW ROSTER HUD */}
+      {/* 3. PERSISTENT CREW ROSTER HUD */}
       <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
@@ -1034,7 +1037,7 @@ export function WeaponsStation({
         {renderSnapshotCard(
           "masterArm",
           "Weapon Safety",
-          isArmed ? "WEAPONS HOT" : "WEAPONS SAFE",
+          isArmed ? "WEAPONS ARMED" : "WEAPONS SAFE",
           isArmed ? "Firing Circuits Live" : "Interlocks Engaged",
           isArmed ? <ShieldAlert className="w-3 h-3 text-red-alert" /> : <ShieldCheck className="w-3 h-3 text-emerald-400" />,
           isArmed ? "text-red-alert animate-pulse" : "text-emerald-400"
@@ -1081,14 +1084,14 @@ export function WeaponsStation({
           "Tactical Surges",
           !hasAnyChassisSurge
             ? `Locked (Tier ${shipTier})`
-            : isSmall
+            : isSmallOrTiny
             ? (standingByUsed ? "Used (Recharge)" : "Surges Ready")
             : isMedium
             ? `${versatileMaxUses - versatileTransportUsed} Uses (Refit)`
             : "Chassis Surges",
           !hasAnyChassisSurge
             ? `${shipSize.toUpperCase()} Chassis`
-            : isSmall
+            : isSmallOrTiny
             ? (leafOnTheWindUsed ? "Nat 20 Expended" : "Surges Active")
             : isMedium
             ? (bestShipInVerseUsed ? "Best Ship Active" : "Transport Ready")
@@ -1104,17 +1107,17 @@ export function WeaponsStation({
         {renderSnapshotCard(
           "mods",
           "Hardware",
-          `${installedMods.length} Mods`,
-          "Weapons Station",
+          `${weaponsMods.length} Mods`,
+          "Weapons Hardware",
           <Cpu className="w-3 h-3 text-purple-400" />,
           "text-purple-300"
         )}
 
         {renderSnapshotCard(
-          "telemetry",
-          "Telemetry",
-          `${shipConfig?.stats?.wisdom ?? 10} WIS`,
-          `${shipConfig?.stats?.strength ?? 10} STR`,
+          "ship_stats",
+          "Ship Stats",
+          `AC ${shipConfig?.armorClass ?? 12}`,
+          "Armor Class",
           <Activity className="w-3 h-3 text-cyan-neon" />,
           "text-cyan-neon"
         )}
@@ -1124,8 +1127,8 @@ export function WeaponsStation({
       {openCards.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
           <Crosshair className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
-          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL WEAPONS CONSOLE DRAWERS COLLAPSED</p>
-          <p className="text-[10px] mt-1 text-slate-500">Tap any of the status cards above or choose an operational preset.</p>
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL WEAPONS CONSOLE PANELS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any status card above or choose an operational preset.</p>
         </div>
       ) : (
         <div
@@ -1158,7 +1161,7 @@ export function WeaponsStation({
                       {cardId === "stances" && "Tactical Targeting & Firing Stances"}
                       {cardId === "chassisSurges" && "Tactical Chassis Surges & Reactions"}
                       {cardId === "mods" && "Installed Weapon Modifications"}
-                      {cardId === "telemetry" && "Ship Core Telemetry & Gunnery Modifiers"}
+                      {cardId === "ship_stats" && "Ship Ability Scores & Statistics"}
                     </h3>
                   </div>
 
@@ -1175,7 +1178,7 @@ export function WeaponsStation({
                       type="button"
                       onClick={() => toggleCard(cardId)}
                       className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
-                      title="Collapse Drawer"
+                      title="Collapse Panel"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1188,7 +1191,7 @@ export function WeaponsStation({
                     <div className="flex flex-col sm:flex-row items-center justify-between p-3 rounded border border-bridge-border/60 bg-black/40 gap-3">
                       <div>
                         <span className="text-xs font-bold uppercase text-slate-200 block mb-0.5">
-                          Master Circuit Interlock Status
+                          Weapon Safety Interlock
                         </span>
                         <p className="text-[10px] text-muted-foreground leading-relaxed">
                           Weapons cannot be fired while set to SAFE. Arm the weapons to engage firing computers, targeting reticles, and ordnance chamber tubes.
@@ -1212,7 +1215,7 @@ export function WeaponsStation({
                         ) : (
                           <>
                             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                            <span>ARM WEAPONS HOT</span>
+                            <span>ARM WEAPONS</span>
                           </>
                         )}
                       </button>
@@ -1259,7 +1262,7 @@ export function WeaponsStation({
                           ))}
                         </div>
 
-                        {!canSpendStation && canSpendShared && (
+                        {effectiveAvailable <= 0 && sharedPoolDice > 0 && (
                           <button
                             type="button"
                             onClick={() => handleCustomConsume(1)}
@@ -1610,7 +1613,7 @@ export function WeaponsStation({
                   </div>
                 )}
 
-                {/* 6. CHASSIS SURGES WORKSPACE (GUARDED STRICTLY BY SIZE AND TIER) */}
+                {/* 6. CHASSIS SURGES WORKSPACE */}
                 {cardId === "chassisSurges" && (
                   <div className="flex flex-col gap-3">
                     {!hasAnyChassisSurge ? (
@@ -1619,7 +1622,7 @@ export function WeaponsStation({
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        {/* SMALL CHASSIS: Standing By (Tier 4) */}
+                        {/* SMALL/TINY CHASSIS: Standing By (Tier 4) */}
                         {hasStandingBy && (
                           <button
                             type="button"
@@ -1639,7 +1642,7 @@ export function WeaponsStation({
                           </button>
                         )}
 
-                        {/* SMALL CHASSIS: Leaf on the Wind (Tier 5) */}
+                        {/* SMALL/TINY CHASSIS: Leaf on the Wind (Tier 5) */}
                         {hasLeafOnTheWind && (
                           <button
                             type="button"
@@ -1716,8 +1719,8 @@ export function WeaponsStation({
                   </div>
                 )}
 
-                {/* 8. CORE TELEMETRY WORKSPACE */}
-                {cardId === "telemetry" && (
+                {/* 8. SHIP ABILITY SCORES & STATISTICS WORKSPACE */}
+                {cardId === "ship_stats" && (
                   <div className="flex flex-col gap-3">
                     <ShipStats shipConfig={shipConfig} systemDamageLevel={systemDamageLevel} />
                   </div>
@@ -1995,10 +1998,24 @@ export function WeaponsStation({
         const rapidProp = props.find((p: string) => p.includes("rapid"))
         const rapidRating = parseInt((rapidProp || "2").replace(/[^0-9]/g, ""), 10) || (activeWizardWeapon.rapid ?? catalogDef?.rapid ?? 2)
 
-        const rangeStr = (isOrdnance && armedAmmoDef?.range)
+        const rawRangeStr = (isOrdnance && armedAmmoDef?.range)
           ? armedAmmoDef.range
           : (activeWizardWeapon.range || catalogDef?.range || "600/2400")
-        const [normalRange, maxRange] = rangeStr.split("/").map((v: string) => parseInt(v.trim(), 10) || 0)
+
+        let normalRange = 600
+        let maxRange = 2400
+
+        if (rawRangeStr.includes("/")) {
+          const [n, m] = rawRangeStr.split("/").map((v: string) => parseInt(v.trim(), 10) || 0)
+          normalRange = n || 600
+          maxRange = m || normalRange * 4
+        } else {
+          const parsedSingle = parseInt(rawRangeStr.replace(/[^0-9]/g, ""), 10)
+          if (!isNaN(parsedSingle) && parsedSingle > 0) {
+            normalRange = parsedSingle
+            maxRange = parsedSingle * 4
+          }
+        }
 
         const conProp = props.find((p: string) => p.startsWith("constitution"))
         const conReq = conProp ? parseInt(conProp.split(" ")[1], 10) || 10 : (catalogDef?.constitutionSaveDC ?? null)
@@ -2399,7 +2416,7 @@ export function WeaponsStation({
                       onClick={() => setRangeBracket("normal")}
                       className={`p-3 rounded border text-left transition-all cursor-pointer ${
                         rangeBracket === "normal"
-                          ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 shadow-[0_0_10px_rgba(168,85,247,0.2)]"
+                          ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
                           : "border-bridge-border bg-black/40 text-slate-300 hover:border-emerald-400/40"
                       }`}
                     >

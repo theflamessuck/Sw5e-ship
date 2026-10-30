@@ -26,7 +26,8 @@ import {
   Flame,
   AlertOctagon,
   Anchor,
-  Compass
+  Compass,
+  Sparkles
 } from "lucide-react"
 import { CombatResources } from "./combat-resources"
 import { StationModifications, Modification } from "./ship-modifications"
@@ -53,7 +54,9 @@ function playFlatGlassClick() {
   try {
     const ctx = getAudioContext()
     if (!ctx) return
-    if (ctx.state === "suspended") ctx.resume()
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {})
+    }
 
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -78,7 +81,9 @@ function playSubtleEngage() {
   try {
     const ctx = getAudioContext()
     if (!ctx) return
-    if (ctx.state === "suspended") ctx.resume()
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {})
+    }
 
     const now = ctx.currentTime
     const osc = ctx.createOscillator()
@@ -116,7 +121,8 @@ export type DefenseCardId =
   | "statuses"
   | "tacticalDefense"
   | "powerDice"
-  | "telemetry"
+  | "mods"
+  | "ship_stats"
 
 interface CustomPreset {
   id: string
@@ -125,10 +131,9 @@ interface CustomPreset {
 }
 
 const DEFAULT_PRESETS: CustomPreset[] = [
-  { id: "shields", name: "Shields & Hull", activeCards: ["shields", "hull", "powerDice"] },
-  { id: "damageControl", name: "Damage Control", activeCards: ["hull", "systemDamage", "statuses"] },
-  { id: "tactical", name: "Tactical Defenses", activeCards: ["shields", "armor", "tacticalDefense"] },
-  { id: "all", name: "All Systems", activeCards: ["shields", "hull", "armor", "systemDamage", "statuses", "tacticalDefense", "powerDice", "telemetry"] }
+  { id: "shields", name: "Shields & Hull", activeCards: ["shields", "hull", "statuses", "systemDamage"] },
+  { id: "tactical", name: "Tactical Defenses", activeCards: ["tacticalDefense","mods"] },
+  { id: "all", name: "All Systems", activeCards: ["shields", "hull", "armor", "systemDamage", "statuses", "tacticalDefense", "powerDice", "mods", "ship_stats"] }
 ]
 
 export interface ActiveStatus {
@@ -278,6 +283,12 @@ interface DefenseStationProps {
   tempShields?: number
   standingByUsed?: boolean
   onUseStandingBy?: () => void
+  leafOnTheWindUsed?: boolean
+  onUseLeafOnTheWind?: () => void
+  versatileTransportUsed?: number
+  onUpdateVersatileTransportUsed?: (count: number | ((prev: number) => number)) => void
+  bestShipInVerseUsed?: boolean
+  onUpdateBestShipInVerseUsed?: (used: boolean | ((prev: boolean) => boolean)) => void
   systemDamageLevel?: number
   onUpdateSystemDamageLevel?: (level: number | ((prev: number) => number)) => void
   statuses?: ActiveStatus[]
@@ -318,6 +329,12 @@ export function DefenseStation({
   tempShields,
   standingByUsed = false,
   onUseStandingBy,
+  leafOnTheWindUsed = false,
+  onUseLeafOnTheWind,
+  versatileTransportUsed = 0,
+  onUpdateVersatileTransportUsed,
+  bestShipInVerseUsed = false,
+  onUpdateBestShipInVerseUsed,
   systemDamageLevel: rawSystemDamageLevel = 0,
   onUpdateSystemDamageLevel,
   statuses = [],
@@ -382,7 +399,6 @@ export function DefenseStation({
     }
   }
 
-  // Ensure systemDamageLevel is strictly a valid integer number
   const numericSystemDamageLevel = useMemo(() => {
     if (typeof rawSystemDamageLevel === "number") return rawSystemDamageLevel
     if (typeof rawSystemDamageLevel === "string") {
@@ -392,7 +408,6 @@ export function DefenseStation({
     return 0
   }, [rawSystemDamageLevel])
 
-  // --- CREW ASSIGNMENT EXTRACTION ---
   const assignedCrew = useMemo(() => {
     return manifest
       .filter((m) => m.location === "defense" && !m.isPassenger)
@@ -403,18 +418,31 @@ export function DefenseStation({
     return manifest.filter((m) => m.location !== "defense" && !m.isPassenger)
   }, [manifest])
 
-  const isAttackFighterMastery = shipConfig?.roleMastery === "Attack Fighter"
+  const defenseMods = useMemo(() => {
+    return installedMods.filter(
+      (m) => m.station?.toLowerCase() === "defense"
+    )
+  }, [installedMods])
+
   const isNavigatorMastery = shipConfig?.roleMastery === "Navigator"
 
-  const isMedium = (shipConfig?.size || "small").toLowerCase() === "medium"
+  const shipSize = (shipConfig?.size || "small").toLowerCase()
+  const isSmallOrTiny = shipSize === "small" || shipSize === "tiny"
+  const isMedium = shipSize === "medium"
   const shipTier = typeof shipConfig?.tier === "number" ? shipConfig.tier : 0
   const hasHoldTogether = isMedium && shipTier >= 3
+
+  // Chassis Surge Gating
+  const hasStandingBy = isSmallOrTiny && shipTier >= 4
+  const hasLeafOnTheWind = isSmallOrTiny && shipTier >= 5
+  const hasVersatileTransport = isMedium && shipTier >= 3
+  const versatileMaxUses = 2 * shipTier
+  const hasBestShip = isMedium && shipTier >= 5
 
   const isLevel4Damage = numericSystemDamageLevel >= 4
 
   const hasFeedbackShield = installedMods.some((m) => m.name.toUpperCase().includes("FEEDBACK SHIELD"))
   const hasInvulnerabilityDrive = installedMods.some((m) => m.name.toUpperCase().includes("INVULNERABILITY DRIVE"))
-  const hasInertialDampeners = installedMods.some((m) => m.name.toUpperCase().includes("INERTIAL DAMPENERS"))
 
   const [invulnerabilityRounds, setInvulnerabilityRounds] = useState<number>(0)
   const [invulnerabilityUsed, setInvulnerabilityUsed] = useState<boolean>(false)
@@ -423,9 +451,9 @@ export function DefenseStation({
   const feedbackDie = getFeedbackDieBySize(shipConfig?.size)
 
   const handleTriggerFeedbackShield = () => {
-    const maxVal = parseInt(feedbackDie.replace("1d", ""), 10) || 6
+    const maxVal = parseInt(feedbackDie.replace(/[^0-9]/g, ""), 10) || 6
     const roll = Math.floor(Math.random() * maxVal) + 1
-    setFeedbackRollLog(`Retaliation Triggered: ${roll} damage reflected back to attacker (${feedbackDie} roll, matching attack type).`)
+    setFeedbackRollLog(`Retaliation Triggered: ${roll} damage reflected back to attacker (${feedbackDie} roll).`)
   }
 
   const handleActivateInvulnerabilityDrive = () => {
@@ -448,18 +476,6 @@ export function DefenseStation({
     }
   }, [shipConfig?.shieldType])
 
-  let shieldCapCoeff = "1"
-  let shieldRegenCoeff = "1"
-
-  const normalizedShieldType = currentShieldType.toLowerCase()
-  if (normalizedShieldType.includes("fortress")) {
-    shieldCapCoeff = "3/2"
-    shieldRegenCoeff = "2/3"
-  } else if (normalizedShieldType.includes("quick-charge") || normalizedShieldType.includes("quick charge")) {
-    shieldCapCoeff = "2/3"
-    shieldRegenCoeff = "3/2"
-  }
- 
   const powerCoupling = shipConfig?.powerCoupling ?? shipConfig?.couplingType ?? "Direct Power Coupling"
   const isDistributed = powerCoupling.toLowerCase().includes("distributed")
   const isHubAndSpoke = powerCoupling.toLowerCase().includes("hub") || powerCoupling.toLowerCase().includes("spoke")
@@ -489,11 +505,8 @@ export function DefenseStation({
       return true
     }
 
-    return false
+    return !!onConsumePowerDice(amount)
   }
-
-  const canSpendStation = effectiveAvailable > 0
-  const canSpendShared = isHubAndSpoke && sharedPoolDice > 0
 
   const sizeKey = ((shipConfig?.size || "small").toLowerCase()) as ShipSize
   const sizeRules = SHIP_SIZE_RULES[sizeKey] || SHIP_SIZE_RULES.small
@@ -519,7 +532,6 @@ export function DefenseStation({
     dexLimitLabel = "Max +2 DEX (Deflection)"
   }
 
-  // Astrogation Mishap (6-8): Gravity Warp reduces AC by 2 until refitted[cite: 1, 12]
   const hasGravityWarpMishap = statuses.some((s) => 
     s.id?.toLowerCase().includes("gravity warp") || 
     s.title?.toLowerCase().includes("gravity warp")
@@ -613,9 +625,6 @@ export function DefenseStation({
     })
   }, [dynamicAC, onHullChange])
 
-  const [isAutoRegenActive, setIsAutoRegenActive] = useState<boolean>(false)
-  const [regenThresholdPct, setRegenThresholdPct] = useState<number>(75)
-
   useEffect(() => {
     if (shipConfig) {
       setHull(getInitialHull())
@@ -633,7 +642,6 @@ export function DefenseStation({
 
   const strModifier = Math.floor((-10 + (shipConfig?.stats?.strength ?? (shipConfig as any)?.str ?? 10)) / 2)
   const boostCheckBonus = shipConfig?.skills?.boost ?? (strModifier + 2)
-  const proficiencyBonus = boostCheckBonus - strModifier
 
   const [hasRegeneratedThisTurn, setHasRegeneratedThisTurn] = useState<boolean>(false)
   const [regenLog, setRegenLog] = useState<string>("")
@@ -690,8 +698,17 @@ export function DefenseStation({
     const ceiling = isLevel4Damage ? effectiveMaxHull : hull.max
     const newCurrent = Math.max(0, Math.min(ceiling, hull.current + delta))
 
+    // SW5e Rules: Damage suffered while at 0 HP incurs a failed destruction saving throw
     if (hull.current === 0 && incomingDamage) {
-      setDestructionSaves((ds) => ({ ...ds, isStable: false }))
+      setDestructionSaves((prev) => {
+        const newFailures = prev.failures + 1
+        return {
+          ...prev,
+          failures: newFailures,
+          isStable: false,
+          lastResultText: `Damage at 0 HP: Incurred 1 failed destruction save (${newFailures} Failures).`,
+        }
+      })
     }
 
     setHull((prev) => ({ ...prev, current: newCurrent }))
@@ -712,18 +729,20 @@ export function DefenseStation({
     let rawHealAmount = 0
     let rollDetails = ""
 
+    const dieSides = parseInt(shipShields.sdType.replace(/[^0-9]/g, ""), 10) || 8
+
     if (isManual && manualValue !== undefined) {
       rawHealAmount = Math.max(1, manualValue)
       rollDetails = `Manual Shield Roll: +${rawHealAmount} SP`
     } else {
-      const roll1 = Math.floor(Math.random() * 8) + 1
+      const roll1 = Math.floor(Math.random() * dieSides) + 1
       if (!isSuccess) {
-        const roll2 = Math.floor(Math.random() * 8) + 1
+        const roll2 = Math.floor(Math.random() * dieSides) + 1
         rawHealAmount = Math.min(roll1, roll2)
-        rollDetails = `Failed check (Rolled ${d20Roll}+${boostCheckBonus}=${totalCheck} vs DC ${targetDC}). Rolled d8 twice [${roll1}, ${roll2}], took lesser: +${rawHealAmount} SP`
+        rollDetails = `Failed check (Rolled ${d20Roll}+${boostCheckBonus}=${totalCheck} vs DC ${targetDC}). Rolled 2${shipShields.sdType} [${roll1}, ${roll2}], took lesser: +${rawHealAmount} SP`
       } else {
         rawHealAmount = roll1
-        rollDetails = `Successful check (Rolled ${d20Roll}+${boostCheckBonus}=${totalCheck} vs DC ${targetDC}). Rolled d8 [${roll1}]: +${rawHealAmount} SP`
+        rollDetails = `Successful check (Rolled ${d20Roll}+${boostCheckBonus}=${totalCheck} vs DC ${targetDC}). Rolled ${shipShields.sdType} [${roll1}]: +${rawHealAmount} SP`
       }
     }
 
@@ -750,6 +769,34 @@ export function DefenseStation({
 
   const handleRollDestructionSave = () => {
     const roll = Math.floor(Math.random() * 20) + 1
+
+    if (roll === 20) {
+      // Natural 20 restores 1 HP
+      handleAdjustHull(1)
+      setDestructionSaves((prev) => ({
+        ...prev,
+        successes: 3,
+        isStable: true,
+        lastRoll: 20,
+        lastResultText: "NATURAL 20! Ship regains 1 HP and stabilizes instantly.",
+      }))
+      return
+    }
+
+    if (roll === 1) {
+      // Natural 1 counts as two failures
+      setDestructionSaves((prev) => {
+        const newFailures = prev.failures + 2
+        return {
+          ...prev,
+          failures: newFailures,
+          lastRoll: 1,
+          lastResultText: `NATURAL 1! Critical failure (+2 failures, total: ${newFailures}).`,
+        }
+      })
+      return
+    }
+
     const isSuccess = roll >= 10
 
     setDestructionSaves((prev) => {
@@ -764,34 +811,8 @@ export function DefenseStation({
         isStable: nowStable,
         lastRoll: roll,
         lastResultText: isSuccess 
-          ? `Rolled ${roll}: SUCCESS! (${newSuccesses}/3)` 
-          : `Rolled ${roll}: FAILURE! System damage incurred. (${newFailures} Failures)`,
-      }
-    })
-  }
-
-  const handleSetSuccessesCount = (count: number) => {
-    setDestructionSaves((prev) => {
-      const newSuccesses = prev.successes === count ? count - 1 : count
-      const clampedSuccesses = Math.max(0, Math.min(3, newSuccesses))
-      const nowStable = clampedSuccesses >= 3
-      return {
-        ...prev,
-        successes: clampedSuccesses,
-        isStable: nowStable,
-        lastResultText: `Manually set successes to ${clampedSuccesses}/3`,
-      }
-    })
-  }
-
-  const handleSetFailuresCount = (count: number) => {
-    setDestructionSaves((prev) => {
-      const newFailures = prev.failures === count ? count - 1 : count
-      const clampedFailures = Math.max(0, Math.min(3, newFailures))
-      return {
-        ...prev,
-        failures: clampedFailures,
-        lastResultText: `Manually set failures to ${clampedFailures}`,
+          ? `Rolled ${roll}: SUCCESS (${newSuccesses}/3)` 
+          : `Rolled ${roll}: FAILURE (${newFailures} Failures)`,
       }
     })
   }
@@ -882,7 +903,6 @@ export function DefenseStation({
     return "bg-emerald-500"
   }
 
-  const currentSelectedStatusMeta = SHIP_STATUS_OPTIONS.find((s) => s.id === selectedStatusId)
   const currentDamageDefinition = SYSTEM_DAMAGE_LEVEL_DEFINITIONS[numericSystemDamageLevel] || SYSTEM_DAMAGE_LEVEL_DEFINITIONS[0]
 
   // RENDER DOCKED SNAPSHOT CARD TILE
@@ -930,9 +950,9 @@ export function DefenseStation({
         </div>
 
         <div className="flex items-center justify-between w-full border-t border-bridge-border/30 pt-1 text-[8px] uppercase text-slate-500">
-          <span>CONSOLE</span>
+          <span>PANEL</span>
           <span className={isOpen ? "text-cyan-neon font-bold" : ""}>
-            {isOpen ? "ACTIVE ▲" : "STANDBY ▼"}
+            {isOpen ? "OPEN ▲" : "CLOSED ▼"}
           </span>
         </div>
       </button>
@@ -953,7 +973,7 @@ export function DefenseStation({
           <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
             {shipConfig?.name?.toUpperCase() || "VESSEL"} // ARMOR &amp; SHIELD MITIGATION //{" "}
             <span className={hull.current === 0 ? "text-red-500 font-bold animate-pulse" : (shipShields.current === 0 && shipShields.temp === 0) ? "text-amber-400 font-bold" : "text-emerald-400 font-bold"}>
-              {hull.current === 0 ? "CRITICAL BREACH" : (shipShields.current === 0 && shipShields.temp === 0) ? "SHIELDS DOWN" : "EMITTERS NOMINAL"}
+              {hull.current === 0 ? "HULL DEPLETED (DESTRUCTION SAVES)" : (shipShields.current === 0 && shipShields.temp === 0) ? "SHIELDS DOWN" : "SHIELDS ONLINE"}
             </span>
           </p>
         </div>
@@ -969,12 +989,6 @@ export function DefenseStation({
           {isLevel4Damage && (
             <span className="rounded border border-red-500/80 bg-red-950/60 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-red-300 animate-pulse">
               ⚠️ LVL 4: 50% HP/SP CAP
-            </span>
-          )}
-
-          {isAutoRegenActive && (
-            <span className="rounded border border-emerald-500/50 bg-emerald-950/40 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-emerald-400 flex items-center gap-1">
-              <ShieldCheck className="w-3 h-3" /> AUTO-REGEN ACTIVE
             </span>
           )}
 
@@ -1011,9 +1025,18 @@ export function DefenseStation({
           })}
           <button
             type="button"
+            onClick={() => applyPreset([])}
+            disabled={openCards.length === 0}
+            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-slate-700 bg-black/40 text-slate-400 hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+            title="Collapse all active console drawers"
+          >
+            Clear All
+          </button>
+          <button
+            type="button"
             onClick={handleSaveCustomPreset}
             className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
-            title="Save current layout to local browser"
+            title="Save layout view"
           >
             <Bookmark className="w-3 h-3" /> Save View
           </button>
@@ -1038,7 +1061,7 @@ export function DefenseStation({
         </div>
       </div>
 
-      {/* 3. COMPACT CREW ROSTER HUD */}
+      {/* 3. PERSISTENT CREW ROSTER HUD */}
       <div className="rounded border border-cyan-neon/40 bg-black/40 px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shadow-[0_0_12px_rgba(0,255,255,0.04)]">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 text-xs font-bold text-cyan-neon uppercase tracking-wider mr-1">
@@ -1127,7 +1150,7 @@ export function DefenseStation({
           "shields",
           "Shield Grid",
           `${shipShields.current}/${isLevel4Damage ? effectiveMaxShields : fullMaxShields} SP`,
-          shipShields.temp > 0 ? `+${shipShields.temp} Temp SP` : "Emitters Nominal",
+          shipShields.temp > 0 ? `+${shipShields.temp} Temp SP` : "Shields Online",
           <Shield className="w-3 h-3 text-cyan-neon" />,
           shipShields.current === 0 && shipShields.temp === 0 ? "text-red-400 animate-pulse" : "text-cyan-neon"
         )}
@@ -1172,25 +1195,25 @@ export function DefenseStation({
           "tacticalDefense",
           "Tactical Grid",
           invulnerabilityRounds > 0 ? `${invulnerabilityRounds} Rnds Invuln` : hasFeedbackShield ? "Feedback Ready" : "Standard",
-          hasInertialDampeners ? "Dampeners On" : "Tactical Modules",
+          "Defense Hardware",
           <Zap className="w-3 h-3 text-purple-400" />,
           invulnerabilityRounds > 0 ? "text-purple-300 animate-pulse" : "text-purple-300"
         )}
 
         {renderSnapshotCard(
-          "powerDice",
-          "Defense Power",
-          isDistributed ? `${currentStationDice}/2 Dice` : `${effectiveAvailable}/${effectiveMax} Dice`,
-          isHubAndSpoke ? `${sharedPoolDice}/2 Shared` : powerCoupling.replace(" Power Coupling", ""),
-          <Zap className="w-3 h-3 text-amber-400" />,
-          "text-amber-300"
+          "mods",
+          "Hardware",
+          `${defenseMods.length} Mods`,
+          "Defense Hardware",
+          <Cpu className="w-3 h-3 text-purple-400" />,
+          "text-purple-300"
         )}
 
         {renderSnapshotCard(
-          "telemetry",
-          "Telemetry",
-          `${shipShields.totalSD - spentShieldDice}/${shipShields.totalSD} SD`,
-          `${hull.totalHD - spentHullDice}/${hull.totalHD} HD`,
+          "ship_stats",
+          "Ship Stats",
+          `AC ${dynamicAC}`,
+          "Armor Class",
           <Activity className="w-3 h-3 text-cyan-neon" />,
           "text-cyan-neon"
         )}
@@ -1200,8 +1223,8 @@ export function DefenseStation({
       {openCards.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
           <Shield className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
-          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL DEFENSE CONSOLE DRAWERS COLLAPSED</p>
-          <p className="text-[10px] mt-1 text-slate-500">Tap any of the status cards above or choose an operational preset.</p>
+          <p className="uppercase tracking-widest text-slate-300 font-bold">ALL DEFENSE CONSOLE PANELS COLLAPSED</p>
+          <p className="text-[10px] mt-1 text-slate-500">Tap any status card above or choose an operational preset.</p>
         </div>
       ) : (
         <div
@@ -1234,7 +1257,8 @@ export function DefenseStation({
                       {cardId === "statuses" && "Active Conditions & Status Modifiers"}
                       {cardId === "tacticalDefense" && "Active Tactical Defense Modules"}
                       {cardId === "powerDice" && "Defense Power Coupling Matrix"}
-                      {cardId === "telemetry" && "Ship Core Telemetry & Defensive Reserves"}
+                      {cardId === "mods" && "Installed Defense Hardware"}
+                      {cardId === "ship_stats" && "Ship Ability Scores & Statistics"}
                     </h3>
                   </div>
 
@@ -1251,7 +1275,7 @@ export function DefenseStation({
                       type="button"
                       onClick={() => toggleCard(cardId)}
                       className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-black/40 cursor-pointer"
-                      title="Collapse Drawer"
+                      title="Collapse Panel"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1511,7 +1535,7 @@ export function DefenseStation({
 
                         {hasHoldTogether && (
                           <div className="text-[9px] font-mono text-emerald-300">
-                            ★ Hold Together Active: Make save instead of auto-failing on damage[cite: 12]!
+                            ★ Hold Together Active: Make save instead of auto-failing on damage!
                           </div>
                         )}
 
@@ -1566,7 +1590,7 @@ export function DefenseStation({
                     <div className="text-[9px] font-mono text-cyan-300 space-y-1 bg-black/40 p-2 rounded border border-bridge-border/40">
                       <p>• Base 10 + {appliedDexMod >= 0 ? `+${appliedDexMod}` : appliedDexMod} (Dex) + {tierACBonus} (Tier {shipTier}) {hasGravityWarpMishap ? "- 2 (Gravity Warp)" : ""} = <strong>{dynamicAC} AC</strong></p>
                       {hasGravityWarpMishap && (
-                        <p className="text-red-400 font-bold">• ⚠️ Structural gravity warp active (-2 AC). Refit required to clear[cite: 1, 12].</p>
+                        <p className="text-red-400 font-bold">• ⚠️ Structural gravity warp active (-2 AC). Refit required to clear.</p>
                       )}
                     </div>
                   </div>
@@ -1578,7 +1602,7 @@ export function DefenseStation({
                     <div className="flex justify-between items-center border-b border-bridge-border/40 pb-1.5">
                       <div>
                         <span className="text-xs font-bold text-white block">{currentDamageDefinition.title}</span>
-                        <span className="text-[9px] text-muted-foreground">Cumulative Failure Rating</span>
+                        <span className="text-[9px] text-muted-foreground">System Damage Level</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <button
@@ -1683,7 +1707,7 @@ export function DefenseStation({
                         <div className="p-2.5 rounded border border-bridge-border bg-black/40 flex flex-col justify-between gap-1.5">
                           <span className="font-bold text-cyan-neon uppercase">Feedback Shield</span>
                           <p className="text-[9px] text-muted-foreground leading-relaxed">
-                            Reaction: Retaliate with {feedbackDie} damage matching attack type[cite: 12].
+                            Reaction: Retaliate with {feedbackDie} damage matching attack type.
                           </p>
                           <button
                             onClick={handleTriggerFeedbackShield}
@@ -1701,7 +1725,7 @@ export function DefenseStation({
                         <div className="p-2.5 rounded border border-purple-500/40 bg-black/40 flex flex-col justify-between gap-1.5">
                           <span className="font-bold text-purple-300 uppercase">Invulnerability Drive</span>
                           <p className="text-[9px] text-muted-foreground leading-relaxed">
-                            Damage immunity for 1d4 rounds[cite: 12]. Halves flight speed, doubles turn speed[cite: 12].
+                            Damage immunity for 1d4 rounds. Halves flight speed, doubles turn speed.
                           </p>
                           {invulnerabilityRounds > 0 ? (
                             <button
@@ -1735,7 +1759,14 @@ export function DefenseStation({
                       onConsumePowerDice={handleCustomConsume}
                       standingByUsed={standingByUsed}
                       onUseStandingBy={onUseStandingBy}
+                      leafOnTheWindUsed={leafOnTheWindUsed}
+                      onUseLeafOnTheWind={onUseLeafOnTheWind}
+                      versatileTransportUsed={versatileTransportUsed}
+                      onUpdateVersatileTransportUsed={onUpdateVersatileTransportUsed}
+                      bestShipInVerseUsed={bestShipInVerseUsed}
+                      onUpdateBestShipInVerseUsed={onUpdateBestShipInVerseUsed}
                       shipTier={shipConfig?.tier ?? 0}
+                      shipSize={shipConfig?.size}
                     />
 
                     {isHubAndSpoke && (
@@ -1771,8 +1802,19 @@ export function DefenseStation({
                   </div>
                 )}
 
-                {/* 8. TELEMETRY WORKSPACE */}
-                {cardId === "telemetry" && (
+                {/* 8. HARDWARE MODS WORKSPACE */}
+                {cardId === "mods" && (
+                  <div className="flex flex-col gap-2">
+                    <StationModifications 
+                      station="Defense" 
+                      installedMods={installedMods} 
+                      onRemoveMod={onRemoveMod} 
+                    />
+                  </div>
+                )}
+
+                {/* 9. SHIP ABILITY SCORES & STATISTICS WORKSPACE */}
+                {cardId === "ship_stats" && (
                   <div className="flex flex-col gap-3">
                     <ShipStats 
                       shipConfig={shipConfig} 
@@ -1785,6 +1827,99 @@ export function DefenseStation({
             )
           })}
         </div>
+      )}
+
+      {/* 6. CHASSIS TACTICAL SURGES & REACTIONS (ALWAYS READY TRAY AT BOTTOM) */}
+      {shipTier >= 3 && (
+        <section className="rounded-md border border-cyan-neon/40 bg-bridge-panel p-2.5 shadow-[0_0_12px_rgba(0,255,255,0.04)] flex flex-col gap-2">
+          <div className="flex items-center justify-between border-b border-bridge-border/60 pb-1">
+            <h3 className="text-[10px] font-bold tracking-[0.2em] text-cyan-neon uppercase flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-cyan-neon" />
+              Chassis Tactical Surges (Tier {shipTier})
+            </h3>
+            <span className="text-[8px] font-mono text-muted-foreground">COMBAT ACTIONS</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            {isSmallOrTiny && shipTier >= 4 && (
+              <button
+                type="button"
+                disabled={standingByUsed}
+                onClick={onUseStandingBy}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  standingByUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-cyan-neon/50 text-cyan-neon hover:bg-cyan-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Standing By</span>
+                  <span>{standingByUsed ? "USED" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: +1 Extra Action</span>
+              </button>
+            )}
+
+            {isSmallOrTiny && shipTier >= 5 && (
+              <button
+                type="button"
+                disabled={leafOnTheWindUsed}
+                onClick={onUseLeafOnTheWind}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  leafOnTheWindUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-emerald-500/50 text-emerald-400 hover:bg-emerald-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Leaf on the Wind</span>
+                  <span>{leafOnTheWindUsed ? "USED" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Treat roll as Nat 20</span>
+              </button>
+            )}
+
+            {isMedium && hasVersatileTransport && (
+              <button
+                type="button"
+                disabled={versatileTransportUsed >= versatileMaxUses}
+                onClick={() => {
+                  onUpdateVersatileTransportUsed?.((prev) => Math.min(versatileMaxUses, (Number(prev) || 0) + 1))
+                }}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  versatileTransportUsed >= versatileMaxUses
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-cyan-400/50 text-cyan-300 hover:bg-cyan-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Versatile Transport</span>
+                  <span>{versatileMaxUses - versatileTransportUsed}/{versatileMaxUses}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Reaction: Grant Advantage</span>
+              </button>
+            )}
+
+            {isMedium && hasBestShip && (
+              <button
+                type="button"
+                disabled={bestShipInVerseUsed}
+                onClick={() => onUpdateBestShipInVerseUsed?.(true)}
+                className={`p-2 rounded border text-left transition cursor-pointer ${
+                  bestShipInVerseUsed
+                    ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-black/40 border-amber-400/50 text-amber-300 hover:bg-amber-950/40"
+                }`}
+              >
+                <div className="flex justify-between text-[10px] font-bold">
+                  <span>Best Ship in 'Verse</span>
+                  <span>{bestShipInVerseUsed ? "EXP" : "READY"}</span>
+                </div>
+                <span className="text-[8px] text-slate-400 block mt-0.5">Action: Gain Resistance</span>
+              </button>
+            )}
+          </div>
+        </section>
       )}
     </div>
   )

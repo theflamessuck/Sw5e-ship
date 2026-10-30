@@ -130,6 +130,8 @@ interface GmStationProps {
   onToggleTurn?: (memberId: string) => void
   onUpdateInitiative?: (memberId: string, initiative: number) => void
   onCycleReactor?: (generatedAmount?: number) => void
+  onAdvanceCombatRoundWithCycle?: (shouldCycleReactor: boolean) => void
+  autoCycleReactorOnTurnEnd?: boolean
   currentHull?: number
   maxHull?: number
   onHullChange?: (current: number, max: number) => void
@@ -199,6 +201,8 @@ export function GmStation({
   onToggleTurn,
   onUpdateInitiative,
   onCycleReactor,
+  onAdvanceCombatRoundWithCycle,
+  autoCycleReactorOnTurnEnd = false,
   currentHull = 40,
   maxHull = 40,
   onHullChange,
@@ -254,7 +258,6 @@ export function GmStation({
   const [globalAdvantageMode, setGlobalAdvantageMode] = useState<RollAdvantageMode>("normal")
   const [rowAdvantageMap, setRowAdvantageMap] = useState<Record<string, RollAdvantageMode>>({})
 
-  // Global Brutal Criticals preference fallback
   const isBrutalCriticals = Boolean(shipConfig?.useBrutalCriticals)
 
   const [lastDiceResult, setLastDiceResult] = useState<{
@@ -558,7 +561,6 @@ export function GmStation({
     }
   }
 
-  // --- AUTOMATED ATTACK ROLLER USING COMBAT-ROLLER ---
   const handleRollToHit = (shipId: string, shipName: string, action: NpcAction, overrideMode?: RollAdvantageMode) => {
     const bonus = action.attackBonus ?? 0
     const mode = overrideMode || rowAdvantageMap[shipId] || globalAdvantageMode
@@ -589,7 +591,6 @@ export function GmStation({
     })
   }
 
-  // --- AUTOMATED DAMAGE ROLLER WITH BRUTAL CRITICAL SUPPORT ---
   const handleRollDamage = (shipName: string, action: NpcAction, isCrit: boolean = false) => {
     if (!action.damage) return
 
@@ -611,7 +612,6 @@ export function GmStation({
     })
   }
 
-  // --- AUTOMATED SAVING THROW ROLLER ---
   const handleRollSavingThrow = (shipName: string, statblock: NpcShipStatblock, stat: StatKey, overrideMode?: RollAdvantageMode) => {
     const { mod, isProficient } = computeSaveModifier(statblock, stat)
     const mode = overrideMode || globalAdvantageMode
@@ -711,8 +711,19 @@ export function GmStation({
     })
   }, [bestiaryList, managerTierFilter, managerSearchQuery])
 
+  // --- AUTOMATED OR MANUAL ADVANCE ON "NEXT TURN" BUTTON ---
   const handleNextTurnCycle = () => {
     if (isRoundFinished) {
+      if (autoCycleReactorOnTurnEnd) {
+        if (onAdvanceCombatRoundWithCycle) {
+          onAdvanceCombatRoundWithCycle(true)
+        } else {
+          onCycleReactor?.()
+          handleAdvanceRound()
+        }
+        return
+      }
+
       if (!hasCycledReactorThisRound) {
         alert(`Round ${combatRound} Complete: Engineering or the GM must Cycle the Reactor before Round ${combatRound + 1} can begin!`)
         return
@@ -732,6 +743,16 @@ export function GmStation({
         onUpdateCombatState?.({ enemyShips: updated })
       }
     } else {
+      if (autoCycleReactorOnTurnEnd) {
+        if (onAdvanceCombatRoundWithCycle) {
+          onAdvanceCombatRoundWithCycle(true)
+        } else {
+          onCycleReactor?.()
+          handleAdvanceRound()
+        }
+        return
+      }
+
       if (!hasCycledReactorThisRound) {
         alert(`Round ${combatRound} Complete: Engineering or the GM must Cycle the Reactor before Round ${combatRound + 1} can begin!`)
         return
@@ -772,19 +793,28 @@ export function GmStation({
   }
 
   const handleAdvanceRound = () => {
+    if (autoCycleReactorOnTurnEnd && onAdvanceCombatRoundWithCycle) {
+      onAdvanceCombatRoundWithCycle(true)
+      return
+    }
+
     if (!hasCycledReactorThisRound) {
       alert("Round End Lock: Cycle the Reactor before starting the next round.")
       return
     }
 
-    const nextRound = combatRound + 1
-    const resetEnemies = enemyShips.map((e) => ({ ...e, hasTakenTurn: false }))
-    onUpdateCombatState?.({
-      round: nextRound,
-      playerShipHasActed: false,
-      hasCycledReactorThisRound: false,
-      enemyShips: resetEnemies,
-    })
+    if (onAdvanceCombatRoundWithCycle) {
+      onAdvanceCombatRoundWithCycle(false)
+    } else {
+      const nextRound = combatRound + 1
+      const resetEnemies = enemyShips.map((e) => ({ ...e, hasTakenTurn: false }))
+      onUpdateCombatState?.({
+        round: nextRound,
+        playerShipHasActed: false,
+        hasCycledReactorThisRound: false,
+        enemyShips: resetEnemies,
+      })
+    }
   }
 
   const handleGmCycleReactor = () => {
@@ -1113,8 +1143,14 @@ export function GmStation({
             </span>
             {isBrutalCriticals && (
               <span className="rounded px-2 py-0.5 text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
-                <Flame className="h-3 w-3 text-amber-400" />
+                <Flame className="w-3 h-3 text-amber-400" />
                 BRUTAL CRITS ACTIVE
+              </span>
+            )}
+            {autoCycleReactorOnTurnEnd && (
+              <span className="rounded px-2 py-0.5 text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                <RotateCw className="w-3 h-3 text-emerald-400" />
+                AUTO REACTOR CYCLE ON
               </span>
             )}
           </div>
@@ -1122,7 +1158,6 @@ export function GmStation({
 
         {/* Global Roller Stance & Round Director */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Global Roll Stance Selector */}
           <div className="flex items-center gap-1 bg-black/70 border border-slate-700 rounded p-0.5 text-[9px] font-bold uppercase">
             <span className="text-muted-foreground px-1">Roll Stance:</span>
             <button
@@ -1170,7 +1205,7 @@ export function GmStation({
             ROUND {combatRound}
           </span>
 
-          {isInCombat && isRoundFinished && !hasCycledReactorThisRound ? (
+          {isInCombat && isRoundFinished && !hasCycledReactorThisRound && !autoCycleReactorOnTurnEnd ? (
             <button
               type="button"
               onClick={handleGmCycleReactor}
@@ -1272,7 +1307,7 @@ export function GmStation({
               Prev Turn
             </button>
 
-            {isRoundFinished && !hasCycledReactorThisRound ? (
+            {isRoundFinished && !hasCycledReactorThisRound && !autoCycleReactorOnTurnEnd ? (
               <button
                 type="button"
                 onClick={handleGmCycleReactor}
@@ -1567,7 +1602,6 @@ export function GmStation({
                   </div>
 
                   <div className="flex items-center gap-2 self-end sm:self-center">
-                    {/* Row Stance Selector */}
                     {!ship.isDisabled && (
                       <div className="flex items-center gap-0.5 bg-black/70 border border-slate-700 rounded p-0.5 text-[8px] font-bold uppercase">
                         <button
