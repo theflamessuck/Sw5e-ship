@@ -47,7 +47,8 @@ import {
   ShieldAlert,
   Activity,
   X,
-  Zap
+  Zap,
+  AlertTriangle
 } from "lucide-react"
 import {
   rollAttackD20,
@@ -458,6 +459,10 @@ export function EnginesStation({
   const [awayMissionDaysInput, setAwayMissionDaysInput] = useState<string>("7")
   const [helmAttackType, setHelmAttackType] = useState<HelmAttackType>("standard")
   const [dogfightCheckResult, setDogfightCheckResult] = useState<string | null>(null)
+
+  // 1/10th Low Fuel Alert Detection
+  const fuelCapacity = maxFuel ?? 30
+  const isLowFuel = currentFuel <= fuelCapacity * 0.1
 
   const hasSecondaryTransponderMod = useMemo(() => {
     return installedMods.some((mod) => {
@@ -1394,6 +1399,16 @@ export function EnginesStation({
         </div>
       </header>
 
+      {/* LOW FUEL ALARM BANNER (<= 10% RESERVES) */}
+      {isLowFuel && (
+        <section className="rounded-md border border-amber-400 bg-amber-950/40 p-2.5 shadow-[0_0_15px_rgba(251,191,36,0.25)] flex items-center justify-between text-xs animate-pulse">
+          <div className="flex items-center gap-2 text-amber-300 font-bold">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>LOW FUEL WARNING: Less than 10% fuel reserves remaining ({fuelRemaining} / {fuelCapacity} units). Refuel at nearest spaceport.</span>
+          </div>
+        </section>
+      )}
+
       {/* 2. PRESET WORKSPACE SELECTOR & AUDIO/HAPTIC MUTE BAR */}
       <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded bg-black/60 border border-bridge-border text-xs">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -1567,9 +1582,9 @@ export function EnginesStation({
           "fuel",
           "Fuel Core",
           `${fuelRemaining}/${fuelMax}`,
-          environment.toUpperCase(),
+          isLowFuel ? "LOW FUEL" : environment.toUpperCase(),
           <Flame className="w-3 h-3 text-amber-400" />,
-          "text-amber-300"
+          isLowFuel ? "text-amber-300 animate-pulse font-bold" : "text-amber-300"
         )}
 
         {renderSnapshotCard(
@@ -1599,7 +1614,7 @@ export function EnginesStation({
           "text-purple-300"
         )}
 
-        {renderSnapshotCard(
+       {renderSnapshotCard(
           "ship_stats",
           "Ship Stats",
           `AC ${shipConfig?.armorClass ?? 12}`,
@@ -2095,14 +2110,22 @@ export function EnginesStation({
                       </div>
                     </div>
 
-                    <div className="bg-black/40 p-2.5 rounded border border-bridge-border/40 flex flex-col gap-2">
+                    <div className={`p-2.5 rounded border flex flex-col gap-2 transition-all ${
+                      isLowFuel 
+                        ? "bg-amber-950/40 border-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.2)]" 
+                        : "bg-black/40 border-bridge-border/40"
+                    }`}>
                       <div className="flex justify-between items-baseline text-xs">
                         <span className="text-muted-foreground uppercase text-[10px]">Fuel Reserves:</span>
-                        <span className="font-bold text-cyan-neon font-mono">{fuelRemaining} / {fuelMax} Units</span>
+                        <span className={`font-bold font-mono ${isLowFuel ? "text-amber-300 animate-pulse font-black" : "text-cyan-neon"}`}>
+                          {fuelRemaining} / {fuelMax} Units {isLowFuel ? "(LOW FUEL)" : ""}
+                        </span>
                       </div>
                       <div className="h-2 w-full bg-slate-900 rounded-sm overflow-hidden border border-bridge-border/30">
                         <div
-                          className="h-full bg-cyan-neon transition-all"
+                          className={`h-full transition-all ${
+                            isLowFuel ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" : "bg-cyan-neon"
+                          }`}
                           style={{ width: `${Math.min(100, Math.max(0, (fuelRemaining / fuelMax) * 100))}%` }}
                         />
                       </div>
@@ -2360,7 +2383,7 @@ export function EnginesStation({
                 disabled={initiationProcedures >= targetProcedures}
                 className="flex-1 py-1.5 rounded border border-cyan-neon/60 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-xs font-bold text-cyan-neon uppercase disabled:opacity-40 cursor-pointer"
               >
-                Roll Duress Check
+                Roll Startup Check
               </button>
               <button
                 onClick={handleEngageStartup}

@@ -24,12 +24,16 @@ import {
   Maximize2,
   Minimize2,
   Layers,
-  Bookmark,
   Volume2,
   VolumeX,
   Activity,
   Zap,
-  Cpu
+  Cpu,
+  ArrowRightLeft,
+  Minus,
+  Plus,
+  Coins,
+  Trash2
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { CombatResources } from "./combat-resources"
@@ -190,7 +194,11 @@ interface WeaponsStationProps {
   bestShipInVerseUsed?: boolean
   onUpdateBestShipInVerseUsed?: (used: boolean | ((prev: boolean) => boolean)) => void
   ordnanceList?: OrdnanceItem[]
-  onUpdateOrdnanceList?: React.Dispatch<React.SetStateAction<OrdnanceItem[]>>
+  onUpdateOrdnanceList?: (
+    newList: OrdnanceItem[] | ((prev: OrdnanceItem[]) => OrdnanceItem[])
+  ) => void
+  onSellOrdnance?: (ordnance: OrdnanceItem, quantity: number, totalRefund: number) => void
+  onJettisonOrdnance?: (ordnance: OrdnanceItem, quantity: number) => void
   sFoilsMode?: "locked" | "unlocked"
   systemDamageLevel?: number
   shipStatuses?: ActiveStatus[]
@@ -248,6 +256,8 @@ export function WeaponsStation({
   onUpdateBestShipInVerseUsed,
   ordnanceList: externalOrdnanceList,
   onUpdateOrdnanceList,
+  onSellOrdnance,
+  onJettisonOrdnance,
   sFoilsMode = "unlocked",
   systemDamageLevel = 0,
   shipStatuses = [],
@@ -270,6 +280,10 @@ export function WeaponsStation({
 
   const [maximizedCard, setMaximizedCard] = useState<WeaponsCardId | null>(null)
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true)
+
+  // Ordnance Management Wizard State (Sell / Jettison)
+  const [managingOrdnance, setManagingOrdnance] = useState<OrdnanceItem | null>(null)
+  const [manageQuantity, setManageQuantity] = useState<number>(1)
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -296,18 +310,6 @@ export function WeaponsStation({
     }
     setOpenCards(cards)
     setMaximizedCard(null)
-  }
-
-  const handleSaveCustomPreset = () => {
-    const name = window.prompt("Enter name for this custom weapons layout:", "Custom Weapons Setup")
-    if (!name) return
-    if (typeof window !== "undefined") {
-      try {
-        const key = `sw5e_weapons_preset_${Date.now()}`
-        localStorage.setItem(key, JSON.stringify({ id: key, name, activeCards: openCards }))
-        alert(`Preset '${name}' saved to this device!`)
-      } catch {}
-    }
   }
 
   const [isArmed, setIsArmed] = useState<boolean>(false)
@@ -539,6 +541,49 @@ export function WeaponsStation({
     } as any)
 
     setOrdnanceDisarmModal(null)
+  }
+
+  // Handle Opening Ordnance Offload Wizard
+  const handleOpenManageOrdnance = (item: OrdnanceItem) => {
+    setManagingOrdnance(item)
+    setManageQuantity(1)
+  }
+
+  // Handle Selling Ordnance (100% Full Refund)
+  const handleConfirmSellOrdnance = () => {
+    if (!managingOrdnance || manageQuantity <= 0) return
+    const refundTotal = manageQuantity * managingOrdnance.costPerUnit
+
+    if (onSellOrdnance) {
+      onSellOrdnance(managingOrdnance, manageQuantity, refundTotal)
+    } else {
+      setOrdnanceList((prev) =>
+        prev.map((o) =>
+          o.id === managingOrdnance.id
+            ? { ...o, currentReserve: Math.max(0, o.currentReserve - manageQuantity) }
+            : o
+        )
+      )
+    }
+    setManagingOrdnance(null)
+  }
+
+  // Handle Jettisoning Ordnance (Dump with 0 credits)
+  const handleConfirmJettisonOrdnance = () => {
+    if (!managingOrdnance || manageQuantity <= 0) return
+
+    if (onJettisonOrdnance) {
+      onJettisonOrdnance(managingOrdnance, manageQuantity)
+    } else {
+      setOrdnanceList((prev) =>
+        prev.map((o) =>
+          o.id === managingOrdnance.id
+            ? { ...o, currentReserve: Math.max(0, o.currentReserve - manageQuantity) }
+            : o
+        )
+      )
+    }
+    setManagingOrdnance(null)
   }
 
   const computeAttackModDisplay = (weaponProperties: string[] = [], isPrimary: boolean = true) => {
@@ -884,7 +929,7 @@ export function WeaponsStation({
         </div>
       </header>
 
-      {/* 2. PRESET WORKSPACE SELECTOR & AUDIO/HAPTIC MUTE BAR */}
+      {/* 2. PRESET WORKSPACE SELECTOR */}
       <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded bg-black/60 border border-bridge-border text-xs">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[9px] uppercase tracking-wider text-slate-400 flex items-center gap-1">
@@ -909,7 +954,7 @@ export function WeaponsStation({
               </button>
             )
           })}
-         <button
+          <button
             type="button"
             onClick={() => applyPreset([])}
             disabled={openCards.length === 0}
@@ -917,14 +962,6 @@ export function WeaponsStation({
             title="Collapse all open drawers"
           >
             Clear All
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveCustomPreset}
-            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
-            title="Save layout view"
-          >
-            <Bookmark className="w-3 h-3" /> Save View
           </button>
         </div>
 
@@ -1032,7 +1069,7 @@ export function WeaponsStation({
         )}
       </div>
 
-      {/* 4. TOP-DECK MODULAR SNAPSHOT TILES (8 UNIFORM TILES) */}
+      {/* 4. TOP-DECK MODULAR SNAPSHOT TILES */}
       <section className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 w-full">
         {renderSnapshotCard(
           "masterArm",
@@ -1123,7 +1160,7 @@ export function WeaponsStation({
         )}
       </section>
 
-      {/* 5. EXPANDABLE DYNAMIC WORKSPACE GRID (RESPONSIVE 2-COLUMN) */}
+      {/* 5. EXPANDABLE DYNAMIC WORKSPACE GRID */}
       {openCards.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 border border-dashed border-bridge-border/60 rounded bg-black/40 text-center text-xs text-muted-foreground my-2">
           <Crosshair className="w-8 h-8 text-cyan-neon/30 mb-2 animate-pulse" />
@@ -1514,7 +1551,7 @@ export function WeaponsStation({
                             <th className="p-1.5">Ordnance</th>
                             <th className="p-1.5">Damage</th>
                             <th className="p-1.5">In Reserve</th>
-                            <th className="p-1.5">Action</th>
+                            <th className="p-1.5">Actions</th>
                             <th className="p-1.5">Req Qty</th>
                           </tr>
                         </thead>
@@ -1534,19 +1571,31 @@ export function WeaponsStation({
                                 <td className="p-1.5 text-amber-300 font-mono text-[10px]">{item.damage} {item.damageType}</td>
                                 <td className="p-1.5 font-bold font-mono">{item.currentReserve}</td>
                                 <td className="p-1.5">
-                                  <div className="flex items-center gap-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <button
                                       type="button"
                                       onClick={() => setWeaponArmModal({ weapon: matchingInstalled[0] })}
                                       disabled={!hasMatchingLauncher || item.currentReserve <= 0}
-                                      className={`px-1.5 py-0.5 rounded border text-[8px] font-bold uppercase transition-all flex items-center gap-0.5 ${
+                                      className={`px-1.5 py-0.5 rounded border text-[8px] font-bold uppercase transition-all flex items-center gap-0.5 cursor-pointer ${
                                         !hasMatchingLauncher || item.currentReserve <= 0
                                           ? "bg-red-950/20 border-red-500/30 text-slate-500 cursor-not-allowed opacity-40"
-                                          : "bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer"
+                                          : "bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30"
                                       }`}
                                     >
                                       <ArrowDownToLine className="w-2.5 h-2.5" /> Arm
                                     </button>
+
+                                    {item.currentReserve > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenManageOrdnance(item)}
+                                        className="px-1.5 py-0.5 rounded border border-amber-400/60 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 text-[8px] font-bold uppercase transition flex items-center gap-0.5 cursor-pointer"
+                                        title="Sell for refund or jettison into space"
+                                      >
+                                        <ArrowRightLeft className="w-2.5 h-2.5 text-amber-400" /> Offload
+                                      </button>
+                                    )}
+
                                     {isArmedInAnyWeapon && (
                                       <button
                                         type="button"
@@ -1622,7 +1671,6 @@ export function WeaponsStation({
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        {/* SMALL/TINY CHASSIS: Standing By (Tier 4) */}
                         {hasStandingBy && (
                           <button
                             type="button"
@@ -1642,7 +1690,6 @@ export function WeaponsStation({
                           </button>
                         )}
 
-                        {/* SMALL/TINY CHASSIS: Leaf on the Wind (Tier 5) */}
                         {hasLeafOnTheWind && (
                           <button
                             type="button"
@@ -1662,7 +1709,6 @@ export function WeaponsStation({
                           </button>
                         )}
 
-                        {/* MEDIUM CHASSIS: Versatile Transport (Tier 3) */}
                         {hasVersatileTransport && (
                           <button
                             type="button"
@@ -1684,7 +1730,6 @@ export function WeaponsStation({
                           </button>
                         )}
 
-                        {/* MEDIUM CHASSIS: Best Ship in the 'Verse (Tier 5) */}
                         {hasBestShip && (
                           <button
                             type="button"
@@ -1730,6 +1775,144 @@ export function WeaponsStation({
           })}
         </div>
       )}
+
+      {/* MODAL: TABLET-OPTIMIZED OFFLOAD WIZARD (SELL OR JETTISON) */}
+      {managingOrdnance && (() => {
+        const item = managingOrdnance
+        const maxAvailable = item.currentReserve
+        const totalRefund = manageQuantity * item.costPerUnit
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 font-mono">
+            <div className="w-full max-w-md rounded-xl border-2 border-amber-400/80 bg-slate-950 p-5 shadow-[0_0_35px_rgba(245,158,11,0.25)] flex flex-col gap-4 text-xs">
+              <div className="flex justify-between items-center border-b border-bridge-border/60 pb-3">
+                <div className="flex items-center gap-2">
+                  <ArrowRightLeft className="w-5 h-5 text-amber-400" />
+                  <div>
+                    <h3 className="text-sm font-bold text-amber-300 uppercase tracking-wider">
+                      Offload Ordnance // {item.name}
+                    </h3>
+                    <span className="text-[10px] text-muted-foreground block mt-0.5">
+                      {maxAvailable} unit{maxAvailable > 1 ? "s" : ""} in reserve • Value: {item.costPerUnit.toLocaleString()} cr each
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setManagingOrdnance(null)}
+                  className="rounded p-1 text-muted-foreground hover:text-white cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Touch-Friendly Quantity Stepper */}
+              <div className="flex flex-col gap-2 bg-black/60 p-3.5 rounded-lg border border-bridge-border/60">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-muted-foreground uppercase text-[10px]">Select Quantity:</span>
+                  <span className="text-cyan-neon font-bold font-mono text-base">
+                    {manageQuantity} / {maxAvailable}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 w-full pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setManageQuantity(1)}
+                    className="px-2.5 py-2 rounded border border-slate-700 bg-slate-900 text-slate-300 hover:text-white font-bold text-[10px] cursor-pointer"
+                  >
+                    MIN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManageQuantity((prev) => Math.max(1, prev - 1))}
+                    disabled={manageQuantity <= 1}
+                    className="flex-1 py-2 rounded border border-bridge-border bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-sm flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManageQuantity((prev) => Math.min(maxAvailable, prev + 1))}
+                    disabled={manageQuantity >= maxAvailable}
+                    className="flex-1 py-2 rounded border border-bridge-border bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-sm flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManageQuantity(maxAvailable)}
+                    className="px-2.5 py-2 rounded border border-cyan-neon/50 bg-cyan-neon/10 text-cyan-neon font-bold text-[10px] cursor-pointer"
+                  >
+                    MAX
+                  </button>
+                </div>
+              </div>
+
+              {/* Action Cards: Sell vs Jettison */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                {/* Sell Card */}
+                <button
+                  type="button"
+                  onClick={handleConfirmSellOrdnance}
+                  className="p-3 rounded-lg border border-emerald-500/60 bg-emerald-950/30 hover:bg-emerald-900/40 text-left flex flex-col justify-between gap-2 cursor-pointer transition shadow-[0_0_12px_rgba(52,211,153,0.15)] group"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-emerald-300 text-xs uppercase flex items-center gap-1.5">
+                      <Coins className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+                      Sell for Refund
+                    </span>
+                    <span className="text-[9px] px-1 py-0.2 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 font-bold">
+                      100%
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-base font-bold font-mono text-emerald-300 block">
+                      +{totalRefund.toLocaleString()} cr
+                    </span>
+                    <span className="text-[9px] text-muted-foreground block mt-0.5">
+                      Credit full market purchase price directly to ship ledger.
+                    </span>
+                  </div>
+                </button>
+
+                {/* Jettison Card */}
+                <button
+                  type="button"
+                  onClick={handleConfirmJettisonOrdnance}
+                  className="p-3 rounded-lg border border-rose-500/60 bg-rose-950/30 hover:bg-rose-900/40 text-left flex flex-col justify-between gap-2 cursor-pointer transition shadow-[0_0_12px_rgba(244,63,94,0.15)] group"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-rose-300 text-xs uppercase flex items-center gap-1.5">
+                      <Trash2 className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
+                      Jettison Cargo
+                    </span>
+                    <span className="text-[9px] px-1 py-0.2 rounded border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold">
+                      0 cr
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-base font-bold font-mono text-rose-400 block">
+                      Dump to Space
+                    </span>
+                    <span className="text-[9px] text-muted-foreground block mt-0.5">
+                      Eject warheads into vacuum. Zero credit recovery.
+                    </span>
+                  </div>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setManagingOrdnance(null)}
+                className="w-full py-2 rounded border border-slate-700 bg-black/40 text-slate-400 hover:text-white uppercase font-bold text-xs cursor-pointer mt-1"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* MODAL 1: ARM FROM WEAPON CARD DIRECTLY */}
       {weaponArmModal && (() => {

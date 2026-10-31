@@ -26,12 +26,12 @@ import {
   Maximize2,
   Minimize2,
   Layers,
-  Bookmark,
   Volume2,
   VolumeX,
   Lock,
   Unlock,
-  CheckCircle2
+  CheckCircle2,
+  AlertTriangle
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { StationModifications, Modification } from "./ship-modifications"
@@ -202,6 +202,8 @@ interface EngineeringStationProps {
   manifest?: ManifestMember[]
   onAssignCrew?: (memberId: string, targetLocation: ShipCompartmentId) => void
   onToggleTurn?: (memberId: string) => void
+  currentFuel?: number
+  maxFuel?: number
 }
 
 type StationKey = "engines" | "communications" | "weapons" | "sensors" | "defense"
@@ -292,6 +294,8 @@ export function EngineeringStation({
   manifest = [],
   onAssignCrew,
   onToggleTurn,
+  currentFuel,
+  maxFuel,
 }: EngineeringStationProps) {
   // --- MFD MODULAR DECK STATE (PER-CLIENT PERSISTENCE) ---
   const [openCards, setOpenCards] = useState<EngineeringCardId[]>(() => {
@@ -334,18 +338,6 @@ export function EngineeringStation({
     setMaximizedCard(null)
   }
 
-  const handleSaveCustomPreset = () => {
-    const name = window.prompt("Enter name for this custom engineering layout:", "Custom Engineering Setup")
-    if (!name) return
-    if (typeof window !== "undefined") {
-      try {
-        const key = `sw5e_eng_preset_${Date.now()}`
-        localStorage.setItem(key, JSON.stringify({ id: key, name, activeCards: openCards }))
-        alert(`Preset '${name}' saved to this device!`)
-      } catch {}
-    }
-  }
-
   const getModFromScore = (score?: number) => (score !== undefined ? Math.floor((score - 10) / 2) : 0)
   const formatMod = (mod: number) => (mod >= 0 ? `+${mod}` : `${mod}`)
 
@@ -374,6 +366,11 @@ export function EngineeringStation({
   const currentActualShields = shieldCurrent ?? effectiveShieldMax
   const effectiveHullDieType = shipConfig?.hullDiceType ?? "d8"
   
+  // Fuel Low-Warning Check (<= 10%)
+  const fuelCapacity = maxFuel ?? shipConfig?.fuelCapacity ?? 30
+  const liveFuel = currentFuel ?? 30
+  const isLowFuel = liveFuel <= fuelCapacity * 0.1
+
   const rawReactorType = shipConfig?.reactorType ?? "Fuel Cell Reactor"
   const reactorType = rawReactorType.toLowerCase()
 
@@ -1001,6 +998,16 @@ export function EngineeringStation({
         </div>
       </header>
 
+      {/* LOW FUEL ALARM BANNER (<= 10% RESERVES) */}
+      {isLowFuel && (
+        <section className="rounded-md border border-amber-400 bg-amber-950/40 p-2.5 shadow-[0_0_15px_rgba(251,191,36,0.25)] flex items-center justify-between text-xs animate-pulse">
+          <div className="flex items-center gap-2 text-amber-300 font-bold">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>LOW FUEL WARNING: Less than 10% fuel reserves remaining ({liveFuel} / {fuelCapacity} units). Alert Helm and initiate refueling.</span>
+          </div>
+        </section>
+      )}
+
       {/* 2. PRESET WORKSPACE SELECTOR & AUDIO/HAPTIC MUTE BAR */}
       <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded bg-black/60 border border-bridge-border text-xs">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -1034,14 +1041,6 @@ export function EngineeringStation({
             title="Collapse all open drawers"
           >
             Clear All
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveCustomPreset}
-            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
-            title="Save layout view"
-          >
-            <Bookmark className="w-3 h-3" /> Save View
           </button>
         </div>
 
@@ -1153,9 +1152,9 @@ export function EngineeringStation({
           "reactor",
           "Reactor Core",
           getShortReactorDisplayName(rawReactorType),
-          autoCycleReactor ? "Auto-Refresh ON" : isCycling ? "Cycling..." : "Cycle Ready",
+          isLowFuel ? "LOW FUEL" : autoCycleReactor ? "Auto-Refresh ON" : isCycling ? "Cycling..." : "Cycle Ready",
           <Zap className="w-3 h-3 text-amber-400" />,
-          "text-amber-300"
+          isLowFuel ? "text-amber-300 animate-pulse font-bold" : "text-amber-300"
         )}
 
         {renderSnapshotCard(

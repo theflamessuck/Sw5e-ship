@@ -57,6 +57,7 @@ interface NavcomputerStationProps {
   onAddStatus?: (status: ActiveStatus) => void
   onApplyDirectHullDamage?: (amount: number) => void
   shipConfig?: ShipConfig
+  currentFuel?: number
 }
 
 const ALL_REGIONS: GalacticRegion[] = [
@@ -103,6 +104,7 @@ export function NavcomputerStation({
   onAddStatus,
   onApplyDirectHullDamage,
   shipConfig,
+  currentFuel = 30,
 }: NavcomputerStationProps) {
   // -------------------------------------------------------------
   // 1. HYPERDRIVE DETECTION & CLASS EXTRACTION
@@ -511,6 +513,11 @@ export function NavcomputerStation({
       dailyCost: days * fuelMultiplier
     }
   }, [travelDuration, fuelMultiplier])
+
+  const hasEnoughFuel = useMemo(() => {
+    if (!estimatedFuelBurn) return true
+    return currentFuel >= estimatedFuelBurn.totalUnits
+  }, [currentFuel, estimatedFuelBurn])
 
   const evaluateRoll = (total: number) => {
     if (total >= 30) return { successes: 5, label: "PERFECT (+5 Equations)" }
@@ -1114,7 +1121,11 @@ export function NavcomputerStation({
               </div>
             </div>
           ) : travelDuration ? (
-            <div className="mt-4 p-3.5 rounded bg-black/70 border border-cyan-neon/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 font-mono">
+            <div className={`mt-4 p-3.5 rounded border flex flex-col md:flex-row justify-between items-start md:items-center gap-3 font-mono transition-all ${
+              !hasEnoughFuel 
+                ? "bg-amber-950/40 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.3)] animate-pulse" 
+                : "bg-black/70 border-cyan-neon/50"
+            }`}>
               <div>
                 <span className="text-[9px] uppercase tracking-wider text-muted-foreground block">
                   Estimated Travel Time ({selectedOrigin.region} &rarr; {selectedDest.region})
@@ -1122,6 +1133,12 @@ export function NavcomputerStation({
                 <span className="text-sm font-bold text-cyan-neon">
                   {selectedOrigin.name} &rarr; {selectedDest.name}
                 </span>
+                {!hasEnoughFuel && (
+                  <span className="text-[10px] text-amber-300 font-bold flex items-center gap-1 mt-0.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                    INSUFFICIENT FUEL: Needs {estimatedFuelBurn?.totalUnits} units, only {currentFuel} units onboard!
+                  </span>
+                )}
               </div>
 
               {travelDuration.isUnknown ? (
@@ -1146,7 +1163,7 @@ export function NavcomputerStation({
                     <span className="text-[8px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                       <Fuel className="h-3 w-3 text-amber-400" /> Fuel Burn
                     </span>
-                    <span className="text-sm font-bold text-amber-400 font-mono" title={`Jump entry (${estimatedFuelBurn?.jumpCost}u) + ${estimatedFuelBurn?.days} days transit (${estimatedFuelBurn?.dailyCost}u)`}>
+                    <span className={`text-sm font-bold font-mono ${!hasEnoughFuel ? "text-amber-300 underline font-black" : "text-amber-400"}`} title={`Jump entry (${estimatedFuelBurn?.jumpCost}u) + ${estimatedFuelBurn?.days} days transit (${estimatedFuelBurn?.dailyCost}u)`}>
                       {estimatedFuelBurn ? `${estimatedFuelBurn.totalUnits} Units` : `${fuelMultiplier} Unit`}
                     </span>
                     <span className="text-[8px] text-muted-foreground font-mono">
@@ -1291,6 +1308,8 @@ export function NavcomputerStation({
                   className={`w-full md:w-auto px-6 py-3 rounded border font-bold text-xs tracking-wider shadow-lg transition-all cursor-pointer ${
                     !hasHyperdrive || !selectedOrigin || !selectedDest
                       ? "border-red-500/40 bg-red-950/20 text-red-400/60 cursor-not-allowed opacity-60"
+                      : !hasEnoughFuel
+                      ? "border-amber-400 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 shadow-[0_0_15px_rgba(251,191,36,0.3)] animate-pulse"
                       : equationsCompleted >= targetEquations
                       ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.4)] animate-pulse"
                       : "border-amber-400/60 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20 shadow-[0_0_10px_rgba(251,191,36,0.2)]"
@@ -1298,6 +1317,8 @@ export function NavcomputerStation({
                 >
                   {!hasHyperdrive
                     ? "JUMP TO HYPERSPACE (NO DRIVE DETECTED)"
+                    : !hasEnoughFuel
+                    ? `JUMP TO HYPERSPACE (INSUFFICIENT FUEL)`
                     : equationsCompleted >= targetEquations
                     ? "JUMP TO HYPERSPACE"
                     : "RISKY JUMP (CALCULATIONS INCOMPLETE)"}

@@ -729,7 +729,7 @@ export default function BridgeDashboard() {
     }))
   }
 
-  // --- AUTOMATED DAILY PROGRESSION: CONSUMES RATIONS AND BURNS FUEL IN HYPERSPACE ---
+  // --- AUTOMATED DAILY PROGRESSION: CONSUMES RATIONS, HANDLES HYPERSPACE TRAVEL, AUTO-ARRIVES, AND MONITORS FUEL ---
   const handleAdvanceCampaignDay = (newDay?: number | ((prev: number) => number)) => {
     updateRoomData((prev) => {
       let resolvedTarget: number
@@ -741,11 +741,9 @@ export default function BridgeDashboard() {
         resolvedTarget = prev.currentDay + 1
       }
 
-      const daysPassed = Math.max(0, resolvedTarget - prev.currentDay)
-      const dailyDepletion = daysPassed > 0 ? prev.manifest.length * daysPassed : 0
-      const nextRations = Math.max(0, prev.cargoRations - dailyDepletion)
+      const requestedDays = Math.max(0, resolvedTarget - prev.currentDay)
+      if (requestedDays === 0) return prev
 
-      // Calculate reactor fuel multiplier
       const rawReactor = prev.shipConfig?.reactorType ?? "Fuel Cell Reactor"
       const reactorLower = rawReactor.toLowerCase()
       const fuelMultiplier = reactorLower.includes("ionization")
@@ -754,18 +752,98 @@ export default function BridgeDashboard() {
         ? 1.5
         : 1.0
 
-      // If in hyperspace (activeJourney), burn daily transit fuel
+      let daysPassed = requestedDays
       let nextFuel = prev.currentFuel
-      if (prev.activeJourney && daysPassed > 0) {
-        const transitFuelBurn = daysPassed * fuelMultiplier
-        nextFuel = Math.max(0, Math.round((prev.currentFuel - transitFuelBurn) * 10) / 10)
+      let nextJourney = prev.activeJourney
+      let nextStatuses = prev.shipStatuses
+      let nextLocation = prev.currentLocationPlanet
+      let nextTarget = prev.targetDestinationPlanet
+      let nextPoweredOn = prev.isPoweredOn
+      let newTransactions = prev.transactions
+
+      // 1. Hyperspace Journey Bounds, Flameout, & Auto-Arrival
+      if (prev.activeJourney) {
+        const alreadyTraveled = Math.max(0, prev.currentDay - prev.activeJourney.startDay)
+        const remainingJumpDays = Math.max(0, prev.activeJourney.totalDays - alreadyTraveled)
+
+        // Only burn fuel for actual days remaining in hyperspace (stops excess fuel burn after arrival)
+        const burnableDays = Math.min(requestedDays, remainingJumpDays)
+        const neededFuel = burnableDays * fuelMultiplier
+
+        if (burnableDays > 0) {
+          if (prev.currentFuel >= neededFuel) {
+            nextFuel = Math.max(0, Math.round((prev.currentFuel - neededFuel) * 10) / 10)
+
+            // Auto-revert if trip reaches completion
+            if (alreadyTraveled + burnableDays >= prev.activeJourney.totalDays) {
+              nextLocation = prev.activeJourney.destination
+              nextTarget = ""
+              nextJourney = null
+            }
+          } else {
+            // Out-of-Fuel Emergency Dropout
+            const possibleDays = Math.floor(prev.currentFuel / fuelMultiplier)
+            daysPassed = Math.max(0, possibleDays)
+            nextFuel = 0
+            nextJourney = null
+            nextPoweredOn = false
+            nextLocation = `Deep Space (${prev.activeJourney.originRegion || "Unknown Sector"})`
+            nextTarget = ""
+
+            if (!nextStatuses.some((s) => s.id === "fuel-depleted")) {
+              nextStatuses = [
+                ...nextStatuses,
+                {
+                  id: "fuel-depleted",
+                  title: "OUT OF FUEL // EMERGENCY DROPOUT",
+                  effect: "Hyperdrive starved of fuel. Dropped out of hyperspace in uncharted space. Auxiliary battery power only.",
+                  duration: "Until Refueled",
+                },
+              ]
+            }
+          }
+        } else {
+          // Already at destination, no hyperspace fuel burn needed
+          nextLocation = prev.activeJourney.destination
+          nextTarget = ""
+          nextJourney = null
+        }
       }
+
+      // 2. Persistent Low Fuel Warning (<= 10% Reserves)
+      const effectiveFuelCap = prev.shipConfig?.fuelCapacity ?? prev.maxFuel ?? 30
+      const lowFuelThreshold = effectiveFuelCap * 0.1
+      if (nextFuel > 0 && nextFuel <= lowFuelThreshold) {
+        if (!nextStatuses.some((s) => s.id === "low-fuel-alert")) {
+          nextStatuses = [
+            ...nextStatuses,
+            {
+              id: "low-fuel-alert",
+              title: "LOW FUEL WARNING",
+              effect: `Fuel reserves critical (${nextFuel} / ${effectiveFuelCap} units). Less than 10% fuel remaining.`,
+              duration: "Until Refueled",
+            },
+          ]
+        }
+      } else if (nextFuel > lowFuelThreshold) {
+        nextStatuses = nextStatuses.filter((s) => s.id !== "low-fuel-alert")
+      }
+
+      // 3. Crew Rations Consumption
+      const dailyRations = prev.manifest.length * daysPassed
+      const nextRations = Math.max(0, prev.cargoRations - dailyRations)
 
       return {
         ...prev,
-        currentDay: resolvedTarget,
-        cargoRations: nextRations,
+        currentDay: prev.currentDay + daysPassed,
         currentFuel: nextFuel,
+        cargoRations: nextRations,
+        activeJourney: nextJourney,
+        currentLocationPlanet: nextLocation,
+        targetDestinationPlanet: nextTarget,
+        shipStatuses: nextStatuses,
+        isPoweredOn: nextPoweredOn,
+        transactions: newTransactions,
       }
     })
   }
@@ -2056,6 +2134,48 @@ export default function BridgeDashboard() {
                         typeof newList === "function" ? newList(prev.ordnanceList) : newList,
                     }))
                   }
+                  onSellOrdnance={(item, qty, refundTotal) => {
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      ordnanceList: prev.ordnanceList.map((o) =>
+                        o.id === item.id
+                          ? { ...o, currentReserve: Math.max(0, o.currentReserve - qty) }
+                          : o
+                      ),
+                      transactions: [
+                        {
+                          id: generateSecureId("tx"),
+                          date: `Day ${prev.currentDay}`,
+                          description: `Sold Ordnance: ${qty}x ${item.name} (Full Refund)`,
+                          category: "Refit",
+                          amount: refundTotal,
+                          type: "credit",
+                        },
+                        ...prev.transactions,
+                      ],
+                    }))
+                  }}
+                  onJettisonOrdnance={(item, qty) => {
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      ordnanceList: prev.ordnanceList.map((o) =>
+                        o.id === item.id
+                          ? { ...o, currentReserve: Math.max(0, o.currentReserve - qty) }
+                          : o
+                      ),
+                      transactions: [
+                        {
+                          id: generateSecureId("tx"),
+                          date: `Day ${prev.currentDay}`,
+                          description: `Jettisoned Ordnance: ${qty}x ${item.name} (Dumped into Space)`,
+                          category: "Operations",
+                          amount: 0,
+                          type: "debit",
+                        },
+                        ...prev.transactions,
+                      ],
+                    }))
+                  }}
                   sFoilsMode={sFoilsMode}
                   systemDamageLevel={systemDamageLevel}
                   shipStatuses={shipStatuses}
@@ -2180,6 +2300,8 @@ export default function BridgeDashboard() {
                 <EngineeringStation
                   isPoweredOn={isPoweredOn}
                   onSetPoweredOn={handleSetPoweredOn}
+                  currentFuel={currentFuel}
+                  maxFuel={effectiveShipConfig.fuelCapacity}
                   autoCycleReactor={autoCycleReactorOnTurnEnd}
                   onToggleAutoCycleReactor={(enabled) =>
                     updateRoomData((prev) => ({ ...prev, autoCycleReactorOnTurnEnd: enabled }))
@@ -2676,6 +2798,7 @@ export default function BridgeDashboard() {
                     }))
                   }}
                   shipConfig={effectiveShipConfig}
+                  currentFuel={currentFuel}
                 />
               ) : active === "GM Station" ? (
                 <GmStation

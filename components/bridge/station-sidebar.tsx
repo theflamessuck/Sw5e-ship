@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import {
   Wrench,
   Activity,
@@ -20,6 +21,8 @@ import {
   Clock,
   UserCheck,
   Layers,
+  ChevronDown,
+  ChevronRight,
   type LucideIcon,
 } from "lucide-react"
 import type { ManifestMember, ShipCompartmentId } from "./bridge-dashboard"
@@ -47,6 +50,8 @@ interface StationItem {
   icon: LucideIcon
   code: string
 }
+
+type DrawerSectionId = "stations" | "utility" | "setup" | "active_pcs"
 
 // 1. Primary Operating Stations
 const PRIMARY_STATIONS: StationItem[] = [
@@ -129,6 +134,29 @@ export function StationSidebar({
   manifest?: ManifestMember[]
   installedSuites?: InstalledSuite[]
 }) {
+  const getSectionForStation = (stationId: Station): DrawerSectionId => {
+    if (PRIMARY_STATIONS.some((s) => s.id === stationId)) return "stations"
+    if (UTILITY_STATIONS.some((s) => s.id === stationId)) return "utility"
+    if (SETUP_STATIONS.some((s) => s.id === stationId)) return "setup"
+    return "stations"
+  }
+
+  // Allow null so that all sections can be minimized
+  const [expandedSection, setExpandedSection] = useState<DrawerSectionId | null>(() =>
+    getSectionForStation(active)
+  )
+
+  useEffect(() => {
+    if (active !== "GM Station") {
+      setExpandedSection(getSectionForStation(active))
+    }
+  }, [active])
+
+  // Toggle open or closed on press
+  const toggleSection = (section: DrawerSectionId) => {
+    setExpandedSection((prev) => (prev === section ? null : section))
+  }
+
   const handleStationClick = (id: Station) => {
     if (id === "GM Station") {
       const isUnlocked = sessionStorage.getItem("gm_station_unlocked") === "true"
@@ -154,12 +182,10 @@ export function StationSidebar({
     }
   }
 
-  // Filter for Player Characters with fallback if isPlayer is not explicitly set
   const playerCharacters = manifest.filter(
     (m) => m.isPlayer !== false && !m.isPassenger
   )
 
-  // Helper to determine if a station is currently crewed by at least 1 person
   const isStationCrewed = (stationId: Station): boolean => {
     switch (stationId) {
       case "Engines":
@@ -197,7 +223,7 @@ export function StationSidebar({
         aria-current={isActive ? "page" : undefined}
         disabled={isBlackout}
         className={[
-          "group relative flex items-center gap-2.5 rounded-sm border px-2.5 py-1.5 text-left transition-colors cursor-pointer",
+          "group relative flex items-center gap-2.5 rounded-sm border px-2.5 py-1.5 text-left transition-colors cursor-pointer w-full",
           isBlackout
             ? "border-red-500/20 bg-black/40 text-red-500/50 cursor-not-allowed opacity-50"
             : isActive
@@ -223,8 +249,8 @@ export function StationSidebar({
           }
           strokeWidth={2}
         />
-        <span className="hidden text-xs font-bold tracking-wider lg:inline">
-          {isBlackout ? `${id.toUpperCase()} [OFFLINE]` : id.toUpperCase()}
+        <span className="hidden text-xs font-bold tracking-wider lg:inline truncate">
+          {isBlackout ? `${id.toUpperCase()} [OFF]` : id.toUpperCase()}
         </span>
         <span className="text-xs font-bold tracking-widest lg:hidden">
           {code}
@@ -234,55 +260,205 @@ export function StationSidebar({
   }
 
   return (
-    <aside className="shrink-0 lg:w-56 flex flex-col gap-3 font-mono">
+    <aside className="shrink-0 lg:w-56 flex flex-col gap-2 font-mono">
       <nav
         aria-label="Bridge stations"
-        className={`flex shrink-0 flex-row gap-2 overflow-x-auto rounded-md border p-2 lg:flex-col lg:overflow-visible transition-colors ${
+        className={`flex shrink-0 flex-row gap-2 overflow-x-auto rounded-md border p-1.5 lg:flex-col lg:overflow-visible transition-colors ${
           isBlackout
             ? "border-red-500/60 bg-red-950/20 shadow-[0_0_20px_rgba(239,68,68,0.2)]"
             : "border-bridge-border bg-bridge-panel"
         }`}
       >
-        {/* SECTION 1: STATIONS */}
-        <div className="flex flex-col gap-1">
-          <div className="px-2 py-1 flex items-center justify-between border-b border-bridge-border/60 bg-black/30 rounded-t-sm mb-1">
-            <span
-              className={`text-[10px] tracking-[0.25em] font-extrabold uppercase ${
-                isBlackout
-                  ? "text-red-400 animate-pulse"
-                  : "text-cyan-neon text-glow-cyan"
-              }`}
-            >
-              // STATIONS
-            </span>
-            <span className="hidden lg:inline text-[8px] text-muted-foreground/60 uppercase">OPERATIONS</span>
-          </div>
-          {PRIMARY_STATIONS.map(renderStationButton)}
+        {/* DRAWER 1: STATIONS */}
+        <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => toggleSection("stations")}
+            className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
+          >
+            <div className="flex items-center gap-1.5">
+              {expandedSection === "stations" ? (
+                <ChevronDown className="h-3 w-3 text-cyan-neon" />
+              ) : (
+                <ChevronRight className="h-3 w-3 text-slate-500" />
+              )}
+              <span
+                className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
+                  isBlackout
+                    ? "text-red-400 animate-pulse"
+                    : expandedSection === "stations"
+                    ? "text-cyan-neon text-glow-cyan"
+                    : "text-slate-300"
+                }`}
+              >
+                Stations
+              </span>
+            </div>
+            {expandedSection !== "stations" && PRIMARY_STATIONS.some((s) => s.id === active) && (
+              <span className="text-[8px] font-bold text-cyan-neon bg-cyan-neon/10 px-1 py-0.2 rounded border border-cyan-neon/30">
+                ACTIVE
+              </span>
+            )}
+          </button>
+
+          {expandedSection === "stations" && (
+            <div className="p-1 flex flex-col gap-0.5 border-t border-bridge-border/40 bg-black/20">
+              {PRIMARY_STATIONS.map(renderStationButton)}
+            </div>
+          )}
         </div>
 
-        {/* SECTION 2: UTILITY */}
-        <div className="flex flex-col gap-1 lg:mt-3">
-          <div className="px-2 py-1 flex items-center justify-between border-b border-bridge-border/60 bg-black/30 rounded-t-sm mb-1">
-            <span className="text-[10px] tracking-[0.25em] font-extrabold uppercase text-slate-300">
-              // UTILITY
-            </span>
-            <span className="hidden lg:inline text-[8px] text-muted-foreground/60 uppercase">LOGISTICS</span>
-          </div>
-          {UTILITY_STATIONS.map(renderStationButton)}
+        {/* DRAWER 2: UTILITY */}
+        <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => toggleSection("utility")}
+            className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
+          >
+            <div className="flex items-center gap-1.5">
+              {expandedSection === "utility" ? (
+                <ChevronDown className="h-3 w-3 text-cyan-neon" />
+              ) : (
+                <ChevronRight className="h-3 w-3 text-slate-500" />
+              )}
+              <span
+                className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
+                  expandedSection === "utility"
+                    ? "text-cyan-neon text-glow-cyan"
+                    : "text-slate-300"
+                }`}
+              >
+                Utility
+              </span>
+            </div>
+            {expandedSection !== "utility" && UTILITY_STATIONS.some((s) => s.id === active) && (
+              <span className="text-[8px] font-bold text-cyan-neon bg-cyan-neon/10 px-1 py-0.2 rounded border border-cyan-neon/30">
+                ACTIVE
+              </span>
+            )}
+          </button>
+
+          {expandedSection === "utility" && (
+            <div className="p-1 flex flex-col gap-0.5 border-t border-bridge-border/40 bg-black/20">
+              {UTILITY_STATIONS.map(renderStationButton)}
+            </div>
+          )}
         </div>
 
-        {/* SECTION 3: SET-UP */}
-        <div className="flex flex-col gap-1 lg:mt-3">
-          <div className="px-2 py-1 flex items-center justify-between border-b border-bridge-border/60 bg-black/30 rounded-t-sm mb-1">
-            <span className="text-[10px] tracking-[0.25em] font-extrabold uppercase text-amber-400">
-              // SET-UP
-            </span>
-            <span className="hidden lg:inline text-[8px] text-muted-foreground/60 uppercase">CONFIG</span>
-          </div>
-          {SETUP_STATIONS.map(renderStationButton)}
+        {/* DRAWER 3: SETUP */}
+        <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => toggleSection("setup")}
+            className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
+          >
+            <div className="flex items-center gap-1.5">
+              {expandedSection === "setup" ? (
+                <ChevronDown className="h-3 w-3 text-amber-400" />
+              ) : (
+                <ChevronRight className="h-3 w-3 text-slate-500" />
+              )}
+              <span
+                className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
+                  expandedSection === "setup"
+                    ? "text-amber-400"
+                    : "text-slate-300"
+                }`}
+              >
+                Setup
+              </span>
+            </div>
+            {expandedSection !== "setup" && SETUP_STATIONS.some((s) => s.id === active) && (
+              <span className="text-[8px] font-bold text-amber-300 bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/30">
+                ACTIVE
+              </span>
+            )}
+          </button>
+
+          {expandedSection === "setup" && (
+            <div className="p-1 flex flex-col gap-0.5 border-t border-bridge-border/40 bg-black/20">
+              {SETUP_STATIONS.map(renderStationButton)}
+            </div>
+          )}
         </div>
 
-        {/* GM STATION OVERRIDE BUTTON */}
+        {/* DRAWER 4: ACTIVE PCS */}
+        <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => toggleSection("active_pcs")}
+            className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
+          >
+            <div className="flex items-center gap-1.5">
+              {expandedSection === "active_pcs" ? (
+                <ChevronDown className="h-3 w-3 text-cyan-neon" />
+              ) : (
+                <ChevronRight className="h-3 w-3 text-slate-500" />
+              )}
+              <span
+                className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
+                  expandedSection === "active_pcs"
+                    ? "text-cyan-neon text-glow-cyan"
+                    : "text-slate-300"
+                }`}
+              >
+                Active PCs
+              </span>
+            </div>
+            <span className="text-[9px] font-bold text-muted-foreground font-mono">
+              {playerCharacters.length} Crew
+            </span>
+          </button>
+
+          {expandedSection === "active_pcs" && (
+            <div className="p-1.5 flex flex-col gap-1 border-t border-bridge-border/40 bg-black/20 max-h-56 overflow-y-auto">
+              {playerCharacters.length === 0 ? (
+                <p className="text-[10px] text-slate-500 italic py-1 text-center">
+                  No active PCs in manifest
+                </p>
+              ) : (
+                playerCharacters.map((pc) => {
+                  const locationLabel = formatCompartmentName(pc.location, installedSuites)
+                  const hasTakenTurn = pc.hasTakenTurnThisRound
+
+                  return (
+                    <div
+                      key={pc.id}
+                      className={`flex items-center justify-between rounded p-1.5 border text-xs transition ${
+                        hasTakenTurn
+                          ? "bg-slate-950/40 border-slate-800 text-slate-400"
+                          : "bg-black/60 border-cyan-500/30 text-slate-100"
+                      }`}
+                    >
+                      <div className="flex flex-col min-w-0 pr-1">
+                        <span className="font-bold text-[10px] truncate max-w-[95px]">
+                          {pc.name}
+                        </span>
+                        <span className="text-[8px] font-mono text-cyan-300/80 truncate">
+                          @ {locationLabel}
+                        </span>
+                      </div>
+
+                      <div className="shrink-0">
+                        {hasTakenTurn ? (
+                          <span className="flex items-center gap-0.5 text-[8px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1 py-0.5 rounded">
+                            <CheckCircle2 className="h-2.5 w-2.5" /> Done
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-0.5 text-[8px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1 py-0.5 rounded animate-pulse">
+                            <Clock className="h-2.5 w-2.5" /> Wait
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* STANDALONE GM STATION ACCESS */}
         {(() => {
           const id: Station = "GM Station"
           const isActive = id === active
@@ -293,98 +469,24 @@ export function StationSidebar({
               onClick={() => handleStationClick(id)}
               aria-current={isActive ? "page" : undefined}
               className={[
-                "group relative flex items-center gap-2.5 rounded-sm border px-2.5 py-1.5 text-left transition-colors mt-2 border-t border-bridge-border/80 pt-2 cursor-pointer",
+                "group relative flex items-center gap-2 rounded-sm border px-2.5 py-1.5 text-left transition-colors cursor-pointer w-full mt-1",
                 isActive
                   ? "border-amber-500/80 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.25)]"
                   : "border-amber-500/30 bg-amber-500/10 text-amber-400/90 hover:bg-amber-500/15 hover:text-amber-300",
               ].join(" ")}
             >
-              {isActive && (
-                <span
-                  className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-amber-400"
-                  aria-hidden="true"
-                />
-              )}
               <ShieldAlert
                 className="h-3.5 w-3.5 text-amber-400 animate-pulse shrink-0"
                 strokeWidth={2}
               />
-              <span className="hidden text-xs font-bold tracking-widest lg:inline flex-1">
-                GM STATION
-              </span>
-              <span className="text-xs font-bold tracking-widest lg:hidden flex-1">
-                GM
+              <span className="text-[10px] font-bold tracking-widest uppercase flex-1 truncate">
+                GM Station
               </span>
               <Lock className="h-3 w-3 text-amber-400/70 shrink-0" />
             </button>
           )
         })()}
       </nav>
-
-      {/* ========================================================================= */}
-      {/* PC CREW COMBAT STATUS HUD (ALWAYS VISIBLE)                                 */}
-      {/* ========================================================================= */}
-      <div className="flex flex-col gap-2 rounded-md border border-cyan-neon/30 bg-bridge-panel p-2.5 shadow-sm">
-        <div className="flex items-center justify-between border-b border-bridge-border/60 pb-1.5 bg-black/40 px-2 py-1 rounded-t-sm">
-          <div className="flex items-center gap-1.5 text-[10px] font-extrabold text-cyan-neon uppercase tracking-wider">
-            <UserCheck className="h-3.5 w-3.5 text-cyan-neon" />
-            <span>Active PCs</span>
-          </div>
-          <span className="text-[9px] text-muted-foreground font-bold">
-            {playerCharacters.length} Crew
-          </span>
-        </div>
-
-        {playerCharacters.length === 0 ? (
-          <p className="text-[10px] text-slate-500 italic py-2 text-center">
-            No player characters registered in manifest
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto pr-1">
-            {playerCharacters.map((pc) => {
-              const locationLabel = formatCompartmentName(pc.location, installedSuites)
-              const hasTakenTurn = pc.hasTakenTurnThisRound
-
-              return (
-                <div
-                  key={pc.id}
-                  className={`flex items-center justify-between rounded p-1.5 border text-xs transition ${
-                    hasTakenTurn
-                      ? "bg-slate-950/40 border-slate-800 text-slate-400"
-                      : "bg-black/60 border-cyan-500/30 text-slate-100"
-                  }`}
-                >
-                  <div className="flex flex-col min-w-0 pr-1">
-                    <span className="font-bold text-[11px] truncate max-w-[105px]">
-                      {pc.name}
-                    </span>
-                    <span className="text-[9px] font-mono text-cyan-300/80 truncate">
-                      @ {locationLabel}
-                    </span>
-                  </div>
-
-                  <div
-                    className="flex items-center gap-1 shrink-0"
-                    title={hasTakenTurn ? "Turn taken this round" : "Turn pending"}
-                  >
-                    {hasTakenTurn ? (
-                      <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded">
-                        <CheckCircle2 className="h-3 w-3" />
-                        Done
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-[9px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded animate-pulse">
-                        <Clock className="h-3 w-3" />
-                        Wait
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
     </aside>
   )
 }

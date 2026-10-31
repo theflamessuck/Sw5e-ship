@@ -127,7 +127,7 @@ interface CustomPreset {
 
 const DEFAULT_PRESETS: CustomPreset[] = [
   { id: "radar", name: "Radar & Contacts", activeCards: ["arrayStatus", "contacts"] },
-  { id: "recon", name: "Active Recon", activeCards: ["activeScan", "sensorProbe", "contacts"] },
+  { id: "recon", name: "Active Recon", activeCards: ["activeScan", "contacts", "sensorProbe"] },
   { id: "ew", name: "Tactical ECM", activeCards: ["tacticalModules", "powerDice", "arrayStatus"] },
   { id: "all", name: "All Sensor Systems", activeCards: ["arrayStatus", "powerDice", "activeScan", "sensorProbe", "contacts", "tacticalModules", "mods", "ship_stats"] }
 ]
@@ -860,14 +860,7 @@ export function SensorsStation({
           >
             Clear All
           </button>
-          <button
-            type="button"
-            onClick={handleSaveCustomPreset}
-            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
-            title="Save layout view"
-          >
-            <Bookmark className="w-3 h-3" /> Save View
-          </button>
+          
         </div>
 
         <div className="flex items-center gap-2">

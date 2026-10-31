@@ -1032,14 +1032,7 @@ export function DefenseStation({
           >
             Clear All
           </button>
-          <button
-            type="button"
-            onClick={handleSaveCustomPreset}
-            className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-400/50 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 cursor-pointer"
-            title="Save layout view"
-          >
-            <Bookmark className="w-3 h-3" /> Save View
-          </button>
+          
         </div>
 
         <div className="flex items-center gap-2">
