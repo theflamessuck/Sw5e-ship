@@ -30,7 +30,8 @@ import {
   Volume2,
   VolumeX,
   Lock,
-  Unlock
+  Unlock,
+  CheckCircle2
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { StationModifications, Modification } from "./ship-modifications"
