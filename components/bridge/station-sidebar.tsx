@@ -223,7 +223,7 @@ export function StationSidebar({
         aria-current={isActive ? "page" : undefined}
         disabled={isBlackout}
         className={[
-          "group relative flex items-center gap-2.5 rounded-sm border px-2.5 py-1.5 text-left transition-colors cursor-pointer w-full",
+          "group relative flex items-center gap-2 rounded-sm border px-2.5 py-1.5 text-left transition-colors cursor-pointer w-full shrink-0",
           isBlackout
             ? "border-red-500/20 bg-black/40 text-red-500/50 cursor-not-allowed opacity-50"
             : isActive
@@ -240,225 +240,225 @@ export function StationSidebar({
         <Icon
           className={
             isBlackout
-              ? "h-3.5 w-3.5 text-red-500/50"
+              ? "h-3.5 w-3.5 text-red-500/50 shrink-0"
               : hasCrew
-              ? "h-3.5 w-3.5 text-emerald-400 drop-shadow-[0_0_6px_rgba(52,211,153,0.7)]"
+              ? "h-3.5 w-3.5 text-emerald-400 drop-shadow-[0_0_6px_rgba(52,211,153,0.7)] shrink-0"
               : isActive
-              ? "text-glow-cyan h-3.5 w-3.5"
-              : "h-3.5 w-3.5"
+              ? "text-glow-cyan h-3.5 w-3.5 shrink-0"
+              : "h-3.5 w-3.5 shrink-0"
           }
           strokeWidth={2}
         />
-        <span className="hidden text-xs font-bold tracking-wider lg:inline truncate">
+        <span className="text-xs font-bold tracking-wider truncate">
           {isBlackout ? `${id.toUpperCase()} [OFF]` : id.toUpperCase()}
-        </span>
-        <span className="text-xs font-bold tracking-widest lg:hidden">
-          {code}
         </span>
       </button>
     )
   }
 
   return (
-    <aside className="shrink-0 lg:w-56 flex flex-col gap-2 font-mono">
+    <aside className="shrink-0 w-full lg:w-56 flex flex-col gap-2 font-mono">
       <nav
         aria-label="Bridge stations"
-        className={`flex shrink-0 flex-row gap-2 overflow-x-auto rounded-md border p-1.5 lg:flex-col lg:overflow-visible transition-colors ${
+        className={`flex flex-col gap-1.5 rounded-md border p-1.5 transition-colors ${
           isBlackout
             ? "border-red-500/60 bg-red-950/20 shadow-[0_0_20px_rgba(239,68,68,0.2)]"
             : "border-bridge-border bg-bridge-panel"
         }`}
       >
-        {/* DRAWER 1: STATIONS */}
-        <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
-          <button
-            type="button"
-            onClick={() => toggleSection("stations")}
-            className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
-          >
-            <div className="flex items-center gap-1.5">
-              {expandedSection === "stations" ? (
-                <ChevronDown className="h-3 w-3 text-cyan-neon" />
-              ) : (
-                <ChevronRight className="h-3 w-3 text-slate-500" />
+        {/* TOP BAR / ACCORDIONS GRID */}
+        <div className="flex flex-col gap-1">
+          {/* DRAWER 1: STATIONS */}
+          <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleSection("stations")}
+              className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5">
+                {expandedSection === "stations" ? (
+                  <ChevronDown className="h-3 w-3 text-cyan-neon shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3 w-3 text-slate-500 shrink-0" />
+                )}
+                <span
+                  className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
+                    isBlackout
+                      ? "text-red-400 animate-pulse"
+                      : expandedSection === "stations"
+                      ? "text-cyan-neon text-glow-cyan"
+                      : "text-slate-300"
+                  }`}
+                >
+                  Stations
+                </span>
+              </div>
+              {expandedSection !== "stations" && PRIMARY_STATIONS.some((s) => s.id === active) && (
+                <span className="text-[8px] font-bold text-cyan-neon bg-cyan-neon/10 px-1 py-0.2 rounded border border-cyan-neon/30">
+                  ACTIVE
+                </span>
               )}
-              <span
-                className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
-                  isBlackout
-                    ? "text-red-400 animate-pulse"
-                    : expandedSection === "stations"
-                    ? "text-cyan-neon text-glow-cyan"
-                    : "text-slate-300"
-                }`}
-              >
-                Stations
-              </span>
-            </div>
-            {expandedSection !== "stations" && PRIMARY_STATIONS.some((s) => s.id === active) && (
-              <span className="text-[8px] font-bold text-cyan-neon bg-cyan-neon/10 px-1 py-0.2 rounded border border-cyan-neon/30">
-                ACTIVE
-              </span>
+            </button>
+
+            {expandedSection === "stations" && (
+              <div className="p-1 flex flex-col gap-0.5 border-t border-bridge-border/40 bg-black/20">
+                {PRIMARY_STATIONS.map(renderStationButton)}
+              </div>
             )}
-          </button>
+          </div>
 
-          {expandedSection === "stations" && (
-            <div className="p-1 flex flex-col gap-0.5 border-t border-bridge-border/40 bg-black/20">
-              {PRIMARY_STATIONS.map(renderStationButton)}
-            </div>
-          )}
-        </div>
-
-        {/* DRAWER 2: UTILITY */}
-        <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
-          <button
-            type="button"
-            onClick={() => toggleSection("utility")}
-            className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
-          >
-            <div className="flex items-center gap-1.5">
-              {expandedSection === "utility" ? (
-                <ChevronDown className="h-3 w-3 text-cyan-neon" />
-              ) : (
-                <ChevronRight className="h-3 w-3 text-slate-500" />
+          {/* DRAWER 2: UTILITY */}
+          <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleSection("utility")}
+              className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5">
+                {expandedSection === "utility" ? (
+                  <ChevronDown className="h-3 w-3 text-cyan-neon shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3 w-3 text-slate-500 shrink-0" />
+                )}
+                <span
+                  className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
+                    expandedSection === "utility"
+                      ? "text-cyan-neon text-glow-cyan"
+                      : "text-slate-300"
+                  }`}
+                >
+                  Utility
+                </span>
+              </div>
+              {expandedSection !== "utility" && UTILITY_STATIONS.some((s) => s.id === active) && (
+                <span className="text-[8px] font-bold text-cyan-neon bg-cyan-neon/10 px-1 py-0.2 rounded border border-cyan-neon/30">
+                  ACTIVE
+                </span>
               )}
-              <span
-                className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
-                  expandedSection === "utility"
-                    ? "text-cyan-neon text-glow-cyan"
-                    : "text-slate-300"
-                }`}
-              >
-                Utility
-              </span>
-            </div>
-            {expandedSection !== "utility" && UTILITY_STATIONS.some((s) => s.id === active) && (
-              <span className="text-[8px] font-bold text-cyan-neon bg-cyan-neon/10 px-1 py-0.2 rounded border border-cyan-neon/30">
-                ACTIVE
-              </span>
+            </button>
+
+            {expandedSection === "utility" && (
+              <div className="p-1 flex flex-col gap-0.5 border-t border-bridge-border/40 bg-black/20">
+                {UTILITY_STATIONS.map(renderStationButton)}
+              </div>
             )}
-          </button>
+          </div>
 
-          {expandedSection === "utility" && (
-            <div className="p-1 flex flex-col gap-0.5 border-t border-bridge-border/40 bg-black/20">
-              {UTILITY_STATIONS.map(renderStationButton)}
-            </div>
-          )}
-        </div>
-
-        {/* DRAWER 3: SETUP */}
-        <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
-          <button
-            type="button"
-            onClick={() => toggleSection("setup")}
-            className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
-          >
-            <div className="flex items-center gap-1.5">
-              {expandedSection === "setup" ? (
-                <ChevronDown className="h-3 w-3 text-amber-400" />
-              ) : (
-                <ChevronRight className="h-3 w-3 text-slate-500" />
+          {/* DRAWER 3: SETUP */}
+          <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleSection("setup")}
+              className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5">
+                {expandedSection === "setup" ? (
+                  <ChevronDown className="h-3 w-3 text-amber-400 shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3 w-3 text-slate-500 shrink-0" />
+                )}
+                <span
+                  className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
+                    expandedSection === "setup"
+                      ? "text-amber-400"
+                      : "text-slate-300"
+                  }`}
+                >
+                  Setup
+                </span>
+              </div>
+              {expandedSection !== "setup" && SETUP_STATIONS.some((s) => s.id === active) && (
+                <span className="text-[8px] font-bold text-amber-300 bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/30">
+                  ACTIVE
+                </span>
               )}
-              <span
-                className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
-                  expandedSection === "setup"
-                    ? "text-amber-400"
-                    : "text-slate-300"
-                }`}
-              >
-                Setup
-              </span>
-            </div>
-            {expandedSection !== "setup" && SETUP_STATIONS.some((s) => s.id === active) && (
-              <span className="text-[8px] font-bold text-amber-300 bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/30">
-                ACTIVE
-              </span>
+            </button>
+
+            {expandedSection === "setup" && (
+              <div className="p-1 flex flex-col gap-0.5 border-t border-bridge-border/40 bg-black/20">
+                {SETUP_STATIONS.map(renderStationButton)}
+              </div>
             )}
-          </button>
+          </div>
 
-          {expandedSection === "setup" && (
-            <div className="p-1 flex flex-col gap-0.5 border-t border-bridge-border/40 bg-black/20">
-              {SETUP_STATIONS.map(renderStationButton)}
-            </div>
-          )}
-        </div>
-
-        {/* DRAWER 4: ACTIVE PCS */}
-        <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
-          <button
-            type="button"
-            onClick={() => toggleSection("active_pcs")}
-            className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
-          >
-            <div className="flex items-center gap-1.5">
-              {expandedSection === "active_pcs" ? (
-                <ChevronDown className="h-3 w-3 text-cyan-neon" />
-              ) : (
-                <ChevronRight className="h-3 w-3 text-slate-500" />
-              )}
-              <span
-                className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
-                  expandedSection === "active_pcs"
-                    ? "text-cyan-neon text-glow-cyan"
-                    : "text-slate-300"
-                }`}
-              >
-                Active PCs
+          {/* DRAWER 4: ACTIVE PCS */}
+          <div className="flex flex-col rounded border border-bridge-border/60 bg-black/40 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleSection("active_pcs")}
+              className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-white/5 transition cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5">
+                {expandedSection === "active_pcs" ? (
+                  <ChevronDown className="h-3 w-3 text-cyan-neon shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3 w-3 text-slate-500 shrink-0" />
+                )}
+                <span
+                  className={`text-[10px] tracking-[0.2em] font-extrabold uppercase ${
+                    expandedSection === "active_pcs"
+                      ? "text-cyan-neon text-glow-cyan"
+                      : "text-slate-300"
+                  }`}
+                >
+                  Active PCs
+                </span>
+              </div>
+              <span className="text-[9px] font-bold text-muted-foreground font-mono">
+                {playerCharacters.length} Crew
               </span>
-            </div>
-            <span className="text-[9px] font-bold text-muted-foreground font-mono">
-              {playerCharacters.length} Crew
-            </span>
-          </button>
+            </button>
 
-          {expandedSection === "active_pcs" && (
-            <div className="p-1.5 flex flex-col gap-1 border-t border-bridge-border/40 bg-black/20 max-h-56 overflow-y-auto">
-              {playerCharacters.length === 0 ? (
-                <p className="text-[10px] text-slate-500 italic py-1 text-center">
-                  No active PCs in manifest
-                </p>
-              ) : (
-                playerCharacters.map((pc) => {
-                  const locationLabel = formatCompartmentName(pc.location, installedSuites)
-                  const hasTakenTurn = pc.hasTakenTurnThisRound
+            {expandedSection === "active_pcs" && (
+              <div className="p-1.5 flex flex-col gap-1 border-t border-bridge-border/40 bg-black/20 max-h-56 overflow-y-auto">
+                {playerCharacters.length === 0 ? (
+                  <p className="text-[10px] text-slate-500 italic py-1 text-center">
+                    No active PCs in manifest
+                  </p>
+                ) : (
+                  playerCharacters.map((pc) => {
+                    const locationLabel = formatCompartmentName(pc.location, installedSuites)
+                    const hasTakenTurn = pc.hasTakenTurnThisRound
 
-                  return (
-                    <div
-                      key={pc.id}
-                      className={`flex items-center justify-between rounded p-1.5 border text-xs transition ${
-                        hasTakenTurn
-                          ? "bg-slate-950/40 border-slate-800 text-slate-400"
-                          : "bg-black/60 border-cyan-500/30 text-slate-100"
-                      }`}
-                    >
-                      <div className="flex flex-col min-w-0 pr-1">
-                        <span className="font-bold text-[10px] truncate max-w-[95px]">
-                          {pc.name}
-                        </span>
-                        <span className="text-[8px] font-mono text-cyan-300/80 truncate">
-                          @ {locationLabel}
-                        </span>
-                      </div>
-
-                      <div className="shrink-0">
-                        {hasTakenTurn ? (
-                          <span className="flex items-center gap-0.5 text-[8px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1 py-0.5 rounded">
-                            <CheckCircle2 className="h-2.5 w-2.5" /> Done
+                    return (
+                      <div
+                        key={pc.id}
+                        className={`flex items-center justify-between rounded p-1.5 border text-xs transition ${
+                          hasTakenTurn
+                            ? "bg-slate-950/40 border-slate-800 text-slate-400"
+                            : "bg-black/60 border-cyan-500/30 text-slate-100"
+                        }`}
+                      >
+                        <div className="flex flex-col min-w-0 pr-1">
+                          <span className="font-bold text-[10px] truncate max-w-[120px]">
+                            {pc.name}
                           </span>
-                        ) : (
-                          <span className="flex items-center gap-0.5 text-[8px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1 py-0.5 rounded animate-pulse">
-                            <Clock className="h-2.5 w-2.5" /> Wait
+                          <span className="text-[8px] font-mono text-cyan-300/80 truncate">
+                            @ {locationLabel}
                           </span>
-                        )}
+                        </div>
+
+                        <div className="shrink-0">
+                          {hasTakenTurn ? (
+                            <span className="flex items-center gap-0.5 text-[8px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1 py-0.5 rounded">
+                              <CheckCircle2 className="h-2.5 w-2.5" /> Done
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-0.5 text-[8px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1 py-0.5 rounded animate-pulse">
+                              <Clock className="h-2.5 w-2.5" /> Wait
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          )}
+                    )
+                  })
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* STANDALONE GM STATION ACCESS */}
+        {/* STANDALONE GM STATION ACCESS (Compact, Sleek Button) */}
         {(() => {
           const id: Station = "GM Station"
           const isActive = id === active
@@ -469,19 +469,21 @@ export function StationSidebar({
               onClick={() => handleStationClick(id)}
               aria-current={isActive ? "page" : undefined}
               className={[
-                "group relative flex items-center gap-2 rounded-sm border px-2.5 py-1.5 text-left transition-colors cursor-pointer w-full mt-1",
+                "group relative flex items-center justify-between rounded-sm border px-2.5 py-1.5 text-left transition-colors cursor-pointer w-full mt-0.5 shrink-0",
                 isActive
                   ? "border-amber-500/80 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.25)]"
                   : "border-amber-500/30 bg-amber-500/10 text-amber-400/90 hover:bg-amber-500/15 hover:text-amber-300",
               ].join(" ")}
             >
-              <ShieldAlert
-                className="h-3.5 w-3.5 text-amber-400 animate-pulse shrink-0"
-                strokeWidth={2}
-              />
-              <span className="text-[10px] font-bold tracking-widest uppercase flex-1 truncate">
-                GM Station
-              </span>
+              <div className="flex items-center gap-1.5">
+                <ShieldAlert
+                  className="h-3.5 w-3.5 text-amber-400 animate-pulse shrink-0"
+                  strokeWidth={2}
+                />
+                <span className="text-[10px] font-bold tracking-widest uppercase">
+                  GM Station
+                </span>
+              </div>
               <Lock className="h-3 w-3 text-amber-400/70 shrink-0" />
             </button>
           )
