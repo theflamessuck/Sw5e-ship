@@ -132,7 +132,7 @@ interface CustomPreset {
 
 const DEFAULT_PRESETS: CustomPreset[] = [
   { id: "shields", name: "Shields & Hull", activeCards: ["shields", "hull", "statuses", "systemDamage"] },
-  { id: "tactical", name: "Tactical Defenses", activeCards: ["tacticalDefense","mods"] },
+  { id: "tactical", name: "Tactical Defenses", activeCards: ["powerDice", "tacticalDefense", "mods"] },
   { id: "all", name: "All Systems", activeCards: ["shields", "hull", "armor", "systemDamage", "statuses", "tacticalDefense", "powerDice", "mods", "ship_stats"] }
 ]
 
@@ -354,7 +354,7 @@ export function DefenseStation({
         if (saved) return JSON.parse(saved)
       } catch {}
     }
-    return ["shields", "hull", "powerDice"]
+    return ["shields", "powerDice", "hull"]
   })
 
   const [maximizedCard, setMaximizedCard] = useState<DefenseCardId | null>(null)
@@ -1032,7 +1032,6 @@ export function DefenseStation({
           >
             Clear All
           </button>
-          
         </div>
 
         <div className="flex items-center gap-2">
@@ -1137,8 +1136,8 @@ export function DefenseStation({
         )}
       </div>
 
-      {/* 4. TOP-DECK MODULAR SNAPSHOT TILES (8 UNIFORM TILES) */}
-      <section className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 w-full">
+      {/* 4. TOP-DECK MODULAR SNAPSHOT TILES (9 UNIFORM TILES) */}
+      <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-9 gap-2 w-full">
         {renderSnapshotCard(
           "shields",
           "Shield Grid",
@@ -1146,6 +1145,19 @@ export function DefenseStation({
           shipShields.temp > 0 ? `+${shipShields.temp} Temp SP` : "Shields Online",
           <Shield className="w-3 h-3 text-cyan-neon" />,
           shipShields.current === 0 && shipShields.temp === 0 ? "text-red-400 animate-pulse" : "text-cyan-neon"
+        )}
+
+        {renderSnapshotCard(
+          "powerDice",
+          "Defense Power",
+          isDirect
+            ? `${availablePowerDice}/${maxPowerDice} Dice`
+            : isDistributed
+            ? `${currentStationDice}/2 Dice`
+            : `${currentStationDice}/1 Die`,
+          isHubAndSpoke ? `${sharedPoolDice}/2 Shared` : powerCoupling.replace(" Power Coupling", ""),
+          <Zap className="w-3 h-3 text-amber-400" />,
+          "text-amber-300"
         )}
 
         {renderSnapshotCard(
@@ -1762,36 +1774,40 @@ export function DefenseStation({
                       shipSize={shipConfig?.size}
                     />
 
-                    {isHubAndSpoke && (
-                      <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
-                          <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 w-full">
-                          {Array.from({ length: 2 }).map((_, i) => (
-                            <span
-                              key={i}
-                              className={`h-2.5 flex-1 rounded-xs inline-block ${
-                                i < sharedPoolDice 
-                                  ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
-                                  : "bg-black/80 border border-bridge-border"
-                              }`}
-                            />
-                          ))}
-                        </div>
+                    {isHubAndSpoke && (() => {
+                      const canSpendStation = currentStationDice > 0;
+                      const canSpendShared = sharedPoolDice > 0;
+                      return (
+                        <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
+                            <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 w-full">
+                            {Array.from({ length: 2 }).map((_, i) => (
+                              <span
+                                key={i}
+                                className={`h-2.5 flex-1 rounded-xs inline-block ${
+                                  i < sharedPoolDice 
+                                    ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
+                                    : "bg-black/80 border border-bridge-border"
+                                }`}
+                              />
+                            ))}
+                          </div>
 
-                        {!canSpendStation && canSpendShared && (
-                          <button
-                            type="button"
-                            onClick={() => handleCustomConsume(1)}
-                            className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
-                          >
-                            CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
-                          </button>
-                        )}
-                      </div>
-                    )}
+                          {!canSpendStation && canSpendShared && (
+                            <button
+                              type="button"
+                              onClick={() => handleCustomConsume(1)}
+                              className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
+                            >
+                              CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 

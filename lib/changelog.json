@@ -1,5 +1,45 @@
 [
   {
+    "hash": "982314a",
+    "date": "2026-11-01",
+    "message": "Fix: sidebar when in portait mode"
+  },
+  {
+    "hash": "47a16c0",
+    "date": "2026-11-01",
+    "message": "feat: added GM functionality and overrides"
+  },
+  {
+    "hash": "f4bd6d0",
+    "date": "2026-10-31",
+    "message": "Feat: Added FTL cutoff if fuel low, fuel estimation"
+  },
+  {
+    "hash": "02fe036",
+    "date": "2026-10-31",
+    "message": "fix(engineering) fixed bug with lucide icon not loadig screen properly"
+  },
+  {
+    "hash": "8aa2d53",
+    "date": "2026-10-30",
+    "message": "eat(bridge): implement modular deck refactoring, HUD polish, and fuel burn sync"
+  },
+  {
+    "hash": "e3e2a95",
+    "date": "2026-10-28",
+    "message": "feat(ui): implement modular MFD glass-cockpit consoles, layout presets, and avionics audio"
+  },
+  {
+    "hash": "807f0b2",
+    "date": "2026-10-27",
+    "message": "feat: add mechanical mishaps, dynamic AC penalty, sublight travel, and transponder generation"
+  },
+  {
+    "hash": "963cb27",
+    "date": "2026-10-26",
+    "message": "feat: implement intra-system sublight transit, weapons boost sync, and uninstall confirmations"
+  },
+  {
     "hash": "24c82af",
     "date": "2026-10-25",
     "message": "Fix: Citation errors"
@@ -58,30 +98,5 @@
     "hash": "d15b76a",
     "date": "2026-10-21",
     "message": "Update hyperdrive values"
-  },
-  {
-    "hash": "24b6131",
-    "date": "2026-10-21",
-    "message": "Update browser tab title to Spaceship Control"
-  },
-  {
-    "hash": "54d4df0",
-    "date": "2026-10-21",
-    "message": "Fix race condition and state snapping in room sync hook"
-  },
-  {
-    "hash": "c55ad4d",
-    "date": "2026-10-21",
-    "message": "Switch build to npm and remove out-of-sync pnpm lockfile"
-  },
-  {
-    "hash": "765b231",
-    "date": "2026-10-21",
-    "message": "Add Supabase real-time multiplayer room syncing"
-  },
-  {
-    "hash": "ccbef3a",
-    "date": "2026-10-21",
-    "message": "Initial commit of bridge dashboard"
   }
 ]

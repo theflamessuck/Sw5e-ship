@@ -357,7 +357,7 @@ export function EngineeringStation({
     )
   }, [installedMods])
 
-  const effectiveMaxPowerDice = shipConfig?.maxPowerDice ?? maxPowerDice ?? 0
+  const effectiveMaxPowerDice = shipConfig?.maxPowerDice ?? maxPowerDice ?? 4
   const effectivePowerDieType = shipConfig?.powerDieType ?? powerDieType ?? "d6"
   const effectiveRecoveryRate = shipConfig?.recoveryRate ?? recoveryRate ?? 1
   const effectiveHullMax = shipConfig?.hullMax ?? hullMax ?? 0
@@ -1159,8 +1159,12 @@ export function EngineeringStation({
 
         {renderSnapshotCard(
           "powerDice",
-          "Power Matrix",
-          isDistributed ? "Local Pools" : `${availablePowerDice}/${effectiveMaxPowerDice} Dice`,
+          "Power Coupling & Routing",
+          isDirect
+            ? `${availablePowerDice}/${effectiveMaxPowerDice} Dice`
+            : isHubAndSpoke 
+            ? `${sharedPoolDice}/${maxSharedPool} Shared` 
+            : "Local Pools",
           powerCoupling.replace(" Power Coupling", ""),
           <Gauge className="w-3 h-3 text-cyan-neon" />,
           "text-cyan-neon"
@@ -1253,7 +1257,7 @@ export function EngineeringStation({
                     <span className="w-2 h-2 rounded-xs bg-cyan-neon shadow-[0_0_6px_#06b6d4]" />
                     <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
                       {cardId === "reactor" && "Reactor Core & Round Cycle"}
-                      {cardId === "powerDice" && "Power Coupling & Station Routing"}
+                      {cardId === "powerDice" && (isDirect ? "Central Power Matrix" : "Power Coupling & Station Routing")}
                       {cardId === "boosts" && "Engineering Boost Actions"}
                       {cardId === "patch" && "Emergency Patch Protocol"}
                       {cardId === "recharge" && "Ship Recharge & Maintenance"}
@@ -1367,7 +1371,7 @@ export function EngineeringStation({
                   <div className="flex flex-col gap-3">
                     <div className="flex items-center justify-between border-b border-bridge-border/40 pb-2">
                       <span className="text-xs text-muted-foreground">
-                        {isDirect ? "Central Power Pool" : isHubAndSpoke ? "Shared Pool & Local Nodes" : "Distributed Local Pools"}
+                        {isDirect ? "Direct Central Power Matrix" : isHubAndSpoke ? "Shared Pool & Local Nodes" : "Distributed Local Pools"}
                       </span>
                       {(isDistributed || isHubAndSpoke) && (
                         <button
@@ -1385,59 +1389,119 @@ export function EngineeringStation({
                       )}
                     </div>
 
-                    {isPowerRoutingUnlocked && (
-                      <div className="p-1.5 rounded bg-amber-950/40 border border-amber-500/40 text-[10px] text-amber-300">
-                        ⚡ Power routing unlocked. Adjust priority hierarchy using the arrows, then click "Lock Prioritization".
+                    {/* DIRECT COUPLING VIEW */}
+                    {isDirect ? (
+                      <div className="flex flex-col gap-3 p-3.5 rounded bg-black/40 border border-cyan-neon/40 w-full">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-cyan-neon uppercase tracking-wider flex items-center gap-1.5">
+                            <Zap className="h-4 w-4 text-amber-400" />
+                            Central Reactor Reserve
+                          </span>
+                          <span className="font-bold text-cyan-neon font-mono text-sm">
+                            {availablePowerDice} / {effectiveMaxPowerDice} Dice ({effectivePowerDieType})
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 w-full">
+                          {Array.from({ length: effectiveMaxPowerDice }).map((_, i) => (
+                            <span
+                              key={i}
+                              className={`h-3.5 flex-1 rounded-xs inline-block transition-all ${
+                                i < availablePowerDice 
+                                  ? "bg-cyan-neon shadow-[0_0_8px_#06b6d4]" 
+                                  : "bg-black/90 border border-bridge-border"
+                              }`}
+                            />
+                          ))}
+                        </div>
+
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          Under **Direct Power Coupling**, all power dice reside in the ship's central reactor reserve. Individual stations draw directly from this unsegregated pool as needed.
+                        </p>
                       </div>
-                    )}
-
-                    <div className="flex flex-col gap-1.5">
-                      {priorityOrder.map((stationKey, index) => {
-                        const currentDice = stationPools[stationKey] ?? 0
-                        return (
-                          <div key={stationKey} className="flex items-center justify-between px-2.5 py-1.5 rounded bg-black/40 border border-bridge-border text-xs">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-bold text-amber-400 w-4">#{index + 1}</span>
-                              <span className="font-bold text-slate-200 uppercase">{STATION_NAMES[stationKey]}</span>
+                    ) : (
+                      <>
+                        {/* SHARED REACTOR POOL (HUB & SPOKE) */}
+                        {isHubAndSpoke && (
+                          <div className="flex flex-col gap-2 p-2.5 rounded bg-black/50 border border-amber-500/40 w-full">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px] flex items-center gap-1.5">
+                                <Zap className="h-3.5 w-3.5 text-amber-400" />
+                                Central Hub (Shared Reactor Pool)
+                              </span>
+                              <span className="font-bold text-amber-400 font-mono text-xs">{sharedPoolDice} / {maxSharedPool} Dice</span>
                             </div>
-                            
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-1">
-                                {Array.from({ length: maxStationCapacity }).map((_, i) => (
-                                  <span
-                                    key={i}
-                                    className={`h-2.5 w-5 rounded-sm inline-block ${
-                                      i < currentDice 
-                                        ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.5)]" 
-                                        : "bg-black/90 border border-bridge-border"
-                                    }`}
-                                  />
-                                ))}
-                              </div>
-
-                              {(isDistributed || isHubAndSpoke) && (
-                                <div className="flex items-center gap-0.5">
-                                  <button
-                                    onClick={() => movePriority(index, "up")}
-                                    disabled={index === 0 || !isPowerRoutingUnlocked}
-                                    className="p-1 rounded bg-black/60 border border-bridge-border text-slate-300 hover:bg-cyan-neon/20 disabled:opacity-20 cursor-pointer"
-                                  >
-                                    <ArrowUp className="h-3 w-3" />
-                                  </button>
-                                  <button
-                                    onClick={() => movePriority(index, "down")}
-                                    disabled={index === priorityOrder.length - 1 || !isPowerRoutingUnlocked}
-                                    className="p-1 rounded bg-black/60 border border-bridge-border text-slate-300 hover:bg-cyan-neon/20 disabled:opacity-20 cursor-pointer"
-                                  >
-                                    <ArrowDown className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              )}
+                            <div className="flex items-center gap-1.5 w-full">
+                              {Array.from({ length: maxSharedPool }).map((_, i) => (
+                                <span
+                                  key={i}
+                                  className={`h-3 flex-1 rounded-xs inline-block transition-all ${
+                                    i < sharedPoolDice 
+                                      ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.7)]" 
+                                      : "bg-black/90 border border-bridge-border"
+                                  }`}
+                                />
+                              ))}
                             </div>
+                            <span className="text-[9px] text-muted-foreground">
+                              Reserve power available to any station once its dedicated pool is exhausted.
+                            </span>
                           </div>
-                        )
-                      })}
-                    </div>
+                        )}
+
+                        {isPowerRoutingUnlocked && (
+                          <div className="p-1.5 rounded bg-amber-950/40 border border-amber-500/40 text-[10px] text-amber-300">
+                            ⚡ Power routing unlocked. Adjust priority hierarchy using the arrows, then click "Lock Prioritization".
+                          </div>
+                        )}
+
+                        <div className="flex flex-col gap-1.5">
+                          {priorityOrder.map((stationKey, index) => {
+                            const currentDice = stationPools[stationKey] ?? 0
+                            return (
+                              <div key={stationKey} className="flex items-center justify-between px-2.5 py-1.5 rounded bg-black/40 border border-bridge-border text-xs">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-bold text-amber-400 w-4">#{index + 1}</span>
+                                  <span className="font-bold text-slate-200 uppercase">{STATION_NAMES[stationKey]}</span>
+                                </div>
+                                
+                                <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-1">
+                                    {Array.from({ length: maxStationCapacity }).map((_, i) => (
+                                      <span
+                                        key={i}
+                                        className={`h-2.5 w-5 rounded-sm inline-block ${
+                                          i < currentDice 
+                                            ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.5)]" 
+                                            : "bg-black/90 border border-bridge-border"
+                                        }`}
+                                      />
+                                    ))}
+                                  </div>
+
+                                  <div className="flex items-center gap-0.5">
+                                    <button
+                                      onClick={() => movePriority(index, "up")}
+                                      disabled={index === 0 || !isPowerRoutingUnlocked}
+                                      className="p-1 rounded bg-black/60 border border-bridge-border text-slate-300 hover:bg-cyan-neon/20 disabled:opacity-20 cursor-pointer"
+                                    >
+                                      <ArrowUp className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                      onClick={() => movePriority(index, "down")}
+                                      disabled={index === priorityOrder.length - 1 || !isPowerRoutingUnlocked}
+                                      className="p-1 rounded bg-black/60 border border-bridge-border text-slate-300 hover:bg-cyan-neon/20 disabled:opacity-20 cursor-pointer"
+                                    >
+                                      <ArrowDown className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
