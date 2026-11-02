@@ -44,7 +44,9 @@ import {
   Wrench,
   Lock,
   Unlock,
-  ShieldCheck
+  ShieldCheck,
+  Minus,
+  Edit3
 } from "lucide-react"
 import type { ActiveStatus } from "./defense-station"
 import type { ManifestMember } from "./bridge-dashboard"
@@ -112,9 +114,12 @@ export interface CombatTurnState {
   manualPlayerInitOverride: number | null
   playerShipOrderTie: number
   playerShipHasActed: boolean
+  playerShipNotes?: string
   hasCycledReactorThisRound?: boolean
   enemyShips: EnemyShip[]
 }
+
+type StationKey = "engines" | "communications" | "weapons" | "sensors" | "defense"
 
 interface GmStationProps {
   contacts: SensorContact[]
@@ -141,8 +146,13 @@ interface GmStationProps {
   systemDamageLevel?: number
   onUpdateSystemDamageLevel?: (level: number | ((prev: number) => number)) => void
   availablePowerDice?: number
+  onUpdateAvailablePowerDice?: (dice: number | ((prev: number) => number)) => void
   maxPowerDice?: number
   shipConfig?: ShipConfig
+  stationPools?: Record<string, number>
+  onUpdateStationPools?: React.Dispatch<React.SetStateAction<Record<string, number>>>
+  sharedPoolDice?: number
+  onUpdateSharedPool?: React.Dispatch<React.SetStateAction<number>>
   combatState?: CombatTurnState
   onUpdateCombatState?: (
     updater:
@@ -159,6 +169,22 @@ const CALLSIGNS = [
 
 const STAT_KEYS = ["str", "dex", "con", "int", "wis", "cha"] as const
 type StatKey = typeof STAT_KEYS[number]
+
+const STATION_KEYS_ORDER: StationKey[] = [
+  "engines",
+  "defense",
+  "weapons",
+  "sensors",
+  "communications",
+]
+
+const STATION_LABELS: Record<StationKey, string> = {
+  engines: "Engines",
+  defense: "Defense",
+  weapons: "Weapons",
+  sensors: "Sensors",
+  communications: "Comms",
+}
 
 function getStatMod(score?: number): number {
   if (score === undefined) return 0
@@ -212,8 +238,19 @@ export function GmStation({
   systemDamageLevel = 0,
   onUpdateSystemDamageLevel,
   availablePowerDice = 4,
+  onUpdateAvailablePowerDice,
   maxPowerDice = 4,
   shipConfig,
+  stationPools = {
+    engines: 1,
+    communications: 1,
+    weapons: 1,
+    sensors: 1,
+    defense: 1,
+  },
+  onUpdateStationPools,
+  sharedPoolDice = 2,
+  onUpdateSharedPool,
   combatState,
   onUpdateCombatState,
   onCombatStateChange,
@@ -248,6 +285,7 @@ export function GmStation({
   const manualPlayerInitOverride = combatState?.manualPlayerInitOverride ?? null
   const playerShipOrderTie = combatState?.playerShipOrderTie || 0
   const playerShipHasActed = combatState?.playerShipHasActed || false
+  const playerShipNotes = combatState?.playerShipNotes || ""
   const hasCycledReactorThisRound = combatState?.hasCycledReactorThisRound ?? false
 
   const [isCrewExpanded, setIsCrewExpanded] = useState<boolean>(true)
@@ -259,6 +297,48 @@ export function GmStation({
   const [rowAdvantageMap, setRowAdvantageMap] = useState<Record<string, RollAdvantageMode>>({})
 
   const isBrutalCriticals = Boolean(shipConfig?.useBrutalCriticals)
+
+  // Power Coupling Architecture Rules & Caps
+  const powerCoupling = shipConfig?.powerCoupling ?? shipConfig?.couplingType ?? "Direct Power Coupling"
+  const isDistributed = powerCoupling.toLowerCase().includes("distributed")
+  const isHubAndSpoke = powerCoupling.toLowerCase().includes("hub") || powerCoupling.toLowerCase().includes("spoke")
+  const isDirect = !isDistributed && !isHubAndSpoke
+
+  const stationCap = isDistributed ? 2 : (isHubAndSpoke ? 1 : 0)
+  const maxCentralOrShared = isDirect ? (shipConfig?.maxPowerDice ?? maxPowerDice ?? 4) : (isHubAndSpoke ? 2 : 0)
+
+  const handleAdjustSharedOrCentral = (delta: number) => {
+    if (isDirect) {
+      if (onUpdateAvailablePowerDice) {
+        onUpdateAvailablePowerDice((prev) => Math.max(0, Math.min(maxCentralOrShared, prev + delta)))
+      }
+    } else if (isHubAndSpoke) {
+      if (onUpdateSharedPool) {
+        onUpdateSharedPool((prev) => Math.max(0, Math.min(maxCentralOrShared, prev + delta)))
+      }
+    }
+  }
+
+  const handleAdjustStationPool = (key: StationKey, delta: number) => {
+    if (!onUpdateStationPools) return
+    onUpdateStationPools((prev) => {
+      const current = prev[key] ?? 0
+      const next = Math.max(0, Math.min(stationCap, current + delta))
+      return {
+        ...prev,
+        [key]: next,
+      }
+    })
+  }
+
+  const handleUpdateEnemyNotes = (shipId: string, newNotes: string) => {
+    const updated = enemyShips.map((e) => (e.id === shipId ? { ...e, notes: newNotes } : e))
+    onUpdateCombatState?.({ enemyShips: updated })
+  }
+
+  const handleUpdatePlayerNotes = (newNotes: string) => {
+    onUpdateCombatState?.({ playerShipNotes: newNotes })
+  }
 
   const [lastDiceResult, setLastDiceResult] = useState<{
     shipName: string
@@ -393,7 +473,7 @@ export function GmStation({
       hull: `${currentHull}/${maxHull} HP`,
       shields: `${currentShields}/${maxShields} SP`,
       armorClass: "Ship AC",
-      notes: "Lowest Crew Initiative",
+      notes: playerShipNotes,
       damageReduction: 0,
       damageThreshold: 0,
       statblock: undefined,
@@ -436,6 +516,7 @@ export function GmStation({
     effectivePlayerShipInit,
     playerShipOrderTie,
     playerShipHasActed,
+    playerShipNotes,
     crewActionStats.allDone,
     currentHull,
     maxHull,
@@ -472,9 +553,10 @@ export function GmStation({
     return { activeTurnShip: active, nextTurnShip: next }
   }, [isInCombat, shipQueue])
 
+  // Fixed, reliable broadcast hook with static dependency array
   const lastBroadcastRef = useRef<string>("")
   useEffect(() => {
-    const key = `${isInCombat}-${combatRound}-${activeTurnShip?.name}-${nextTurnShip?.name}-${hasCycledReactorThisRound}`
+    const key = `${isInCombat}-${combatRound}-${activeTurnShip?.name ?? ""}-${nextTurnShip?.name ?? ""}-${hasCycledReactorThisRound}-${playerShipHasActed}-${playerShipNotes}-${enemyShips.length}`
     if (lastBroadcastRef.current !== key) {
       lastBroadcastRef.current = key
 
@@ -502,6 +584,7 @@ export function GmStation({
         manualPlayerInitOverride,
         playerShipOrderTie,
         playerShipHasActed,
+        playerShipNotes,
         hasCycledReactorThisRound,
         enemyShips,
       })
@@ -512,14 +595,11 @@ export function GmStation({
     activeTurnShip?.name,
     nextTurnShip?.name,
     hasCycledReactorThisRound,
-    combatState?.isInCombat,
-    combatState?.round,
-    combatState?.activeShipName,
-    combatState?.nextShipName,
-    combatState?.hasCycledReactorThisRound,
+    combatState,
     manualPlayerInitOverride,
     playerShipOrderTie,
     playerShipHasActed,
+    playerShipNotes,
     enemyShips,
     onUpdateCombatState,
     onCombatStateChange,
@@ -711,7 +791,6 @@ export function GmStation({
     })
   }, [bestiaryList, managerTierFilter, managerSearchQuery])
 
-  // --- AUTOMATED OR MANUAL ADVANCE ON "NEXT TURN" BUTTON ---
   const handleNextTurnCycle = () => {
     if (isRoundFinished) {
       if (autoCycleReactorOnTurnEnd) {
@@ -823,11 +902,12 @@ export function GmStation({
   }
 
   const handleEndCombat = () => {
-    if (confirm("End Starship Combat? This will clear all hostile vessels from initiative and reset rounds to 1.")) {
+    if (confirm("End Starship Combat? This will clear all hostile vessels from initiative, clear combat notes, and reset rounds to 1.")) {
       onUpdateCombatState?.({
         isInCombat: false,
         round: 1,
         playerShipHasActed: false,
+        playerShipNotes: "",
         hasCycledReactorThisRound: false,
         enemyShips: [],
         activeShipName: undefined,
@@ -861,7 +941,8 @@ export function GmStation({
       armorClass: parseInt(newEnemyAC, 10) || 12,
       damageReduction: parseInt(newEnemyDR, 10) || 0,
       hasTakenTurn: false,
-      orderIndex: 0
+      orderIndex: 0,
+      notes: ""
     }
 
     const updated = [enemy, ...enemyShips]
@@ -968,7 +1049,7 @@ export function GmStation({
         damageReduction: contact.damageReduction ?? 0,
         damageThreshold: contact.damageThreshold ?? 0,
         hasTakenTurn: false,
-        notes: `Sector Contact (${contact.distance}) [Init: ${d20}+${dexMod}=${rolledInit}]`,
+        notes: "",
         statblock: contact.statblock,
         orderIndex: 0
       }
@@ -1007,7 +1088,7 @@ export function GmStation({
         damageReduction: c.damageReduction ?? 0,
         damageThreshold: c.damageThreshold ?? 0,
         hasTakenTurn: false,
-        notes: `Sector Contact (${c.distance}) [Init: ${d20}+${dexMod}=${rolledInit}]`,
+        notes: "",
         statblock: c.statblock,
         orderIndex: 0
       }
@@ -1277,7 +1358,7 @@ export function GmStation({
         </div>
       )}
 
-      {/* 1. SHIP-LEVEL INITIATIVE TRACKER */}
+      {/* 1. SHIP-LEVEL INITIATIVE TRACKER WITH INLINE COMBAT NOTES */}
       <section
         className={`rounded-md border p-4 shadow-sm flex flex-col gap-3 transition-colors duration-500 ${
           isInCombat
@@ -1333,7 +1414,7 @@ export function GmStation({
                 type="button"
                 onClick={handleEndCombat}
                 className="px-2.5 py-1 rounded border border-rose-500/60 bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 text-xs font-bold uppercase transition flex items-center gap-1 cursor-pointer"
-                title="End combat and clear all hostiles"
+                title="End combat and clear all hostiles & notes"
               >
                 <XCircle className="h-3.5 w-3.5" />
                 End Combat
@@ -1359,7 +1440,7 @@ export function GmStation({
                   }`}
                 >
                   <div className="p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
                       <div className="flex flex-col items-center">
                         <input
                           type="number"
@@ -1393,7 +1474,7 @@ export function GmStation({
                         </div>
                       </div>
 
-                      <div>
+                      <div className="flex-1 min-w-0 pr-2">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-sm text-cyan-neon uppercase">
                             PLAYER VESSEL
@@ -1409,10 +1490,22 @@ export function GmStation({
                             {crewActionStats.acted} / {crewActionStats.total} Crew Acted
                           </strong>
                         </span>
+
+                        {/* Editable Player Ship Note Bar */}
+                        <div className="flex items-center gap-1.5 mt-1.5 w-full">
+                          <Edit3 className="w-3 h-3 text-cyan-neon/60 shrink-0" />
+                          <input
+                            type="text"
+                            placeholder="Player ship notes (status, buffs, disadvantages)..."
+                            value={playerShipNotes}
+                            onChange={(e) => handleUpdatePlayerNotes(e.target.value)}
+                            className="w-full rounded bg-black/60 border border-cyan-500/30 px-2 py-0.5 text-[10px] text-cyan-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-neon"
+                          />
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 self-end sm:self-center">
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                       <button
                         type="button"
                         onClick={() => setIsCrewExpanded((prev) => !prev)}
@@ -1523,7 +1616,7 @@ export function GmStation({
                 }`}
               >
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
                     <div className="flex flex-col items-center">
                       <input
                         type="number"
@@ -1559,7 +1652,7 @@ export function GmStation({
                       </div>
                     </div>
 
-                    <div>
+                    <div className="flex-1 min-w-0 pr-2">
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
                           type="button"
@@ -1596,12 +1689,23 @@ export function GmStation({
                         AC {ship.armorClass}
                         {ship.damageReduction ? ` • DR ${ship.damageReduction}` : ""}
                         {ship.damageThreshold ? ` • DT ${ship.damageThreshold}` : ""}
-                        {ship.notes ? ` • ${ship.notes}` : ""}
                       </span>
+
+                      {/* Editable Inline Hostile Ship Note Input */}
+                      <div className="flex items-center gap-1.5 mt-1.5 w-full">
+                        <Edit3 className="w-3 h-3 text-slate-500 shrink-0" />
+                        <input
+                          type="text"
+                          placeholder="Hostile tactical notes (target, condition, disadv)..."
+                          value={ship.notes}
+                          onChange={(e) => handleUpdateEnemyNotes(ship.id, e.target.value)}
+                          className="w-full rounded bg-black/60 border border-slate-700 px-2 py-0.5 text-[10px] text-amber-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 self-end sm:self-center">
+                  <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                     {!ship.isDisabled && (
                       <div className="flex items-center gap-0.5 bg-black/70 border border-slate-700 rounded p-0.5 text-[8px] font-bold uppercase">
                         <button
@@ -1965,37 +2069,6 @@ export function GmStation({
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div className="p-2.5 rounded bg-black/50 border border-bridge-border/60 flex flex-col justify-between gap-1.5">
-            <span className="text-[10px] text-muted-foreground uppercase">Hull Points</span>
-            <span className="text-lg font-bold text-rose-400 font-mono">
-              {currentHull} / {maxHull}
-            </span>
-            <div className="flex gap-1">
-              <button
-                type="button"
-                onClick={() => onHullChange?.(Math.max(0, currentHull - 5), maxHull)}
-                className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 font-bold text-[10px] hover:bg-slate-800 cursor-pointer"
-              >
-                -5
-              </button>
-              <button
-                type="button"
-                onClick={() => onHullChange?.(Math.min(maxHull, currentHull + 5), maxHull)}
-                className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 font-bold text-[10px] hover:bg-slate-800 cursor-pointer"
-              >
-                +5
-              </button>
-              <button
-                type="button"
-                onClick={() => onHullChange?.(maxHull, maxHull)}
-                className="px-1.5 py-0.5 rounded bg-rose-950/40 border border-rose-500/40 text-rose-300 font-bold text-[10px] hover:bg-rose-900/50 cursor-pointer"
-                title="Full repair"
-              >
-                Max
-              </button>
-            </div>
-          </div>
-
-          <div className="p-2.5 rounded bg-black/50 border border-bridge-border/60 flex flex-col justify-between gap-1.5">
             <span className="text-[10px] text-muted-foreground uppercase">Shield Points</span>
             <span className="text-lg font-bold text-cyan-neon font-mono">
               {currentShields} / {maxShields}
@@ -2003,23 +2076,54 @@ export function GmStation({
             <div className="flex gap-1">
               <button
                 type="button"
-                onClick={() => onShieldChange?.(Math.max(0, currentShields - 5), maxShields)}
+                onClick={() => onShieldChange?.(Math.max(0, currentShields - 1), maxShields)}
                 className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 font-bold text-[10px] hover:bg-slate-800 cursor-pointer"
               >
-                -5
+                -1
               </button>
               <button
                 type="button"
-                onClick={() => onShieldChange?.(Math.min(maxShields, currentShields + 5), maxShields)}
+                onClick={() => onShieldChange?.(Math.min(maxShields, currentShields + 1), maxShields)}
                 className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 font-bold text-[10px] hover:bg-slate-800 cursor-pointer"
               >
-                +5
+                +1
               </button>
               <button
                 type="button"
                 onClick={() => onShieldChange?.(maxShields, maxShields)}
                 className="px-1.5 py-0.5 rounded bg-cyan-950/40 border border-cyan-neon/40 text-cyan-300 font-bold text-[10px] hover:bg-cyan-900/50 cursor-pointer"
                 title="Full charge"
+              >
+                Max
+              </button>
+            </div>
+          </div>
+
+          <div className="p-2.5 rounded bg-black/50 border border-bridge-border/60 flex flex-col justify-between gap-1.5">
+            <span className="text-[10px] text-muted-foreground uppercase">Hull Points</span>
+            <span className="text-lg font-bold text-rose-400 font-mono">
+              {currentHull} / {maxHull}
+            </span>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => onHullChange?.(Math.max(0, currentHull - 1), maxHull)}
+                className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 font-bold text-[10px] hover:bg-slate-800 cursor-pointer"
+              >
+                -1
+              </button>
+              <button
+                type="button"
+                onClick={() => onHullChange?.(Math.min(maxHull, currentHull + 1), maxHull)}
+                className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 font-bold text-[10px] hover:bg-slate-800 cursor-pointer"
+              >
+                +1
+              </button>
+              <button
+                type="button"
+                onClick={() => onHullChange?.(maxHull, maxHull)}
+                className="px-1.5 py-0.5 rounded bg-rose-950/40 border border-rose-500/40 text-rose-300 font-bold text-[10px] hover:bg-rose-900/50 cursor-pointer"
+                title="Full repair"
               >
                 Max
               </button>
@@ -2058,7 +2162,7 @@ export function GmStation({
           </div>
 
           <div className="p-2.5 rounded bg-black/50 border border-bridge-border/60 flex flex-col justify-between gap-1.5">
-            <span className="text-[10px] text-muted-foreground uppercase">Reactor Reserve</span>
+            <span className="text-[10px] text-muted-foreground uppercase">Reactor Cycle Override</span>
             <span className="text-lg font-bold text-cyan-300 font-mono">
               {availablePowerDice} / {maxPowerDice} Dice
             </span>
@@ -2069,6 +2173,101 @@ export function GmStation({
             >
               Cycle Reactor
             </button>
+          </div>
+        </div>
+
+        {/* GM POWER POOL & STATION DICE ROUTING MATRIX */}
+        <div className="p-3 rounded bg-black/60 border border-amber-500/30 flex flex-col gap-2.5 mt-1">
+          <div className="flex items-center justify-between border-b border-bridge-border/40 pb-1.5">
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-amber-400" />
+              <span className="text-[11px] font-bold uppercase text-amber-300">
+                Power Pool Management // {powerCoupling}
+              </span>
+            </div>
+            <span className="text-[9px] text-muted-foreground">
+              {isDirect
+                ? `Central Pool Max: ${maxCentralOrShared}`
+                : isHubAndSpoke
+                ? `Shared Max: ${maxCentralOrShared} • Station Max: ${stationCap}`
+                : `Local Station Max: ${stationCap}`}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {/* Central / Shared Pool Box */}
+            <div className={`p-2 rounded border flex flex-col justify-between gap-1.5 ${
+              isDistributed
+                ? "bg-slate-950/40 border-slate-800 opacity-50"
+                : "bg-black/80 border-amber-500/50"
+            }`}>
+              <span className="text-[9px] font-bold text-amber-300 uppercase truncate">
+                {isDirect ? "Central Power" : isHubAndSpoke ? "Shared Pool" : "Central (N/A)"}
+              </span>
+              <span className="text-base font-bold font-mono text-amber-300">
+                {isDirect ? availablePowerDice : isHubAndSpoke ? sharedPoolDice : 0} / {maxCentralOrShared}
+              </span>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  disabled={isDistributed || (isDirect ? availablePowerDice <= 0 : sharedPoolDice <= 0)}
+                  onClick={() => handleAdjustSharedOrCentral(-1)}
+                  className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs font-bold disabled:opacity-30 cursor-pointer flex items-center justify-center"
+                >
+                  <Minus className="h-3 w-3" />
+                </button>
+                <button
+                  type="button"
+                  disabled={isDistributed || (isDirect ? availablePowerDice >= maxCentralOrShared : sharedPoolDice >= maxCentralOrShared)}
+                  onClick={() => handleAdjustSharedOrCentral(1)}
+                  className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs font-bold disabled:opacity-30 cursor-pointer flex items-center justify-center"
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Individual Station Pools */}
+            {STATION_KEYS_ORDER.map((sKey) => {
+              const currentDice = stationPools[sKey] ?? 0
+              const isLocked = isDirect
+
+              return (
+                <div
+                  key={sKey}
+                  className={`p-2 rounded border flex flex-col justify-between gap-1.5 ${
+                    isLocked
+                      ? "bg-slate-950/40 border-slate-800 opacity-50"
+                      : "bg-black/80 border-bridge-border/80"
+                  }`}
+                >
+                  <span className="text-[9px] font-bold text-cyan-300 uppercase truncate">
+                    {STATION_LABELS[sKey]}
+                  </span>
+                  <span className="text-base font-bold font-mono text-cyan-neon">
+                    {isLocked ? 0 : currentDice} / {stationCap}
+                  </span>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      disabled={isLocked || currentDice <= 0}
+                      onClick={() => handleAdjustStationPool(sKey, -1)}
+                      className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs font-bold disabled:opacity-30 cursor-pointer flex items-center justify-center"
+                    >
+                      <Minus className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLocked || currentDice >= stationCap}
+                      onClick={() => handleAdjustStationPool(sKey, 1)}
+                      className="flex-1 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs font-bold disabled:opacity-30 cursor-pointer flex items-center justify-center"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
 

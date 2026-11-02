@@ -156,6 +156,7 @@ export interface SyncedCombatState {
   manualPlayerInitOverride: number | null
   playerShipOrderTie: number
   playerShipHasActed: boolean
+  playerShipNotes?: string
   hasCycledReactorThisRound: boolean
   enemyShips: EnemyShip[]
 }
@@ -426,6 +427,7 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
     manualPlayerInitOverride: null,
     playerShipOrderTie: 0,
     playerShipHasActed: false,
+    playerShipNotes: "",
     hasCycledReactorThisRound: false,
     enemyShips: [],
   },
@@ -541,6 +543,7 @@ export default function BridgeDashboard() {
       manualPlayerInitOverride: null,
       playerShipOrderTie: 0,
       playerShipHasActed: false,
+      playerShipNotes: "",
       hasCycledReactorThisRound: false,
       enemyShips: [],
     },
@@ -610,6 +613,7 @@ export default function BridgeDashboard() {
         manualPlayerInitOverride: null,
         playerShipOrderTie: 0,
         playerShipHasActed: false,
+        playerShipNotes: "",
         hasCycledReactorThisRound: false,
         enemyShips: [],
       }
@@ -624,6 +628,7 @@ export default function BridgeDashboard() {
         current.manualPlayerInitOverride === nextCombat.manualPlayerInitOverride &&
         current.playerShipOrderTie === nextCombat.playerShipOrderTie &&
         current.playerShipHasActed === nextCombat.playerShipHasActed &&
+        current.playerShipNotes === nextCombat.playerShipNotes &&
         current.hasCycledReactorThisRound === nextCombat.hasCycledReactorThisRound &&
         current.enemyShips === nextCombat.enemyShips
       ) {
@@ -1419,6 +1424,7 @@ export default function BridgeDashboard() {
         manualPlayerInitOverride: null,
         playerShipOrderTie: 0,
         playerShipHasActed: false,
+        playerShipNotes: "",
         hasCycledReactorThisRound: false,
         enemyShips: [],
       },
@@ -2831,8 +2837,33 @@ export default function BridgeDashboard() {
                     }))
                   }
                   availablePowerDice={availablePowerDice}
+                  onUpdateAvailablePowerDice={(newPower) =>
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      availablePowerDice:
+                        typeof newPower === "function"
+                          ? newPower(prev.availablePowerDice)
+                          : newPower,
+                    }))
+                  }
                   maxPowerDice={shipConfig.maxPowerDice}
                   shipConfig={effectiveShipConfig}
+                  stationPools={stationPools}
+                  onUpdateStationPools={(newPools) =>
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      stationPools:
+                        typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                    }))
+                  }
+                  sharedPoolDice={sharedPoolDice}
+                  onUpdateSharedPool={(newPool) =>
+                    updateRoomData((prev) => ({
+                      ...prev,
+                      sharedPoolDice:
+                        typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                    }))
+                  }
                   combatState={combatState}
                   onUpdateCombatState={handleUpdateCombatState}
                 />
