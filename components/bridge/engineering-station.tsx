@@ -31,7 +31,8 @@ import {
   Lock,
   Unlock,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Timer
 } from "lucide-react"
 import { ShipStats } from "./ship-stats"
 import { StationModifications, Modification } from "./ship-modifications"
@@ -475,6 +476,12 @@ export function EngineeringStation({
     setMishapResultLog(
       `Check: d20 [${duressCondition !== "normal" ? `${rollA}, ${rollB} -> Kept ${keptD20}` : keptD20}] + Mod (${engModInput >= 0 ? `+${engModInput}` : engModInput}) = ${total} (${evalResult.label})`
     )
+  }
+
+  // 10-Minute Uninterrupted Startup Automatic Success
+  const handleTenMinuteStartupCheck = () => {
+    setInitiationProcedures(targetProcedures)
+    setMishapResultLog("⏱️ RULE: 10 minutes uninterrupted warm-up completed. Automatic success on all 10 checklist procedures.")
   }
 
   const handleShutdownShip = () => {
@@ -1994,13 +2001,22 @@ export function EngineeringStation({
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <button
                 onClick={handleRollDuressCheck}
                 disabled={initiationProcedures >= targetProcedures}
                 className="flex-1 py-1.5 rounded border border-cyan-neon/60 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-xs font-bold text-cyan-neon uppercase disabled:opacity-40 cursor-pointer"
               >
                 Roll Regulation Check
+              </button>
+              <button
+                onClick={handleTenMinuteStartupCheck}
+                disabled={initiationProcedures >= targetProcedures}
+                className="flex-1 py-1.5 rounded border border-emerald-500/60 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 text-xs font-bold font-mono uppercase tracking-wider disabled:opacity-40 flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_0_10px_rgba(52,211,153,0.15)]"
+                title="SW5e Rule: Spend 10 uninterrupted minutes on pre-flight warmup to automatically complete all checklist procedures."
+              >
+                <Timer className="h-3.5 w-3.5 text-emerald-400" />
+                <span>10 Min (Auto 10/10)</span>
               </button>
               <button
                 onClick={handleEngageStartup}

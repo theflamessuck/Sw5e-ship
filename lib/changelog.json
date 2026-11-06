@@ -1,5 +1,10 @@
 [
   {
+    "hash": "6462329",
+    "date": "2026-11-01",
+    "message": "Patch: repaired panels in defense station, and sidebar layout"
+  },
+  {
     "hash": "982314a",
     "date": "2026-11-01",
     "message": "Fix: sidebar when in portait mode"
@@ -93,10 +98,5 @@
     "hash": "1ccf028",
     "date": "2026-10-22",
     "message": "Enable PIN security authentication in room selector and sync hook"
-  },
-  {
-    "hash": "d15b76a",
-    "date": "2026-10-21",
-    "message": "Update hyperdrive values"
   }
 ]

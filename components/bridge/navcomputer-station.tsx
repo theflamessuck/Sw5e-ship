@@ -23,7 +23,8 @@ import {
   ShieldCheck,
   ShieldAlert,
   Fuel,
-  Info
+  Info,
+  Timer
 } from "lucide-react"
 
 export interface JourneyData {
@@ -561,6 +562,24 @@ export function NavcomputerStation({
     })
 
     setEquationsCompleted((prev) => Math.min(targetEquations, prev + evaluation.successes))
+  }
+
+  // 10-Minute Uninterrupted Astrogation Automatic Success
+  const handleTenMinuteAstrogationCheck = () => {
+    if (!selectedOrigin || !selectedDest || isIntraSystemFlight) return
+
+    setLastRollResult({
+      d20: null,
+      d20_rolls: null,
+      rollType: astrogationAdvantage,
+      skillMod: astrogationSkillMod,
+      parameterMod: modifierChoice,
+      total: 30,
+      successesGained: targetEquations - equationsCompleted,
+      tierLabel: "10 MIN UNINTERRUPTED: AUTOMATIC SUCCESS (10/10)",
+    })
+
+    setEquationsCompleted(targetEquations)
   }
 
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -1449,12 +1468,12 @@ export function NavcomputerStation({
                 Total modifier applied to roll: <strong>{totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod}</strong>.
               </p>
 
-              <div className="flex gap-2 mb-3">
+              <div className="flex flex-col gap-2 mb-3">
                 <button
                   type="button"
                   onClick={handlePerformCheck}
                   disabled={equationsCompleted >= targetEquations || !selectedOrigin || !selectedDest}
-                  className="flex-1 rounded border border-cyan-neon/60 bg-cyan-neon/20 py-2.5 text-xs font-bold text-cyan-neon hover:bg-cyan-neon/30 disabled:opacity-40 tracking-wider shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
+                  className="w-full rounded border border-cyan-neon/60 bg-cyan-neon/20 py-2.5 text-xs font-bold text-cyan-neon hover:bg-cyan-neon/30 disabled:opacity-40 tracking-wider shadow-[0_0_10px_rgba(0,255,255,0.2)] cursor-pointer"
                 >
                   {!selectedOrigin || !selectedDest
                     ? "SET DESTINATION TO PLOT EQUATIONS"
@@ -1465,6 +1484,17 @@ export function NavcomputerStation({
                           ? "DISADVANTAGE"
                           : "NORMAL"
                       } ${totalAstrogationMod >= 0 ? `+${totalAstrogationMod}` : totalAstrogationMod})`}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleTenMinuteAstrogationCheck}
+                  disabled={equationsCompleted >= targetEquations || !selectedOrigin || !selectedDest}
+                  className="w-full rounded border border-emerald-500/60 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 py-2 text-xs font-bold font-mono tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_10px_rgba(52,211,153,0.15)]"
+                  title="SW5e Rule: Spend 10 uninterrupted minutes calculating to automatically succeed on the check."
+                >
+                  <Timer className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>TAKE 10 MIN (AUTO-SOLVE 10/10 EQUATIONS)</span>
                 </button>
               </div>
 
@@ -1522,7 +1552,9 @@ export function NavcomputerStation({
                     </span>
                   ) : (
                     <span className="text-slate-300">
-                      Manual Total Entered: <strong className="text-cyan-neon text-sm font-bold">{lastRollResult.total}</strong>
+                      {lastRollResult.total === 30 && lastRollResult.tierLabel.includes("10 MIN")
+                        ? <strong className="text-emerald-300">RULE: 10 MIN UNINTERRUPTED CALCULATION (AUTOMATIC SUCCESS)</strong>
+                        : <>Manual Total Entered: <strong className="text-cyan-neon text-sm font-bold">{lastRollResult.total}</strong></>}
                     </span>
                   )}
                 </div>

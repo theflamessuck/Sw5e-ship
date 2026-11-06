@@ -6835,7 +6835,7 @@ export const PLANETS_DATA: PlanetRecord[] = [
     "gridCoordinates": "M-15"
   },
   {
-    "name": "Nal Hutta",
+    "name": "Nal Hutta & Nar Shaddaa",
     "region": "Outer Rim Territories",
     "sector": "Unknown",
     "system": "Y'Toub system",

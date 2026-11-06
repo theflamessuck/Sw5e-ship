@@ -48,7 +48,8 @@ import {
   Activity,
   X,
   Zap,
-  AlertTriangle
+  AlertTriangle,
+  Timer
 } from "lucide-react"
 import {
   rollAttackD20,
@@ -566,7 +567,6 @@ export function EnginesStation({
     })
   }, [installedMods, manifest])
 
-  // Get launcher state directly from modification object (synchronized with database)
   const getLauncherState = (instanceKey: string, weapon: Modification): LauncherLoadState => {
     const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === weapon.name.toLowerCase())
     const capacity = weapon.reload || catalogDef?.reload || 4
@@ -921,9 +921,6 @@ export function EnginesStation({
     return !!onConsumePowerDice?.(amount)
   }
 
-  const canSpendStation = effectiveAvailable > 0
-  const canSpendShared = isHubAndSpoke && sharedPoolDice > 0
-
   const rawReactorType = shipConfig?.reactorType ?? installedMods.find((mod) => 
     mod.name.toLowerCase().includes("reactor") || mod.category === "Reactor"
   )?.name ?? "Fuel Cell Reactor"
@@ -954,7 +951,6 @@ export function EnginesStation({
   const isSmallOrTiny = shipSize === "small" || shipSize === "tiny"
   const isMedium = shipSize === "medium"
 
-  // Chassis Surge Tier Gating: Tier 0 ships have NO unlocked surges
   const hasPinpointStrike = isSmallOrTiny && shipTier >= 1
   const hasRetroThrusters = isSmallOrTiny && shipTier >= 2
   const hasVersatileSnubfighter = isSmallOrTiny && shipTier >= 3
@@ -1057,6 +1053,12 @@ export function EnginesStation({
     setMishapResultLog(
       `Check: d20 [${duressCondition !== "normal" ? `${rollA}, ${rollB} -> Kept ${keptD20}` : keptD20}] + Mod (${pilotModInput >= 0 ? `+${pilotModInput}` : pilotModInput}) = ${total} (${evalResult.label})`
     )
+  }
+
+  // 10-Minute Uninterrupted Startup Automatic Success
+  const handleTenMinuteStartupCheck = () => {
+    setInitiationProcedures(targetProcedures)
+    setMishapResultLog("⏱️ RULE: 10 minutes uninterrupted warm-up completed. Automatic success on all 10 checklist procedures.")
   }
 
   const handleShutdownShip = () => {
@@ -1563,7 +1565,9 @@ export function EnginesStation({
         {renderSnapshotCard(
           "resources",
           "Power Dice",
-          `${effectiveAvailable}/${effectiveMax} Dice`,
+          isDirect
+            ? `${availablePowerDice}/${maxPowerDice} Dice`
+            : `${effectiveAvailable}/${effectiveMax} Dice`,
           isHubAndSpoke ? `${sharedPoolDice}/2 Shared` : `${powerDieType} Rating`,
           <Zap className="w-3 h-3 text-amber-400" />,
           "text-amber-300"
@@ -1809,36 +1813,40 @@ export function EnginesStation({
                       shipSize={shipConfig?.size}
                     />
 
-                    {isHubAndSpoke && (
-                      <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
-                          <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 w-full">
-                          {Array.from({ length: 2 }).map((_, i) => (
-                            <span
-                              key={i}
-                              className={`h-2.5 flex-1 rounded-xs inline-block ${
-                                i < sharedPoolDice 
-                                  ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
-                                  : "bg-black/80 border border-bridge-border"
-                              }`}
-                            />
-                          ))}
-                        </div>
+                    {isHubAndSpoke && (() => {
+                      const canSpendStationDice = currentStationDice > 0;
+                      const canSpendSharedDice = sharedPoolDice > 0;
+                      return (
+                        <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
+                            <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 w-full">
+                            {Array.from({ length: 2 }).map((_, i) => (
+                              <span
+                                key={i}
+                                className={`h-2.5 flex-1 rounded-xs inline-block ${
+                                  i < sharedPoolDice 
+                                    ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
+                                    : "bg-black/80 border border-bridge-border"
+                                }`}
+                              />
+                            ))}
+                          </div>
 
-                        {!canSpendStation && canSpendShared && (
-                          <button
-                            type="button"
-                            onClick={() => handleCustomConsume(1)}
-                            className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
-                          >
-                            CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
-                          </button>
-                        )}
-                      </div>
-                    )}
+                          {!canSpendStationDice && canSpendSharedDice && (
+                            <button
+                              type="button"
+                              onClick={() => handleCustomConsume(1)}
+                              className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
+                            >
+                              CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -2377,13 +2385,22 @@ export function EnginesStation({
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <button
                 onClick={handleRollDuressCheck}
                 disabled={initiationProcedures >= targetProcedures}
                 className="flex-1 py-1.5 rounded border border-cyan-neon/60 bg-cyan-neon/20 hover:bg-cyan-neon/30 text-xs font-bold text-cyan-neon uppercase disabled:opacity-40 cursor-pointer"
               >
                 Roll Startup Check
+              </button>
+              <button
+                onClick={handleTenMinuteStartupCheck}
+                disabled={initiationProcedures >= targetProcedures}
+                className="flex-1 py-1.5 rounded border border-emerald-500/60 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 text-xs font-bold font-mono uppercase tracking-wider disabled:opacity-40 flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_0_10px_rgba(52,211,153,0.15)]"
+                title="SW5e Rule: Spend 10 uninterrupted minutes on pre-flight warmup to automatically complete all checklist procedures."
+              >
+                <Timer className="h-3.5 w-3.5 text-emerald-400" />
+                <span>10 Min (Auto 10/10)</span>
               </button>
               <button
                 onClick={handleEngageStartup}
@@ -2539,7 +2556,6 @@ export function EnginesStation({
 
         const saveDC = 8 + attackMod
 
-        // SW5e Rules: Helm disadvantage applies only to Primary & Secondary weapons (Tertiary & Ordnance exempt)
         const isTertiary = (activeWizardWeapon.category || "").toLowerCase().includes("tertiary")
         const isHelmDisadvantaged = helmAttackType === "standard" && !isTertiary && !isOrdnance
         const hasDisadvantage = rangeBracket === "long" || failsCon || (effectiveSlowedLevel >= 3) || isHelmDisadvantaged
