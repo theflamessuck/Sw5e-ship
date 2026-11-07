@@ -314,6 +314,18 @@ export function WeaponsStation({
 
   const [isArmed, setIsArmed] = useState<boolean>(false)
 
+  const handleArm = () => {
+    if (soundEnabled) playSubtleEngage()
+    triggerTactilePulse("heavy")
+    setIsArmed(true)
+  }
+
+  const handleDisarm = () => {
+    if (soundEnabled) playFlatGlassClick()
+    triggerTactilePulse("tap")
+    setIsArmed(false)
+  }
+
   const assignedConsoleCrew = useMemo(() => {
     return manifest
       .filter((m) => m.location === "weapons" && !m.isPassenger)
@@ -447,7 +459,6 @@ export function WeaponsStation({
     return manifest.find((m) => m.location === turretCompartmentId && !m.isPassenger) || null
   }
 
-  // Synchronized launcher state directly from modification object
   const getLauncherState = (instanceKey: string, weapon: Modification): LauncherLoadState => {
     const catalogDef = STARSHIP_WEAPONS.find((sw) => sw.name.toLowerCase() === weapon.name.toLowerCase())
     const capacity = weapon.reload || catalogDef?.reload || 4
@@ -543,13 +554,11 @@ export function WeaponsStation({
     setOrdnanceDisarmModal(null)
   }
 
-  // Handle Opening Ordnance Offload Wizard
   const handleOpenManageOrdnance = (item: OrdnanceItem) => {
     setManagingOrdnance(item)
     setManageQuantity(1)
   }
 
-  // Handle Selling Ordnance (100% Full Refund)
   const handleConfirmSellOrdnance = () => {
     if (!managingOrdnance || manageQuantity <= 0) return
     const refundTotal = manageQuantity * managingOrdnance.costPerUnit
@@ -568,7 +577,6 @@ export function WeaponsStation({
     setManagingOrdnance(null)
   }
 
-  // Handle Jettisoning Ordnance (Dump with 0 credits)
   const handleConfirmJettisonOrdnance = () => {
     if (!managingOrdnance || manageQuantity <= 0) return
 
@@ -660,7 +668,6 @@ export function WeaponsStation({
   const [toggleMelt, setToggleMelt] = useState<boolean>(false)
   const [toggleDire, setToggleDire] = useState<boolean>(false)
   
-  // Roller states
   const [attackRollData, setAttackRollData] = useState<AttackRollResult | null>(null)
   const [damageRollData, setDamageRollData] = useState<DamageRollBreakdown | null>(null)
   const [manualAttackInput, setManualAttackInput] = useState<string>("")
@@ -851,27 +858,34 @@ export function WeaponsStation({
               <Crosshair className="h-5 w-5 text-cyan-neon" />
               TACTICAL WEAPONS CONTROL
             </h2>
-            <button
-              type="button"
-              onClick={() => setIsArmed((prev) => !prev)}
-              className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer flex items-center gap-1.5 ${
-                isArmed
-                  ? "bg-red-500/20 border-red-500 text-red-300 hover:bg-red-500/30 shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse"
-                  : "bg-emerald-500/20 border-emerald-500/60 text-emerald-300 hover:bg-emerald-500/30 shadow-[0_0_8px_rgba(52,211,153,0.2)]"
-              }`}
-            >
-              {isArmed ? (
-                <>
-                  <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-                  <span>SET TO SAFE</span>
-                </>
-              ) : (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>ARM WEAPONS</span>
-                </>
-              )}
-            </button>
+
+            {/* DUAL TOGGLE ARM / SAFE CONTROL BUTTONS */}
+            <div className="flex items-center rounded border border-bridge-border bg-black/60 p-0.5">
+              <button
+                type="button"
+                onClick={handleArm}
+                className={`px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer flex items-center gap-1.5 ${
+                  isArmed
+                    ? "bg-red-500/20 border-red-500 text-red-300 shadow-[0_0_12px_rgba(239,68,68,0.4)] animate-pulse"
+                    : "border-transparent text-slate-500 hover:text-red-400 hover:bg-red-950/30 opacity-70"
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+                <span>ARM WEAPONS</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleDisarm}
+                className={`px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer flex items-center gap-1.5 ${
+                  !isArmed
+                    ? "bg-emerald-500/20 border-emerald-500/80 text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.3)]"
+                    : "border-transparent text-slate-500 hover:text-emerald-400 hover:bg-emerald-950/30 opacity-70"
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>SET SAFE</span>
+              </button>
+            </div>
           </div>
           <p className="text-[10px] tracking-[0.3em] text-muted-foreground/60 mt-0.5">
             {shipConfig?.name?.toUpperCase() || "VESSEL"} // GUNNERY &amp; FIRE DIRECTORS //{" "}
@@ -1225,37 +1239,53 @@ export function WeaponsStation({
                 {/* 1. MASTER ARM WORKSPACE */}
                 {cardId === "masterArm" && (
                   <div className="flex flex-col gap-3">
-                    <div className="flex flex-col sm:flex-row items-center justify-between p-3 rounded border border-bridge-border/60 bg-black/40 gap-3">
+                    <div className="flex flex-col sm:flex-row items-center justify-between p-3.5 rounded border border-bridge-border/60 bg-black/40 gap-3">
                       <div>
-                        <span className="text-xs font-bold uppercase text-slate-200 block mb-0.5">
-                          Weapon Safety Interlock
-                        </span>
-                        <p className="text-[10px] text-muted-foreground leading-relaxed">
-                          Weapons cannot be fired while set to SAFE. Arm the weapons to engage firing computers, targeting reticles, and ordnance chamber tubes.
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-xs font-bold uppercase text-slate-200">
+                            Weapon Safety Status:
+                          </span>
+                          <span className={`text-xs font-bold font-mono tracking-wider uppercase px-2 py-0.5 rounded border ${
+                            isArmed
+                              ? "bg-red-500/20 border-red-500 text-red-300 shadow-[0_0_8px_rgba(239,68,68,0.4)] animate-pulse"
+                              : "bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.3)]"
+                          }`}>
+                            {isArmed ? "ARMED" : "SAFE"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+                          Weapons cannot be fired while set to SAFE. Use the toggle below to activate weapon circuits or engage safety interlocks.
                         </p>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setIsArmed((prev) => !prev)}
-                        className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer shrink-0 flex items-center gap-2 ${
-                          isArmed
-                            ? "bg-red-500/20 border-red-500 text-red-300 hover:bg-red-500/30 shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse"
-                            : "bg-emerald-500/20 border-emerald-500/60 text-emerald-300 hover:bg-emerald-500/30 shadow-[0_0_8px_rgba(52,211,153,0.2)]"
-                        }`}
-                      >
-                        {isArmed ? (
-                          <>
-                            <ShieldAlert className="w-4 h-4 text-red-400" />
-                            <span>SET TO SAFE</span>
-                          </>
-                        ) : (
-                          <>
-                            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                            <span>ARM WEAPONS</span>
-                          </>
-                        )}
-                      </button>
+                      {/* DUAL BUTTON SAFETY TOGGLE */}
+                      <div className="flex items-center rounded-md border border-bridge-border bg-black/80 p-1 shrink-0 gap-1.5 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={handleArm}
+                          className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer flex items-center gap-2 ${
+                            isArmed
+                              ? "bg-red-500/30 border-red-500 text-red-300 shadow-[0_0_12px_rgba(239,68,68,0.5)] animate-pulse"
+                              : "border-transparent text-slate-500 hover:text-red-400 hover:bg-red-950/30 opacity-70"
+                          }`}
+                        >
+                          <ShieldAlert className="w-4 h-4 text-red-400" />
+                          <span>ARM WEAPONS</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleDisarm}
+                          className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider font-mono border transition-all cursor-pointer flex items-center gap-2 ${
+                            !isArmed
+                              ? "bg-emerald-500/30 border-emerald-500/80 text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.35)]"
+                              : "border-transparent text-slate-500 hover:text-emerald-400 hover:bg-emerald-950/30 opacity-70"
+                          }`}
+                        >
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                          <span>SET SAFE</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

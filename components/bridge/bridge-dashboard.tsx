@@ -24,6 +24,7 @@ import { computeShipModifiers } from "@/lib/ship-modifiers"
 import { AlertOctagon, RefreshCw, Radio, PowerOff } from "lucide-react"
 import { useRoomSync } from "@/hooks/use-room-sync"
 import { RoomSelector } from "./room-selector"
+import { HyperspaceBackground } from "./hyperspace-background"
 
 export type ShipStationId =
   | "helm"
@@ -1901,981 +1902,988 @@ export default function BridgeDashboard() {
     ["Weapons", "Defense", "Sensors", "Communications"].includes(active)
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-3 sm:p-4 lg:p-6">
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-neutral-950/80 border border-neutral-800 p-2.5 rounded-lg shadow-sm">
-        <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_#06b6d4] animate-pulse" />
-          <span className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-300">
-            FENHAVEN STAR DRIVES // BRIDGE OS v2.4
-          </span>
-        </div>
-        <RoomSelector
-          currentRoom={roomCode}
-          onJoinRoom={handleJoinRoom}
-          isConnected={isConnected}
-          isLocked={syncStatus.isPinRequired && !syncStatus.isUnlocked}
-          hasStoredPin={syncStatus.hasStoredPin}
-          onSetPin={updateCloudPin}
-        />
-      </div>
+    <div className="relative min-h-screen bg-neutral-950 overflow-x-hidden">
+      {/* Dynamic Animated Hyperspace / Starfield Canvas */}
+      <HyperspaceBackground isHyperspace={Boolean(activeJourney)} />
 
-      {!roomCode ? (
-        <div className="flex min-h-[480px] flex-col items-center justify-center gap-4 rounded-md border border-neutral-800 bg-neutral-950/90 p-8 text-center font-mono shadow-2xl">
-          <div className="relative flex items-center justify-center">
-            <span className="h-16 w-16 animate-pulse rotate-45 border-2 border-cyan-500/40" />
-            <Radio className="absolute h-7 w-7 text-cyan-400" />
+      {/* Main Bridge Application Shell */}
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-3 sm:p-4 lg:p-6">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-neutral-950/80 border border-neutral-800 p-2.5 rounded-lg shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_#06b6d4] animate-pulse" />
+            <span className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-300">
+              FENHAVEN STAR DRIVES // BRIDGE OS v2.4
+            </span>
           </div>
-          <h2 className="text-lg sm:text-xl font-bold tracking-[0.25em] text-cyan-400 uppercase mt-2">
-            AWAITING SIGNAL LINK // TRANSMISSION OFFLINE
-          </h2>
-          <p className="max-w-md text-xs tracking-wider text-neutral-400 leading-relaxed">
-            No starship link is established. Enter your assigned vessel callsign into the transmission grid above and click <strong className="text-neutral-200">LINK</strong> to access tactical consoles.
-          </p>
-          <div className="flex items-center gap-2 text-[10px] text-neutral-600 uppercase tracking-widest mt-4">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-500/50" />
-            Supabase Relay Standing By
-          </div>
-        </div>
-      ) : syncStatus.isCreationBlocked ? (
-        <div className="flex min-h-[450px] flex-col items-center justify-center gap-4 rounded-md border-2 border-amber-500/80 bg-black/90 p-6 text-center font-mono shadow-[0_0_40px_rgba(245,158,11,0.2)]">
-          <span className="text-4xl">🛠️</span>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-widest text-amber-400 uppercase">
-            RESTRICTED SHIPYARD // AUTHORIZATION REQUIRED
-          </h2>
-          <p className="max-w-md text-xs tracking-wider text-neutral-300 leading-relaxed">
-            Vessel registration <strong className="text-amber-400">{roomCode}</strong> does not exist in the database. A Master Shipyard Authorization Key is required to commission a new vessel.
-          </p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              setCreationKey(creationKeyInput.trim())
-            }}
-            className="flex flex-col sm:flex-row items-center gap-2 mt-2"
-          >
-            <input
-              type="password"
-              placeholder="MASTER KEY"
-              value={creationKeyInput}
-              onChange={(e) => setCreationKeyInput(e.target.value)}
-              className="bg-neutral-950 border border-neutral-700 rounded px-3 py-1.5 text-center text-xs text-neutral-100 font-mono tracking-widest focus:outline-none focus:border-amber-400"
-            />
-            <button
-              type="submit"
-              className="px-4 py-1.5 rounded border border-amber-400/80 bg-amber-500/20 text-xs font-bold uppercase text-amber-300 hover:bg-amber-500/30 transition cursor-pointer"
-            >
-              Authorize &amp; Build
-            </button>
-          </form>
-        </div>
-      ) : syncStatus.isPinRequired && !syncStatus.isUnlocked ? (
-        <div className="flex min-h-[450px] flex-col items-center justify-center gap-4 rounded-md border-2 border-rose-500/80 bg-black/90 p-6 text-center font-mono shadow-[0_0_40px_rgba(244,63,94,0.3)]">
-          <span className="text-4xl">🔒</span>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-widest text-rose-400 uppercase">
-            SECURITY LOCK ENGAGED // ACCESS RESTRICTED
-          </h2>
-          <p className="max-w-md text-xs tracking-wider text-rose-200 leading-relaxed">
-            This vessel is protected by a security PIN. Enter the PIN in the transmission bar at the top and click <strong>LINK</strong> to authenticate.
-          </p>
-        </div>
-      ) : (
-        <>
-          <HeaderBar
-            shipName={shipConfig.name}
-            shipModel={
-              shipConfig.model ||
-              (shipConfig as any).shipClass ||
-              (shipConfig as any).class ||
-              (shipConfig as any).type
-            }
-            currentDay={currentDay}
-            activeJourney={activeJourney}
-            totalShields={totalShields}
-            totalHull={totalHull}
-            systemDamageLevel={systemDamageLevel}
-            shipStatuses={shipStatuses}
-            isUsedCondition={effectiveIsUsed}
-            isInCombat={combatState.isInCombat}
-            combatRound={combatState.round}
-            activeTurnShip={combatState.activeShipName}
-            nextTurnShip={combatState.nextShipName}
+          <RoomSelector
+            currentRoom={roomCode}
+            onJoinRoom={handleJoinRoom}
+            isConnected={isConnected}
+            isLocked={syncStatus.isPinRequired && !syncStatus.isUnlocked}
+            hasStoredPin={syncStatus.hasStoredPin}
+            onSetPin={updateCloudPin}
           />
-          <div className="flex flex-1 flex-col gap-4 lg:flex-row">
-            <StationSidebar
-              active={active}
-              onSelect={setActive}
-              isBlackout={isLevel6Blackout}
-              manifest={manifest}
-              installedSuites={installedSuites}
+        </div>
+
+        {!roomCode ? (
+          <div className="flex min-h-[480px] flex-col items-center justify-center gap-4 rounded-md border border-neutral-800 bg-neutral-950/90 p-8 text-center font-mono shadow-2xl">
+            <div className="relative flex items-center justify-center">
+              <span className="h-16 w-16 animate-pulse rotate-45 border-2 border-cyan-500/40" />
+              <Radio className="absolute h-7 w-7 text-cyan-400" />
+            </div>
+            <h2 className="text-lg sm:text-xl font-bold tracking-[0.25em] text-cyan-400 uppercase mt-2">
+              AWAITING SIGNAL LINK // TRANSMISSION OFFLINE
+            </h2>
+            <p className="max-w-md text-xs tracking-wider text-neutral-400 leading-relaxed">
+              No starship link is established. Enter your assigned vessel callsign into the transmission grid above and click <strong className="text-neutral-200">LINK</strong> to access tactical consoles.
+            </p>
+            <div className="flex items-center gap-2 text-[10px] text-neutral-600 uppercase tracking-widest mt-4">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500/50" />
+              Supabase Relay Standing By
+            </div>
+          </div>
+        ) : syncStatus.isCreationBlocked ? (
+          <div className="flex min-h-[450px] flex-col items-center justify-center gap-4 rounded-md border-2 border-amber-500/80 bg-black/90 p-6 text-center font-mono shadow-[0_0_40px_rgba(245,158,11,0.2)]">
+            <span className="text-4xl">🛠️</span>
+            <h2 className="text-xl sm:text-2xl font-bold tracking-widest text-amber-400 uppercase">
+              RESTRICTED SHIPYARD // AUTHORIZATION REQUIRED
+            </h2>
+            <p className="max-w-md text-xs tracking-wider text-neutral-300 leading-relaxed">
+              Vessel registration <strong className="text-amber-400">{roomCode}</strong> does not exist in the database. A Master Shipyard Authorization Key is required to commission a new vessel.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                setCreationKey(creationKeyInput.trim())
+              }}
+              className="flex flex-col sm:flex-row items-center gap-2 mt-2"
+            >
+              <input
+                type="password"
+                placeholder="MASTER KEY"
+                value={creationKeyInput}
+                onChange={(e) => setCreationKeyInput(e.target.value)}
+                className="bg-neutral-950 border border-neutral-700 rounded px-3 py-1.5 text-center text-xs text-neutral-100 font-mono tracking-widest focus:outline-none focus:border-amber-400"
+              />
+              <button
+                type="submit"
+                className="px-4 py-1.5 rounded border border-amber-400/80 bg-amber-500/20 text-xs font-bold uppercase text-amber-300 hover:bg-amber-500/30 transition cursor-pointer"
+              >
+                Authorize &amp; Build
+              </button>
+            </form>
+          </div>
+        ) : syncStatus.isPinRequired && !syncStatus.isUnlocked ? (
+          <div className="flex min-h-[450px] flex-col items-center justify-center gap-4 rounded-md border-2 border-rose-500/80 bg-black/90 p-6 text-center font-mono shadow-[0_0_40px_rgba(244,63,94,0.3)]">
+            <span className="text-4xl">🔒</span>
+            <h2 className="text-xl sm:text-2xl font-bold tracking-widest text-rose-400 uppercase">
+              SECURITY LOCK ENGAGED // ACCESS RESTRICTED
+            </h2>
+            <p className="max-w-md text-xs tracking-wider text-rose-200 leading-relaxed">
+              This vessel is protected by a security PIN. Enter the PIN in the transmission bar at the top and click <strong>LINK</strong> to authenticate.
+            </p>
+          </div>
+        ) : (
+          <>
+            <HeaderBar
+              shipName={shipConfig.name}
+              shipModel={
+                shipConfig.model ||
+                (shipConfig as any).shipClass ||
+                (shipConfig as any).class ||
+                (shipConfig as any).type
+              }
+              currentDay={currentDay}
+              activeJourney={activeJourney}
+              totalShields={totalShields}
+              totalHull={totalHull}
+              systemDamageLevel={systemDamageLevel}
+              shipStatuses={shipStatuses}
+              isUsedCondition={effectiveIsUsed}
+              isInCombat={combatState.isInCombat}
+              combatRound={combatState.round}
+              activeTurnShip={combatState.activeShipName}
+              nextTurnShip={combatState.nextShipName}
             />
-            <main className="min-w-0 flex-1 relative">
-              {isLevel6Blackout && active !== "GM Station" ? (
-                <div className="flex min-h-[500px] flex-col items-center justify-center gap-4 rounded-md border-2 border-red-600 bg-black/95 p-6 text-center font-mono shadow-[0_0_50px_rgba(239,68,68,0.4)] animate-pulse">
-                  <AlertOctagon className="h-16 w-16 text-red-500 animate-bounce" />
-                  <h2 className="text-xl sm:text-2xl font-black text-red-400 tracking-[0.25em] uppercase">
-                    🚨 SYSTEM COLLAPSE // ALL PRIMARY CONSOLES OFFLINE
-                  </h2>
-                  <p className="max-w-md text-xs tracking-wider text-red-200 leading-relaxed">
-                    Critical Level 6 System Damage. Auxiliary power severed. Primary consoles are disabled.
-                  </p>
+            <div className="flex flex-1 flex-col gap-4 lg:flex-row">
+              <StationSidebar
+                active={active}
+                onSelect={setActive}
+                isBlackout={isLevel6Blackout}
+                manifest={manifest}
+                installedSuites={installedSuites}
+                onToggleTurn={handleToggleTurnTaken}
+              />
+              <main className="min-w-0 flex-1 relative">
+                {isLevel6Blackout && active !== "GM Station" ? (
+                  <div className="flex min-h-[500px] flex-col items-center justify-center gap-4 rounded-md border-2 border-red-600 bg-black/95 p-6 text-center font-mono shadow-[0_0_50px_rgba(239,68,68,0.4)] animate-pulse">
+                    <AlertOctagon className="h-16 w-16 text-red-500 animate-bounce" />
+                    <h2 className="text-xl sm:text-2xl font-black text-red-400 tracking-[0.25em] uppercase">
+                      🚨 SYSTEM COLLAPSE // ALL PRIMARY CONSOLES OFFLINE
+                    </h2>
+                    <p className="max-w-md text-xs tracking-wider text-red-200 leading-relaxed">
+                      Critical Level 6 System Damage. Auxiliary power severed. Primary consoles are disabled.
+                    </p>
 
-                  <div className="flex flex-col sm:flex-row gap-3 mt-4">
-                    <button
-                      type="button"
-                      onClick={() => setActive("GM Station")}
-                      className="px-4 py-2.5 rounded border border-amber-400 bg-amber-500/20 text-xs font-bold text-amber-300 hover:bg-amber-500/30 uppercase tracking-widest cursor-pointer"
-                    >
-                      Access GM Terminal Override
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateRoomData((prev) => ({ ...prev, systemDamageLevel: 5 }))
-                      }
-                      className="px-4 py-2.5 rounded border border-red-500 bg-red-500/20 text-xs font-bold text-red-300 hover:bg-red-500/30 uppercase tracking-widest cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Emergency System Reset (Reduce to Level 5)
-                    </button>
+                    <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setActive("GM Station")}
+                        className="px-4 py-2.5 rounded border border-amber-400 bg-amber-500/20 text-xs font-bold text-amber-300 hover:bg-amber-500/30 uppercase tracking-widest cursor-pointer"
+                      >
+                        Access GM Terminal Override
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateRoomData((prev) => ({ ...prev, systemDamageLevel: 5 }))
+                        }
+                        className="px-4 py-2.5 rounded border border-red-500 bg-red-500/20 text-xs font-bold text-red-300 hover:bg-red-500/30 uppercase tracking-widest cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Emergency System Reset (Reduce to Level 5)
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ) : isDarkStation ? (
-                <div className="flex min-h-[460px] flex-col items-center justify-center gap-4 rounded-md border border-neutral-800 bg-black/90 p-8 text-center font-mono shadow-2xl">
-                  <div className="relative flex items-center justify-center">
-                    <span className="h-14 w-14 animate-pulse rotate-45 border-2 border-neutral-700" />
-                    <PowerOff className="absolute h-6 w-6 text-neutral-500" />
+                ) : isDarkStation ? (
+                  <div className="flex min-h-[460px] flex-col items-center justify-center gap-4 rounded-md border border-neutral-800 bg-black/90 p-8 text-center font-mono shadow-2xl">
+                    <div className="relative flex items-center justify-center">
+                      <span className="h-14 w-14 animate-pulse rotate-45 border-2 border-neutral-700" />
+                      <PowerOff className="absolute h-6 w-6 text-neutral-500" />
+                    </div>
+                    <h2 className="text-base sm:text-lg font-bold tracking-[0.25em] text-neutral-400 uppercase mt-2">
+                      {active.toUpperCase()} OFFLINE — MAIN POWER REQUIRED
+                    </h2>
+                    <p className="max-w-md text-xs tracking-wider text-neutral-500 leading-relaxed">
+                      Main reactor is offline. Power up the reactor from Helm or Engineering to activate this station.
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-3 mt-3">
+                      <button
+                        type="button"
+                        onClick={() => setActive("Engines")}
+                        className="px-4 py-2 rounded border border-cyan-500/50 bg-cyan-950/40 text-xs font-bold text-cyan-300 hover:bg-cyan-900/50 uppercase tracking-widest cursor-pointer"
+                      >
+                        Go to Helm / Engines &rarr;
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActive("Engineering")}
+                        className="px-4 py-2 rounded border border-amber-500/50 bg-amber-950/40 text-xs font-bold text-amber-300 hover:bg-amber-900/50 uppercase tracking-widest cursor-pointer"
+                      >
+                        Go to Engineering &rarr;
+                      </button>
+                    </div>
                   </div>
-                  <h2 className="text-base sm:text-lg font-bold tracking-[0.25em] text-neutral-400 uppercase mt-2">
-                    {active.toUpperCase()} OFFLINE — MAIN POWER REQUIRED
-                  </h2>
-                  <p className="max-w-md text-xs tracking-wider text-neutral-500 leading-relaxed">
-                    Main reactor is offline. Power up the reactor from Helm or Engineering to activate this station.
-                  </p>
-                  <div className="flex flex-col sm:flex-row gap-3 mt-3">
-                    <button
-                      type="button"
-                      onClick={() => setActive("Engines")}
-                      className="px-4 py-2 rounded border border-cyan-500/50 bg-cyan-950/40 text-xs font-bold text-cyan-300 hover:bg-cyan-900/50 uppercase tracking-widest cursor-pointer"
-                    >
-                      Go to Helm / Engines &rarr;
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActive("Engineering")}
-                      className="px-4 py-2 rounded border border-amber-500/50 bg-amber-950/40 text-xs font-bold text-amber-300 hover:bg-amber-900/50 uppercase tracking-widest cursor-pointer"
-                    >
-                      Go to Engineering &rarr;
-                    </button>
-                  </div>
-                </div>
-              ) : active === "Ship Setup" ? (
-                <ShipSetup
-                  initialConfig={shipConfig}
-                  currentDay={currentDay}
-                  onSaveConfig={handleSaveShipConfig}
-                  onFullReset={handleFullShipReset}
-                  externalPendingTier={pendingTier}
-                  onClearPendingTier={() =>
-                    updateRoomData((prev) => ({ ...prev, pendingTier: null }))
-                  }
-                />
-              ) : active === "Crew" ? (
-                <CrewStation
-                  manifest={manifest}
-                  allMembers={manifest}
-                  onAddMember={handleAddMember}
-                  onRemoveMember={handleRemoveMember}
-                  onAssignLocation={handleAssignLocation}
-                  onToggleTurn={handleToggleTurnTaken}
-                  onUpdateInitiative={handleUpdateInitiative}
-                  cargoRations={cargoRations}
-                  installedMods={installedMods}
-                />
-              ) : active === "Weapons" ? (
-                <WeaponsStation
-                  availablePowerDice={stationPools["weapons"] ?? availablePowerDice}
-                  maxPowerDice={shipConfig.maxPowerDice}
-                  powerDieType={shipConfig.powerDieType}
-                  onConsumePowerDice={(amt) => handleConsumeStationPower("weapons", amt)}
-                  shipConfig={effectiveShipConfig}
-                  installedMods={installedMods}
-                  onRemoveMod={handleRemoveMod}
-                  onUpdateMod={handleUpdateMod}
-                  stationPools={stationPools}
-                  onUpdateStationPools={(newPools) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      stationPools:
-                        typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
-                    }))
-                  }
-                  sharedPoolDice={sharedPoolDice}
-                  onUpdateSharedPool={(newPool) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      sharedPoolDice:
-                        typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
-                    }))
-                  }
-                  standingByUsed={isSmallShip ? standingByUsed : false}
-                  onUseStandingBy={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
-                  }}
-                  leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
-                  onUseLeafOnTheWind={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
-                  }}
-                  versatileTransportUsed={isMediumShip ? versatileStarshipUsed : 0}
-                  onUpdateVersatileTransportUsed={(val) => {
-                    if (isMediumShip) updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
-                  }}
-                  bestShipInVerseUsed={isMediumShip ? bestShipInVerseUsed : false}
-                  onUpdateBestShipInVerseUsed={(val) => {
-                    if (isMediumShip) updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
-                  }}
-                  ordnanceList={ordnanceList}
-                  onUpdateOrdnanceList={(newList) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      ordnanceList:
-                        typeof newList === "function" ? newList(prev.ordnanceList) : newList,
-                    }))
-                  }
-                  onSellOrdnance={(item, qty, refundTotal) => {
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      ordnanceList: prev.ordnanceList.map((o) =>
-                        o.id === item.id
-                          ? { ...o, currentReserve: Math.max(0, o.currentReserve - qty) }
-                          : o
-                      ),
-                      transactions: [
-                        {
-                          id: generateSecureId("tx"),
-                          date: `Day ${prev.currentDay}`,
-                          description: `Sold Ordnance: ${qty}x ${item.name} (Full Refund)`,
-                          category: "Refit",
-                          amount: refundTotal,
-                          type: "credit",
-                        },
-                        ...prev.transactions,
-                      ],
-                    }))
-                  }}
-                  onJettisonOrdnance={(item, qty) => {
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      ordnanceList: prev.ordnanceList.map((o) =>
-                        o.id === item.id
-                          ? { ...o, currentReserve: Math.max(0, o.currentReserve - qty) }
-                          : o
-                      ),
-                      transactions: [
-                        {
-                          id: generateSecureId("tx"),
-                          date: `Day ${prev.currentDay}`,
-                          description: `Jettisoned Ordnance: ${qty}x ${item.name} (Dumped into Space)`,
-                          category: "Operations",
-                          amount: 0,
-                          type: "debit",
-                        },
-                        ...prev.transactions,
-                      ],
-                    }))
-                  }}
-                  sFoilsMode={sFoilsMode}
-                  systemDamageLevel={systemDamageLevel}
-                  shipStatuses={shipStatuses}
-                  manifest={manifest}
-                  onAssignCrew={handleAssignLocation}
-                  onToggleTurn={handleToggleTurnTaken}
-                  isWeaponsBoosted={isWeaponsBoosted}
-                  onConsumeWeaponBoost={() =>
-                    updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: false }))
-                  }
-                />
-              ) : active === "Sensors" ? (
-                <SensorsStation
-                  availablePowerDice={stationPools["sensors"] ?? availablePowerDice}
-                  maxPowerDice={shipConfig.maxPowerDice}
-                  powerDieType={shipConfig.powerDieType}
-                  onConsumePowerDice={(amt) => handleConsumeStationPower("sensors", amt)}
-                  contacts={sanitizedSensorContacts}
-                  onUpdateContact={handleUpdateContact}
-                  sensorSkillMod={effectiveSkills.scan ?? 0}
-                  probeSkillMod={effectiveSkills.probe ?? 0}
-                  shipConfig={effectiveShipConfig}
-                  installedMods={installedMods}
-                  onRemoveMod={handleRemoveMod}
-                  stationPools={stationPools}
-                  onUpdateStationPools={(newPools) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      stationPools:
-                        typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
-                    }))
-                  }
-                  sharedPoolDice={sharedPoolDice}
-                  onUpdateSharedPool={(newPool) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      sharedPoolDice:
-                        typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
-                    }))
-                  }
-                  standingByUsed={isSmallShip ? standingByUsed : false}
-                  onUseStandingBy={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
-                  }}
-                  leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
-                  onUseLeafOnTheWind={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
-                  }}
-                  versatileTransportUsed={isMediumShip ? versatileStarshipUsed : 0}
-                  onUpdateVersatileTransportUsed={(val) => {
-                    if (isMediumShip) updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
-                  }}
-                  bestShipInVerseUsed={isMediumShip ? bestShipInVerseUsed : false}
-                  onUpdateBestShipInVerseUsed={(val) => {
-                    if (isMediumShip) updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
-                  }}
-                  onRemoveContact={handleRemoveContact}
-                  systemDamageLevel={systemDamageLevel}
-                  isBlinded={isBlinded}
-                  manifest={manifest}
-                  onAssignCrew={handleAssignLocation}
-                  onToggleTurn={handleToggleTurnTaken}
-                />
-              ) : active === "Defense" ? (
-                <DefenseStation
-                  availablePowerDice={stationPools["defense"] ?? availablePowerDice}
-                  maxPowerDice={shipConfig.maxPowerDice}
-                  powerDieType={shipConfig.powerDieType}
-                  damageReduction={damageReduction}
-                  onConsumePowerDice={(amt) => handleConsumeStationPower("defense", amt)}
-                  onHullChange={(current, max) => setTotalHull({ current, max })}
-                  onShieldChange={(current, max, temp) => setTotalShields({ current, max, temp })}
-                  shipConfig={effectiveShipConfig}
-                  spentHullDice={spentHullDice}
-                  onSpentHullDiceChange={(val) =>
-                    updateRoomData((prev) => ({ ...prev, spentHullDice: val }))
-                  }
-                  spentShieldDice={spentShieldDice}
-                  onSpentShieldDiceChange={(val) =>
-                    updateRoomData((prev) => ({ ...prev, spentShieldDice: val }))
-                  }
-                  installedMods={installedMods}
-                  onRemoveMod={handleRemoveMod}
-                  stationPools={stationPools}
-                  onUpdateStationPools={(newPools) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      stationPools:
-                        typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
-                    }))
-                  }
-                  sharedPoolDice={sharedPoolDice}
-                  onUpdateSharedPool={(newPool) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      sharedPoolDice:
-                        typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
-                    }))
-                  }
-                  currentShields={totalShields.current}
-                  maxShields={totalShields.max}
-                  tempShields={totalShields.temp}
-                  standingByUsed={isSmallShip ? standingByUsed : false}
-                  onUseStandingBy={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
-                  }}
-                  systemDamageLevel={systemDamageLevel}
-                  onUpdateSystemDamageLevel={(lvl) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
-                    }))
-                  }
-                  statuses={shipStatuses}
-                  onAddStatus={handleAddStatus}
-                  onRemoveStatus={handleRemoveStatus}
-                  manifest={manifest}
-                  onAssignCrew={handleAssignLocation}
-                  onToggleTurn={handleToggleTurnTaken}
-                />
-              ) : active === "Engineering" ? (
-                <EngineeringStation
-                  isPoweredOn={isPoweredOn}
-                  onSetPoweredOn={handleSetPoweredOn}
-                  currentFuel={currentFuel}
-                  maxFuel={effectiveShipConfig.fuelCapacity}
-                  autoCycleReactor={autoCycleReactorOnTurnEnd}
-                  onToggleAutoCycleReactor={(enabled) =>
-                    updateRoomData((prev) => ({ ...prev, autoCycleReactorOnTurnEnd: enabled }))
-                  }
-                  maxPowerDice={shipConfig.maxPowerDice}
-                  availablePowerDice={availablePowerDice}
-                  powerDieType={shipConfig.powerDieType}
-                  recoveryRate={shipConfig.recoveryRate}
-                  onCycleReactor={handleCycleReactor}
-                  hullCurrent={totalHull.current}
-                  hullMax={totalHull.max}
-                  shieldCurrent={totalShields.current}
-                  shieldMax={totalShields.max}
-                  shieldTemp={totalShields.temp}
-                  onShieldChange={(current, max, temp) => setTotalShields({ current, max, temp })}
-                  spentShieldDice={spentShieldDice}
-                  onSpentShieldDiceChange={(val) =>
-                    updateRoomData((prev) => ({ ...prev, spentShieldDice: val }))
-                  }
-                  spentHullDice={spentHullDice}
-                  onSpentHullDiceChange={(val) =>
-                    updateRoomData((prev) => ({ ...prev, spentHullDice: val }))
-                  }
-                  onBoostSpeed={() =>
-                    updateRoomData((prev) => ({ ...prev, engineSpeedBoostTurns: 2 }))
-                  }
-                  onBoostShields={(rolledTemp) => {
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      shieldBoostTurns: 2,
-                      shieldState: {
-                        ...prev.shieldState,
-                        temp: (prev.shieldState.temp || 0) + rolledTemp,
-                      },
-                    }))
-                  }}
-                  onBoostWeapons={() =>
-                    updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: true }))
-                  }
-                  boostActionUsed={boostActionUsed}
-                  onBoostActionUsedChange={(val) =>
-                    updateRoomData((prev) => ({ ...prev, boostActionUsed: val }))
-                  }
-                  selectedBoostType={selectedBoostType}
-                  onSelectedBoostTypeChange={(val) =>
-                    updateRoomData((prev) => ({ ...prev, selectedBoostType: val }))
-                  }
-                  boostFeedback={boostFeedback}
-                  onBoostFeedbackChange={(val) =>
-                    updateRoomData((prev) => ({ ...prev, boostFeedback: val }))
-                  }
-                  engineBoostTurnsRemaining={engineSpeedBoostTurns}
-                  shieldBoostTurnsRemaining={shieldBoostTurns}
-                  onPatchHull={(amount) => {
-                    setTotalHull((prev) => ({
-                      current: Math.min(totalHull.max, prev.current + amount),
-                      max: totalHull.max,
-                    }))
-                  }}
-                  onApplyFullRecharge={handleApplyFullRecharge}
-                  strengthMod={getRawModifier(effectiveStats.strength)}
-                  constitutionMod={getRawModifier(effectiveStats.constitution)}
-                  patchSkillMod={effectiveSkills.patch ?? 0}
-                  regulationSkillMod={effectiveSkills.regulation ?? 0}
-                  shipConfig={effectiveShipConfig}
-                  installedMods={installedMods}
-                  onRemoveMod={handleRemoveMod}
-                  stationPools={stationPools}
-                  onUpdateStationPools={(newPools) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      stationPools:
-                        typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
-                    }))
-                  }
-                  sharedPoolDice={sharedPoolDice}
-                  onUpdateSharedPool={(newPool) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      sharedPoolDice:
-                        typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
-                    }))
-                  }
-                  standingByUsed={isSmallShip ? standingByUsed : false}
-                  onUseStandingBy={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
-                  }}
-                  leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
-                  onUseLeafOnTheWind={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
-                  }}
-                  versatileTransportUsed={isMediumShip ? versatileStarshipUsed : 0}
-                  onUpdateVersatileTransportUsed={(val) => {
-                    if (isMediumShip) updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
-                  }}
-                  bestShipInVerseUsed={isMediumShip ? bestShipInVerseUsed : false}
-                  onUpdateBestShipInVerseUsed={(val) => {
-                    if (isMediumShip) updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
-                  }}
-                  manifest={manifest}
-                  onAssignCrew={handleAssignLocation}
-                  onToggleTurn={handleToggleTurnTaken}
-                  onAddStatus={handleAddStatus}
-                  onUpdateSystemDamageLevel={(lvl) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
-                    }))
-                  }
-                />
-              ) : active === "Suites" ? (
-                <SuitesStation
-                  shipConfig={effectiveShipConfig}
-                  installedSuites={installedSuites}
-                  manifest={manifest}
-                  onAssignLocation={handleAssignLocation}
-                  onToggleTurn={handleToggleTurnTaken}
-                />
-              ) : active === "Ship Modifications" ? (
-                <ShipModifications
-                  installedMods={installedMods}
-                  installedSuites={installedSuites}
-                  onInstallMod={handleInstallMod}
-                  onRemoveMod={handleRemoveMod}
-                  onUpdateSuites={handleUpdateSuites}
-                  shipConfig={effectiveShipConfig}
-                  maxMods={effectiveShipConfig.modSlots}
-                />
-              ) : active === "Cargo" ? (
-                <CargoStation
-                  installedMods={installedMods}
-                  installedSuites={installedSuites}
-                  maxCapacityTons={effectiveShipConfig.cargoCapacity}
-                  cargoRations={cargoRations}
-                  onUpdateRations={(newRations) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      cargoRations:
-                        typeof newRations === "function"
-                          ? newRations(prev.cargoRations)
-                          : newRations,
-                    }))
-                  }
-                  manifest={manifest}
-                  currentDay={currentDay}
-                />
-              ) : active === "Communications" ? (
-                <CommunicationsStation
-                  availablePowerDice={stationPools["communications"] ?? availablePowerDice}
-                  maxPowerDice={shipConfig.maxPowerDice}
-                  powerDieType={shipConfig.powerDieType}
-                  onConsumePowerDice={(amt) => handleConsumeStationPower("communications", amt)}
-                  impressMod={effectiveSkills.impress ?? 0}
-                  interfereMod={effectiveSkills.interfere ?? 0}
-                  menaceMod={effectiveSkills.menace ?? 0}
-                  swindleMod={effectiveSkills.swindle ?? 0}
-                  shipConfig={effectiveShipConfig}
-                  installedMods={installedMods}
-                  onRemoveMod={handleRemoveMod}
-                  stationPools={stationPools}
-                  onUpdateStationPools={(newPools) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      stationPools:
-                        typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
-                    }))
-                  }
-                  sharedPoolDice={sharedPoolDice}
-                  onUpdateSharedPool={(newPool) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      sharedPoolDice:
-                        typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
-                    }))
-                  }
-                  standingByUsed={isSmallShip ? standingByUsed : false}
-                  onUseStandingBy={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
-                  }}
-                  leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
-                  onUseLeafOnTheWind={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
-                  }}
-                  versatileTransportUsed={isMediumShip ? versatileStarshipUsed : 0}
-                  onUpdateVersatileTransportUsed={(val) => {
-                    if (isMediumShip) updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
-                  }}
-                  bestShipInVerseUsed={isMediumShip ? bestShipInVerseUsed : false}
-                  onUpdateBestShipInVerseUsed={(val) => {
-                    if (isMediumShip) updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
-                  }}
-                  systemDamageLevel={systemDamageLevel}
-                  isDisabled={isDisabled}
-                  manifest={manifest}
-                  onAssignCrew={handleAssignLocation}
-                  onToggleTurn={handleToggleTurnTaken}
-                />
-              ) : active === "Finance" ? (
-                <FinanceStation
-                  externalShipTier={shipConfig.tier}
-                  onUpgradePurchased={(newTier) => {
-                    updateRoomData((prev) => ({ ...prev, pendingTier: newTier }))
-                    setActive("Ship Setup")
-                  }}
-                  onUpdateTier={(newTier) => {
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      shipConfig: {
-                        ...prev.shipConfig,
-                        tier: newTier,
-                      },
-                    }))
-                  }}
-                  onTierReverted={(targetTier) => {
-                    updateRoomData((prev) => {
-                      const updatedRolls = { ...prev.shipConfig.tierRolls }
-                      for (let t = prev.shipConfig.tier; t > targetTier; t--) {
-                        delete updatedRolls[t]
-                      }
-
-                      const revertSmallSurges = targetTier < 1
-                      const revertMediumSurges = targetTier < 1
-
-                      return {
+                ) : active === "Ship Setup" ? (
+                  <ShipSetup
+                    initialConfig={shipConfig}
+                    currentDay={currentDay}
+                    onSaveConfig={handleSaveShipConfig}
+                    onFullReset={handleFullShipReset}
+                    externalPendingTier={pendingTier}
+                    onClearPendingTier={() =>
+                      updateRoomData((prev) => ({ ...prev, pendingTier: null }))
+                    }
+                  />
+                ) : active === "Crew" ? (
+                  <CrewStation
+                    manifest={manifest}
+                    allMembers={manifest}
+                    onAddMember={handleAddMember}
+                    onRemoveMember={handleRemoveMember}
+                    onAssignLocation={handleAssignLocation}
+                    onToggleTurn={handleToggleTurnTaken}
+                    onUpdateInitiative={handleUpdateInitiative}
+                    cargoRations={cargoRations}
+                    installedMods={installedMods}
+                  />
+                ) : active === "Weapons" ? (
+                  <WeaponsStation
+                    availablePowerDice={stationPools["weapons"] ?? availablePowerDice}
+                    maxPowerDice={shipConfig.maxPowerDice}
+                    powerDieType={shipConfig.powerDieType}
+                    onConsumePowerDice={(amt) => handleConsumeStationPower("weapons", amt)}
+                    shipConfig={effectiveShipConfig}
+                    installedMods={installedMods}
+                    onRemoveMod={handleRemoveMod}
+                    onUpdateMod={handleUpdateMod}
+                    stationPools={stationPools}
+                    onUpdateStationPools={(newPools) =>
+                      updateRoomData((prev) => ({
                         ...prev,
-                        pinpointStrikesUsed: revertSmallSurges ? 0 : prev.pinpointStrikesUsed,
-                        versatileSnubfighterUsed: targetTier < 3 ? 0 : prev.versatileSnubfighterUsed,
-                        standingByUsed: targetTier < 4 ? false : prev.standingByUsed,
-                        leafOnTheWindUsed: targetTier < 5 ? false : prev.leafOnTheWindUsed,
-                        evasiveManeuversUsed: revertMediumSurges ? 0 : prev.evasiveManeuversUsed,
-                        versatileStarshipUsed: targetTier < 3 ? 0 : prev.versatileStarshipUsed,
-                        adaptiveArmorUsed: targetTier < 4 ? 0 : prev.adaptiveArmorUsed,
-                        bestShipInVerseUsed: targetTier < 5 ? false : prev.bestShipInVerseUsed,
+                        stationPools:
+                          typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                      }))
+                    }
+                    sharedPoolDice={sharedPoolDice}
+                    onUpdateSharedPool={(newPool) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        sharedPoolDice:
+                          typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                      }))
+                    }
+                    standingByUsed={isSmallShip ? standingByUsed : false}
+                    onUseStandingBy={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+                    }}
+                    leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
+                    onUseLeafOnTheWind={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+                    }}
+                    versatileTransportUsed={isMediumShip ? versatileStarshipUsed : 0}
+                    onUpdateVersatileTransportUsed={(val) => {
+                      if (isMediumShip) updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
+                    }}
+                    bestShipInVerseUsed={isMediumShip ? bestShipInVerseUsed : false}
+                    onUpdateBestShipInVerseUsed={(val) => {
+                      if (isMediumShip) updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
+                    }}
+                    ordnanceList={ordnanceList}
+                    onUpdateOrdnanceList={(newList) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        ordnanceList:
+                          typeof newList === "function" ? newList(prev.ordnanceList) : newList,
+                      }))
+                    }
+                    onSellOrdnance={(item, qty, refundTotal) => {
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        ordnanceList: prev.ordnanceList.map((o) =>
+                          o.id === item.id
+                            ? { ...o, currentReserve: Math.max(0, o.currentReserve - qty) }
+                            : o
+                        ),
+                        transactions: [
+                          {
+                            id: generateSecureId("tx"),
+                            date: `Day ${prev.currentDay}`,
+                            description: `Sold Ordnance: ${qty}x ${item.name} (Full Refund)`,
+                            category: "Refit",
+                            amount: refundTotal,
+                            type: "credit",
+                          },
+                          ...prev.transactions,
+                        ],
+                      }))
+                    }}
+                    onJettisonOrdnance={(item, qty) => {
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        ordnanceList: prev.ordnanceList.map((o) =>
+                          o.id === item.id
+                            ? { ...o, currentReserve: Math.max(0, o.currentReserve - qty) }
+                            : o
+                        ),
+                        transactions: [
+                          {
+                            id: generateSecureId("tx"),
+                            date: `Day ${prev.currentDay}`,
+                            description: `Jettisoned Ordnance: ${qty}x ${item.name} (Dumped into Space)`,
+                            category: "Operations",
+                            amount: 0,
+                            type: "debit",
+                          },
+                          ...prev.transactions,
+                        ],
+                      }))
+                    }}
+                    sFoilsMode={sFoilsMode}
+                    systemDamageLevel={systemDamageLevel}
+                    shipStatuses={shipStatuses}
+                    manifest={manifest}
+                    onAssignCrew={handleAssignLocation}
+                    onToggleTurn={handleToggleTurnTaken}
+                    isWeaponsBoosted={isWeaponsBoosted}
+                    onConsumeWeaponBoost={() =>
+                      updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: false }))
+                    }
+                  />
+                ) : active === "Sensors" ? (
+                  <SensorsStation
+                    availablePowerDice={stationPools["sensors"] ?? availablePowerDice}
+                    maxPowerDice={shipConfig.maxPowerDice}
+                    powerDieType={shipConfig.powerDieType}
+                    onConsumePowerDice={(amt) => handleConsumeStationPower("sensors", amt)}
+                    contacts={sanitizedSensorContacts}
+                    onUpdateContact={handleUpdateContact}
+                    sensorSkillMod={effectiveSkills.scan ?? 0}
+                    probeSkillMod={effectiveSkills.probe ?? 0}
+                    shipConfig={effectiveShipConfig}
+                    installedMods={installedMods}
+                    onRemoveMod={handleRemoveMod}
+                    stationPools={stationPools}
+                    onUpdateStationPools={(newPools) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        stationPools:
+                          typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                      }))
+                    }
+                    sharedPoolDice={sharedPoolDice}
+                    onUpdateSharedPool={(newPool) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        sharedPoolDice:
+                          typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                      }))
+                    }
+                    standingByUsed={isSmallShip ? standingByUsed : false}
+                    onUseStandingBy={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+                    }}
+                    leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
+                    onUseLeafOnTheWind={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+                    }}
+                    versatileTransportUsed={isMediumShip ? versatileStarshipUsed : 0}
+                    onUpdateVersatileTransportUsed={(val) => {
+                      if (isMediumShip) updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
+                    }}
+                    bestShipInVerseUsed={isMediumShip ? bestShipInVerseUsed : false}
+                    onUpdateBestShipInVerseUsed={(val) => {
+                      if (isMediumShip) updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
+                    }}
+                    onRemoveContact={handleRemoveContact}
+                    systemDamageLevel={systemDamageLevel}
+                    isBlinded={isBlinded}
+                    manifest={manifest}
+                    onAssignCrew={handleAssignLocation}
+                    onToggleTurn={handleToggleTurnTaken}
+                  />
+                ) : active === "Defense" ? (
+                  <DefenseStation
+                    availablePowerDice={stationPools["defense"] ?? availablePowerDice}
+                    maxPowerDice={shipConfig.maxPowerDice}
+                    powerDieType={shipConfig.powerDieType}
+                    damageReduction={damageReduction}
+                    onConsumePowerDice={(amt) => handleConsumeStationPower("defense", amt)}
+                    onHullChange={(current, max) => setTotalHull({ current, max })}
+                    onShieldChange={(current, max, temp) => setTotalShields({ current, max, temp })}
+                    shipConfig={effectiveShipConfig}
+                    spentHullDice={spentHullDice}
+                    onSpentHullDiceChange={(val) =>
+                      updateRoomData((prev) => ({ ...prev, spentHullDice: val }))
+                    }
+                    spentShieldDice={spentShieldDice}
+                    onSpentShieldDiceChange={(val) =>
+                      updateRoomData((prev) => ({ ...prev, spentShieldDice: val }))
+                    }
+                    installedMods={installedMods}
+                    onRemoveMod={handleRemoveMod}
+                    stationPools={stationPools}
+                    onUpdateStationPools={(newPools) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        stationPools:
+                          typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                      }))
+                    }
+                    sharedPoolDice={sharedPoolDice}
+                    onUpdateSharedPool={(newPool) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        sharedPoolDice:
+                          typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                      }))
+                    }
+                    currentShields={totalShields.current}
+                    maxShields={totalShields.max}
+                    tempShields={totalShields.temp}
+                    standingByUsed={isSmallShip ? standingByUsed : false}
+                    onUseStandingBy={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+                    }}
+                    systemDamageLevel={systemDamageLevel}
+                    onUpdateSystemDamageLevel={(lvl) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
+                      }))
+                    }
+                    statuses={shipStatuses}
+                    onAddStatus={handleAddStatus}
+                    onRemoveStatus={handleRemoveStatus}
+                    manifest={manifest}
+                    onAssignCrew={handleAssignLocation}
+                    onToggleTurn={handleToggleTurnTaken}
+                  />
+                ) : active === "Engineering" ? (
+                  <EngineeringStation
+                    isPoweredOn={isPoweredOn}
+                    onSetPoweredOn={handleSetPoweredOn}
+                    currentFuel={currentFuel}
+                    maxFuel={effectiveShipConfig.fuelCapacity}
+                    autoCycleReactor={autoCycleReactorOnTurnEnd}
+                    onToggleAutoCycleReactor={(enabled) =>
+                      updateRoomData((prev) => ({ ...prev, autoCycleReactorOnTurnEnd: enabled }))
+                    }
+                    maxPowerDice={shipConfig.maxPowerDice}
+                    availablePowerDice={availablePowerDice}
+                    powerDieType={shipConfig.powerDieType}
+                    recoveryRate={shipConfig.recoveryRate}
+                    onCycleReactor={handleCycleReactor}
+                    hullCurrent={totalHull.current}
+                    hullMax={totalHull.max}
+                    shieldCurrent={totalShields.current}
+                    shieldMax={totalShields.max}
+                    shieldTemp={totalShields.temp}
+                    onShieldChange={(current, max, temp) => setTotalShields({ current, max, temp })}
+                    spentShieldDice={spentShieldDice}
+                    onSpentShieldDiceChange={(val) =>
+                      updateRoomData((prev) => ({ ...prev, spentShieldDice: val }))
+                    }
+                    spentHullDice={spentHullDice}
+                    onSpentHullDiceChange={(val) =>
+                      updateRoomData((prev) => ({ ...prev, spentHullDice: val }))
+                    }
+                    onBoostSpeed={() =>
+                      updateRoomData((prev) => ({ ...prev, engineSpeedBoostTurns: 2 }))
+                    }
+                    onBoostShields={(rolledTemp) => {
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        shieldBoostTurns: 2,
+                        shieldState: {
+                          ...prev.shieldState,
+                          temp: (prev.shieldState.temp || 0) + rolledTemp,
+                        },
+                      }))
+                    }}
+                    onBoostWeapons={() =>
+                      updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: true }))
+                    }
+                    boostActionUsed={boostActionUsed}
+                    onBoostActionUsedChange={(val) =>
+                      updateRoomData((prev) => ({ ...prev, boostActionUsed: val }))
+                    }
+                    selectedBoostType={selectedBoostType}
+                    onSelectedBoostTypeChange={(val) =>
+                      updateRoomData((prev) => ({ ...prev, selectedBoostType: val }))
+                    }
+                    boostFeedback={boostFeedback}
+                    onBoostFeedbackChange={(val) =>
+                      updateRoomData((prev) => ({ ...prev, boostFeedback: val }))
+                    }
+                    engineBoostTurnsRemaining={engineSpeedBoostTurns}
+                    shieldBoostTurnsRemaining={shieldBoostTurns}
+                    onPatchHull={(amount) => {
+                      setTotalHull((prev) => ({
+                        current: Math.min(totalHull.max, prev.current + amount),
+                        max: totalHull.max,
+                      }))
+                    }}
+                    onApplyFullRecharge={handleApplyFullRecharge}
+                    strengthMod={getRawModifier(effectiveStats.strength)}
+                    constitutionMod={getRawModifier(effectiveStats.constitution)}
+                    patchSkillMod={effectiveSkills.patch ?? 0}
+                    regulationSkillMod={effectiveSkills.regulation ?? 0}
+                    shipConfig={effectiveShipConfig}
+                    installedMods={installedMods}
+                    onRemoveMod={handleRemoveMod}
+                    stationPools={stationPools}
+                    onUpdateStationPools={(newPools) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        stationPools:
+                          typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                        }))
+                    }
+                    sharedPoolDice={sharedPoolDice}
+                    onUpdateSharedPool={(newPool) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        sharedPoolDice:
+                          typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                      }))
+                    }
+                    standingByUsed={isSmallShip ? standingByUsed : false}
+                    onUseStandingBy={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+                    }}
+                    leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
+                    onUseLeafOnTheWind={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+                    }}
+                    versatileTransportUsed={isMediumShip ? versatileStarshipUsed : 0}
+                    onUpdateVersatileTransportUsed={(val) => {
+                      if (isMediumShip) updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
+                    }}
+                    bestShipInVerseUsed={isMediumShip ? bestShipInVerseUsed : false}
+                    onUpdateBestShipInVerseUsed={(val) => {
+                      if (isMediumShip) updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
+                    }}
+                    manifest={manifest}
+                    onAssignCrew={handleAssignLocation}
+                    onToggleTurn={handleToggleTurnTaken}
+                    onAddStatus={handleAddStatus}
+                    onUpdateSystemDamageLevel={(lvl) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
+                      }))
+                    }
+                  />
+                ) : active === "Suites" ? (
+                  <SuitesStation
+                    shipConfig={effectiveShipConfig}
+                    installedSuites={installedSuites}
+                    manifest={manifest}
+                    onAssignLocation={handleAssignLocation}
+                    onToggleTurn={handleToggleTurnTaken}
+                  />
+                ) : active === "Ship Modifications" ? (
+                  <ShipModifications
+                    installedMods={installedMods}
+                    installedSuites={installedSuites}
+                    onInstallMod={handleInstallMod}
+                    onRemoveMod={handleRemoveMod}
+                    onUpdateSuites={handleUpdateSuites}
+                    shipConfig={effectiveShipConfig}
+                    maxMods={effectiveShipConfig.modSlots}
+                  />
+                ) : active === "Cargo" ? (
+                  <CargoStation
+                    installedMods={installedMods}
+                    installedSuites={installedSuites}
+                    maxCapacityTons={effectiveShipConfig.cargoCapacity}
+                    cargoRations={cargoRations}
+                    onUpdateRations={(newRations) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        cargoRations:
+                          typeof newRations === "function"
+                            ? newRations(prev.cargoRations)
+                            : newRations,
+                      }))
+                    }
+                    manifest={manifest}
+                    currentDay={currentDay}
+                  />
+                ) : active === "Communications" ? (
+                  <CommunicationsStation
+                    availablePowerDice={stationPools["communications"] ?? availablePowerDice}
+                    maxPowerDice={shipConfig.maxPowerDice}
+                    powerDieType={shipConfig.powerDieType}
+                    onConsumePowerDice={(amt) => handleConsumeStationPower("communications", amt)}
+                    impressMod={effectiveSkills.impress ?? 0}
+                    interfereMod={effectiveSkills.interfere ?? 0}
+                    menaceMod={effectiveSkills.menace ?? 0}
+                    swindleMod={effectiveSkills.swindle ?? 0}
+                    shipConfig={effectiveShipConfig}
+                    installedMods={installedMods}
+                    onRemoveMod={handleRemoveMod}
+                    stationPools={stationPools}
+                    onUpdateStationPools={(newPools) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        stationPools:
+                          typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                      }))
+                    }
+                    sharedPoolDice={sharedPoolDice}
+                    onUpdateSharedPool={(newPool) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        sharedPoolDice:
+                          typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                      }))
+                    }
+                    standingByUsed={isSmallShip ? standingByUsed : false}
+                    onUseStandingBy={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+                    }}
+                    leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
+                    onUseLeafOnTheWind={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+                    }}
+                    versatileTransportUsed={isMediumShip ? versatileStarshipUsed : 0}
+                    onUpdateVersatileTransportUsed={(val) => {
+                      if (isMediumShip) updateRoomData((prev) => ({ ...prev, versatileStarshipUsed: val }))
+                    }}
+                    bestShipInVerseUsed={isMediumShip ? bestShipInVerseUsed : false}
+                    onUpdateBestShipInVerseUsed={(val) => {
+                      if (isMediumShip) updateRoomData((prev) => ({ ...prev, bestShipInVerseUsed: val }))
+                    }}
+                    systemDamageLevel={systemDamageLevel}
+                    isDisabled={isDisabled}
+                    manifest={manifest}
+                    onAssignCrew={handleAssignLocation}
+                    onToggleTurn={handleToggleTurnTaken}
+                  />
+                ) : active === "Finance" ? (
+                  <FinanceStation
+                    externalShipTier={shipConfig.tier}
+                    onUpgradePurchased={(newTier) => {
+                      updateRoomData((prev) => ({ ...prev, pendingTier: newTier }))
+                      setActive("Ship Setup")
+                    }}
+                    onUpdateTier={(newTier) => {
+                      updateRoomData((prev) => ({
+                        ...prev,
                         shipConfig: {
                           ...prev.shipConfig,
-                          tier: targetTier,
-                          tierRolls: updatedRolls,
-                          roleSpecialization:
-                            targetTier < 2 ? null : prev.shipConfig.roleSpecialization,
-                          roleMastery: targetTier < 4 ? null : prev.shipConfig.roleMastery,
-                          extraSuiteCapacity:
-                            targetTier < 2 ? 0 : prev.shipConfig.extraSuiteCapacity,
+                          tier: newTier,
                         },
+                      }))
+                    }}
+                    onTierReverted={(targetTier) => {
+                      updateRoomData((prev) => {
+                        const updatedRolls = { ...prev.shipConfig.tierRolls }
+                        for (let t = prev.shipConfig.tier; t > targetTier; t--) {
+                          delete updatedRolls[t]
+                        }
+
+                        const revertSmallSurges = targetTier < 1
+                        const revertMediumSurges = targetTier < 1
+
+                        return {
+                          ...prev,
+                          pinpointStrikesUsed: revertSmallSurges ? 0 : prev.pinpointStrikesUsed,
+                          versatileSnubfighterUsed: targetTier < 3 ? 0 : prev.versatileSnubfighterUsed,
+                          standingByUsed: targetTier < 4 ? false : prev.standingByUsed,
+                          leafOnTheWindUsed: targetTier < 5 ? false : prev.leafOnTheWindUsed,
+                          evasiveManeuversUsed: revertMediumSurges ? 0 : prev.evasiveManeuversUsed,
+                          versatileStarshipUsed: targetTier < 3 ? 0 : prev.versatileStarshipUsed,
+                          adaptiveArmorUsed: targetTier < 4 ? 0 : prev.adaptiveArmorUsed,
+                          bestShipInVerseUsed: targetTier < 5 ? false : prev.bestShipInVerseUsed,
+                          shipConfig: {
+                            ...prev.shipConfig,
+                            tier: targetTier,
+                            tierRolls: updatedRolls,
+                            roleSpecialization:
+                              targetTier < 2 ? null : prev.shipConfig.roleSpecialization,
+                            roleMastery: targetTier < 4 ? null : prev.shipConfig.roleMastery,
+                            extraSuiteCapacity:
+                              targetTier < 2 ? 0 : prev.shipConfig.extraSuiteCapacity,
+                          },
+                        }
+                      })
+                    }}
+                    onPaymentSettlement={(chartsIncluded?: boolean, ordnanceIncluded?: boolean) => {
+                      updateRoomData((prev) => {
+                        const updatedOrdnance = ordnanceIncluded
+                          ? prev.ordnanceList.map((item) => ({
+                              ...item,
+                              currentReserve: item.currentReserve + item.requisitionQty,
+                              requisitionQty: 0,
+                            }))
+                          : prev.ordnanceList
+
+                        const nextLastAstrogation =
+                          (chartsIncluded !== false && externalPendingCharts > 0) ||
+                          chartsIncluded === true
+                            ? prev.currentDay
+                            : prev.lastAstrogationDay
+
+                        const clearedStatuses = prev.shipStatuses.filter(
+                          (s) =>
+                            !s.duration?.toLowerCase().includes("refit") &&
+                            !s.id?.toLowerCase().includes("mishap")
+                        )
+
+                        return {
+                          ...prev,
+                          spentHullDice: 0,
+                          currentFuel: prev.maxFuel,
+                          versatileSnubfighterUsed: 0,
+                          evasiveManeuversUsed: 0,
+                          versatileStarshipUsed: 0,
+                          adaptiveArmorUsed: 0,
+                          lastAstrogationDay: nextLastAstrogation,
+                          ordnanceList: updatedOrdnance,
+                          shipStatuses: clearedStatuses,
+                        }
+                      })
+                    }}
+                    transactions={transactions}
+                    onAddTransaction={handleAddTransaction}
+                    currentDay={currentDay}
+                    installedMods={installedMods}
+                    externalBaseShipCost={shipConfig.shipCost}
+                    externalShipCost={shipConfig.shipCost}
+                    externalPaidAmount={shipConfig.paidAmount}
+                    maxHullPoints={shipConfig.baseHull}
+                    spentHullDice={spentHullDice}
+                    shipSize={(shipConfig.size?.toLowerCase() as any) || "medium"}
+                    isUsedCondition={effectiveIsUsed}
+                    onUpdateUsedCondition={handleUpdateUsedConditionBridge}
+                    currentFuel={currentFuel}
+                    maxFuel={effectiveShipConfig.fuelCapacity}
+                    externalPendingCharts={externalPendingCharts}
+                    pendingOrdnanceCost={pendingOrdnanceCost}
+                    pendingOrdnanceItems={pendingOrdnanceItems}
+                    onRestockRations={(qty) =>
+                      updateRoomData((prev) => ({ ...prev, cargoRations: prev.cargoRations + qty }))
+                    }
+                  />
+                ) : active === "Engines" ? (
+                  <EnginesStation
+                    isPoweredOn={isPoweredOn}
+                    onSetPoweredOn={handleSetPoweredOn}
+                    currentFuel={currentFuel}
+                    onFuelChange={(fuel) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        currentFuel: typeof fuel === "function" ? fuel(prev.currentFuel) : fuel,
+                      }))
+                    }
+                    maxFuel={effectiveShipConfig.fuelCapacity}
+                    currentDay={currentDay}
+                    onUpdateDay={handleAdvanceCampaignDay}
+                    lastAstrogationSyncDay={lastAstrogationDay}
+                    activeJourney={activeJourney}
+                    availablePowerDice={stationPools["engines"] ?? availablePowerDice}
+                    maxPowerDice={shipConfig.maxPowerDice}
+                    powerDieType={shipConfig.powerDieType}
+                    onConsumePowerDice={(amt) => handleConsumeStationPower("engines", amt)}
+                    onNavigate={(station) => {
+                      if (station.toLowerCase() === "navcomputer") {
+                        setActive("Navcomputer")
                       }
-                    })
-                  }}
-                  onPaymentSettlement={(chartsIncluded?: boolean, ordnanceIncluded?: boolean) => {
-                    updateRoomData((prev) => {
-                      const updatedOrdnance = ordnanceIncluded
-                        ? prev.ordnanceList.map((item) => ({
-                            ...item,
-                            currentReserve: item.currentReserve + item.requisitionQty,
-                            requisitionQty: 0,
-                          }))
-                        : prev.ordnanceList
-
-                      const nextLastAstrogation =
-                        (chartsIncluded !== false && externalPendingCharts > 0) ||
-                        chartsIncluded === true
-                          ? prev.currentDay
-                          : prev.lastAstrogationDay
-
-                      const clearedStatuses = prev.shipStatuses.filter(
-                        (s) =>
-                          !s.duration?.toLowerCase().includes("refit") &&
-                          !s.id?.toLowerCase().includes("mishap")
-                      )
-
-                      return {
+                    }}
+                    shipConfig={effectiveShipConfig}
+                    installedMods={installedMods}
+                    onRemoveMod={handleRemoveMod}
+                    onUpdateMod={handleUpdateMod}
+                    ordnanceList={ordnanceList}
+                    onUpdateOrdnanceList={(newList) =>
+                      updateRoomData((prev) => ({
                         ...prev,
-                        spentHullDice: 0,
-                        currentFuel: prev.maxFuel,
-                        versatileSnubfighterUsed: 0,
-                        evasiveManeuversUsed: 0,
-                        versatileStarshipUsed: 0,
-                        adaptiveArmorUsed: 0,
-                        lastAstrogationDay: nextLastAstrogation,
-                        ordnanceList: updatedOrdnance,
-                        shipStatuses: clearedStatuses,
+                        ordnanceList:
+                          typeof newList === "function" ? newList(prev.ordnanceList) : newList,
+                      }))
+                    }
+                    stationPools={stationPools}
+                    onUpdateStationPools={(newPools) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        stationPools:
+                          typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                      }))
+                    }
+                    sharedPoolDice={sharedPoolDice}
+                    onUpdateSharedPool={(newPool) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        sharedPoolDice:
+                          typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                      }))
+                    }
+                    pinpointStrikesUsed={isSmallShip ? pinpointStrikesUsed : 0}
+                    onUpdatePinpointStrikesUsed={(val) => {
+                      if (isSmallShip) {
+                        updateRoomData((prev) => ({
+                          ...prev,
+                          pinpointStrikesUsed:
+                            typeof val === "function" ? val(prev.pinpointStrikesUsed) : val,
+                        }))
                       }
-                    })
-                  }}
-                  transactions={transactions}
-                  onAddTransaction={handleAddTransaction}
-                  currentDay={currentDay}
-                  installedMods={installedMods}
-                  externalBaseShipCost={shipConfig.shipCost}
-                  externalShipCost={shipConfig.shipCost}
-                  externalPaidAmount={shipConfig.paidAmount}
-                  maxHullPoints={shipConfig.baseHull}
-                  spentHullDice={spentHullDice}
-                  shipSize={(shipConfig.size?.toLowerCase() as any) || "medium"}
-                  isUsedCondition={effectiveIsUsed}
-                  onUpdateUsedCondition={handleUpdateUsedConditionBridge}
-                  currentFuel={currentFuel}
-                  maxFuel={effectiveShipConfig.fuelCapacity}
-                  externalPendingCharts={externalPendingCharts}
-                  pendingOrdnanceCost={pendingOrdnanceCost}
-                  pendingOrdnanceItems={pendingOrdnanceItems}
-                  onRestockRations={(qty) =>
-                    updateRoomData((prev) => ({ ...prev, cargoRations: prev.cargoRations + qty }))
-                  }
-                />
-              ) : active === "Engines" ? (
-                <EnginesStation
-                  isPoweredOn={isPoweredOn}
-                  onSetPoweredOn={handleSetPoweredOn}
-                  currentFuel={currentFuel}
-                  onFuelChange={(fuel) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      currentFuel: typeof fuel === "function" ? fuel(prev.currentFuel) : fuel,
-                    }))
-                  }
-                  maxFuel={effectiveShipConfig.fuelCapacity}
-                  currentDay={currentDay}
-                  onUpdateDay={handleAdvanceCampaignDay}
-                  lastAstrogationSyncDay={lastAstrogationDay}
-                  activeJourney={activeJourney}
-                  availablePowerDice={stationPools["engines"] ?? availablePowerDice}
-                  maxPowerDice={shipConfig.maxPowerDice}
-                  powerDieType={shipConfig.powerDieType}
-                  onConsumePowerDice={(amt) => handleConsumeStationPower("engines", amt)}
-                  onNavigate={(station) => {
-                    if (station.toLowerCase() === "navcomputer") {
-                      setActive("Navcomputer")
-                    }
-                  }}
-                  shipConfig={effectiveShipConfig}
-                  installedMods={installedMods}
-                  onRemoveMod={handleRemoveMod}
-                  onUpdateMod={handleUpdateMod}
-                  ordnanceList={ordnanceList}
-                  onUpdateOrdnanceList={(newList) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      ordnanceList:
-                        typeof newList === "function" ? newList(prev.ordnanceList) : newList,
-                    }))
-                  }
-                  stationPools={stationPools}
-                  onUpdateStationPools={(newPools) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      stationPools:
-                        typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
-                    }))
-                  }
-                  sharedPoolDice={sharedPoolDice}
-                  onUpdateSharedPool={(newPool) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      sharedPoolDice:
-                        typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
-                    }))
-                  }
-                  pinpointStrikesUsed={isSmallShip ? pinpointStrikesUsed : 0}
-                  onUpdatePinpointStrikesUsed={(val) => {
-                    if (isSmallShip) {
-                      updateRoomData((prev) => ({
-                        ...prev,
-                        pinpointStrikesUsed:
-                          typeof val === "function" ? val(prev.pinpointStrikesUsed) : val,
-                      }))
-                    }
-                  }}
-                  versatileSnubfighterUsed={isSmallShip ? versatileSnubfighterUsed : 0}
-                  onUpdateVersatileSnubfighterUsed={(val) => {
-                    if (isSmallShip) {
-                      updateRoomData((prev) => ({
-                        ...prev,
-                        versatileSnubfighterUsed:
-                          typeof val === "function" ? val(prev.versatileSnubfighterUsed) : val,
-                      }))
-                    }
-                  }}
-                  evasiveManeuversUsed={isMediumShip ? evasiveManeuversUsed : 0}
-                  onUpdateEvasiveManeuversUsed={(val) => {
-                    if (isMediumShip) {
-                      updateRoomData((prev) => ({
-                        ...prev,
-                        evasiveManeuversUsed:
-                          typeof val === "function" ? val(prev.evasiveManeuversUsed) : val,
-                      }))
-                    }
-                  }}
-                  adaptiveArmorUsed={isMediumShip ? adaptiveArmorUsed : 0}
-                  onUpdateAdaptiveArmorUsed={(val) => {
-                    if (isMediumShip) {
-                      updateRoomData((prev) => ({
-                        ...prev,
-                        adaptiveArmorUsed:
-                          typeof val === "function" ? val(prev.adaptiveArmorUsed) : val,
-                      }))
-                    }
-                  }}
-                  onRecharge={() =>
-                    updateRoomData((prev) => ({ ...prev, pinpointStrikesUsed: 0 }))
-                  }
-                  isEngineBoosted={engineSpeedBoostTurns > 0}
-                  engineBoostTurnsRemaining={engineSpeedBoostTurns}
-                  standingByUsed={isSmallShip ? standingByUsed : false}
-                  onUseStandingBy={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
-                  }}
-                  leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
-                  onUseLeafOnTheWind={() => {
-                    if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
-                  }}
-                  sFoilsMode={sFoilsMode}
-                  onToggleSFoils={(mode) =>
-                    updateRoomData((prev) => ({ ...prev, sFoilsMode: mode }))
-                  }
-                  currentHull={totalHull.current}
-                  maxHull={totalHull.max}
-                  currentShields={totalShields.current}
-                  maxShields={totalShields.max}
-                  systemDamageLevel={systemDamageLevel}
-                  onUpdateSystemDamageLevel={(lvl) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
-                    }))
-                  }
-                  effectiveSlowedLevel={effectiveSlowedLevel}
-                  manifest={manifest}
-                  onAssignCrew={handleAssignLocation}
-                  onToggleTurn={handleToggleTurnTaken}
-                  tacticalMovement={tacticalMovement}
-                  onSpendMovement={handleSpendMovement}
-                  onResetMovement={handleResetMovement}
-                  isWeaponsBoosted={isWeaponsBoosted}
-                  onConsumeWeaponBoost={() =>
-                    updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: false }))
-                  }
-                  onAddStatus={handleAddStatus}
-                />
-              ) : active === "Navcomputer" ? (
-                <NavcomputerStation
-                  astrogationAdvantage={astrogationAdvantage}
-                  astrogationSkillMod={effectiveSkills.astrogation ?? 0}
-                  currentDay={currentDay}
-                  lastAstrogationSyncDay={lastAstrogationDay}
-                  activeJourney={activeJourney}
-                  onStartJourney={(journey) => {
-                    updateRoomData((prev) => {
-                      const rawReactor = prev.shipConfig?.reactorType ?? "Fuel Cell Reactor"
-                      const reactorLower = rawReactor.toLowerCase()
-                      const fuelMultiplier = reactorLower.includes("ionization")
-                        ? 0.5
-                        : reactorLower.includes("power core")
-                        ? 1.5
-                        : 1.0
-
-                      // SW5e Rule: Debit 1 threshold jump unit on initial jump entry
-                      const initialJumpCost = 1 * fuelMultiplier
-                      const nextFuel = Math.max(0, Math.round((prev.currentFuel - initialJumpCost) * 10) / 10)
-
-                      return {
-                        ...prev,
-                        currentFuel: nextFuel,
-                        activeJourney: journey,
-                        targetDestinationPlanet: journey.destination,
+                    }}
+                    versatileSnubfighterUsed={isSmallShip ? versatileSnubfighterUsed : 0}
+                    onUpdateVersatileSnubfighterUsed={(val) => {
+                      if (isSmallShip) {
+                        updateRoomData((prev) => ({
+                          ...prev,
+                          versatileSnubfighterUsed:
+                            typeof val === "function" ? val(prev.versatileSnubfighterUsed) : val,
+                        }))
                       }
-                    })
-                  }}
-                  onCancelJourney={() => handleCompleteOrCancelJourney(false)}
-                  onArriveAtDestination={() => handleCompleteOrCancelJourney(true)}
-                  onEmergencyDropOut={handleEmergencyDropOut}
-                  currentLocationPlanet={currentLocationPlanet}
-                  onUpdateCurrentLocationPlanet={(planet) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      currentLocationPlanet:
-                        typeof planet === "function" ? planet(prev.currentLocationPlanet) : planet,
-                    }))
-                  }
-                  targetDestinationPlanet={targetDestinationPlanet}
-                  onUpdateTargetDestinationPlanet={(dest) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      targetDestinationPlanet:
-                        typeof dest === "function" ? dest(prev.targetDestinationPlanet) : dest,
-                    }))
-                  }
-                  onBackToEngines={() => setActive("Engines")}
-                  installedMods={installedMods}
-                  onRemoveMod={handleRemoveMod}
-                  onAddStatus={handleAddStatus}
-                  onApplyDirectHullDamage={(amt) => {
-                    setTotalHull((prev) => ({
-                      current: Math.max(0, prev.current - amt),
-                      max: totalHull.max,
-                    }))
-                  }}
-                  shipConfig={effectiveShipConfig}
-                  currentFuel={currentFuel}
-                />
-              ) : active === "GM Station" ? (
-                <GmStation
-                  contacts={sanitizedSensorContacts}
-                  onAddContact={handleAddContact}
-                  onAddContacts={handleAddContacts}
-                  onRemoveContact={handleRemoveContact}
-                  onClearContacts={handleClearContacts}
-                  onToggleReveal={handleToggleReveal}
-                  shipStatuses={shipStatuses}
-                  onAddStatus={handleAddStatus}
-                  onRemoveStatus={handleRemoveStatus}
-                  manifest={manifest}
-                  onToggleTurn={handleToggleTurnTaken}
-                  onUpdateInitiative={handleUpdateInitiative}
-                  onCycleReactor={handleCycleReactor}
-                  onAdvanceCombatRoundWithCycle={handleAdvanceCombatRoundWithCycle}
-                  autoCycleReactorOnTurnEnd={autoCycleReactorOnTurnEnd}
-                  currentHull={totalHull.current}
-                  maxHull={totalHull.max}
-                  onHullChange={(curr, max) => setTotalHull({ current: curr, max })}
-                  currentShields={totalShields.current}
-                  maxShields={totalShields.max}
-                  onShieldChange={(curr, max, temp) => setTotalShields({ current: curr, max, temp })}
-                  systemDamageLevel={systemDamageLevel}
-                  onUpdateSystemDamageLevel={(lvl) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
-                    }))
-                  }
-                  availablePowerDice={availablePowerDice}
-                  onUpdateAvailablePowerDice={(newPower) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      availablePowerDice:
-                        typeof newPower === "function"
-                          ? newPower(prev.availablePowerDice)
-                          : newPower,
-                    }))
-                  }
-                  maxPowerDice={shipConfig.maxPowerDice}
-                  shipConfig={effectiveShipConfig}
-                  stationPools={stationPools}
-                  onUpdateStationPools={(newPools) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      stationPools:
-                        typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
-                    }))
-                  }
-                  sharedPoolDice={sharedPoolDice}
-                  onUpdateSharedPool={(newPool) =>
-                    updateRoomData((prev) => ({
-                      ...prev,
-                      sharedPoolDice:
-                        typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
-                    }))
-                  }
-                  combatState={combatState}
-                  onUpdateCombatState={handleUpdateCombatState}
-                />
-              ) : active === "Codex" ? (
-                <CodexStation />
-              ) : (
-                <OfflineStation name={active} />
-              )}
-            </main>
-          </div>
-        </>
-      )}
+                    }}
+                    evasiveManeuversUsed={isMediumShip ? evasiveManeuversUsed : 0}
+                    onUpdateEvasiveManeuversUsed={(val) => {
+                      if (isMediumShip) {
+                        updateRoomData((prev) => ({
+                          ...prev,
+                          evasiveManeuversUsed:
+                            typeof val === "function" ? val(prev.evasiveManeuversUsed) : val,
+                        }))
+                      }
+                    }}
+                    adaptiveArmorUsed={isMediumShip ? adaptiveArmorUsed : 0}
+                    onUpdateAdaptiveArmorUsed={(val) => {
+                      if (isMediumShip) {
+                        updateRoomData((prev) => ({
+                          ...prev,
+                          adaptiveArmorUsed:
+                            typeof val === "function" ? val(prev.adaptiveArmorUsed) : val,
+                        }))
+                      }
+                    }}
+                    onRecharge={() =>
+                      updateRoomData((prev) => ({ ...prev, pinpointStrikesUsed: 0 }))
+                    }
+                    isEngineBoosted={engineSpeedBoostTurns > 0}
+                    engineBoostTurnsRemaining={engineSpeedBoostTurns}
+                    standingByUsed={isSmallShip ? standingByUsed : false}
+                    onUseStandingBy={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, standingByUsed: true }))
+                    }}
+                    leafOnTheWindUsed={isSmallShip ? leafOnTheWindUsed : false}
+                    onUseLeafOnTheWind={() => {
+                      if (isSmallShip) updateRoomData((prev) => ({ ...prev, leafOnTheWindUsed: true }))
+                    }}
+                    sFoilsMode={sFoilsMode}
+                    onToggleSFoils={(mode) =>
+                      updateRoomData((prev) => ({ ...prev, sFoilsMode: mode }))
+                    }
+                    currentHull={totalHull.current}
+                    maxHull={totalHull.max}
+                    currentShields={totalShields.current}
+                    maxShields={totalShields.max}
+                    systemDamageLevel={systemDamageLevel}
+                    onUpdateSystemDamageLevel={(lvl) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
+                      }))
+                    }
+                    effectiveSlowedLevel={effectiveSlowedLevel}
+                    manifest={manifest}
+                    onAssignCrew={handleAssignLocation}
+                    onToggleTurn={handleToggleTurnTaken}
+                    tacticalMovement={tacticalMovement}
+                    onSpendMovement={handleSpendMovement}
+                    onResetMovement={handleResetMovement}
+                    isWeaponsBoosted={isWeaponsBoosted}
+                    onConsumeWeaponBoost={() =>
+                      updateRoomData((prev) => ({ ...prev, isWeaponsBoosted: false }))
+                    }
+                    onAddStatus={handleAddStatus}
+                  />
+                ) : active === "Navcomputer" ? (
+                  <NavcomputerStation
+                    astrogationAdvantage={astrogationAdvantage}
+                    astrogationSkillMod={effectiveSkills.astrogation ?? 0}
+                    currentDay={currentDay}
+                    lastAstrogationSyncDay={lastAstrogationDay}
+                    activeJourney={activeJourney}
+                    onStartJourney={(journey) => {
+                      updateRoomData((prev) => {
+                        const rawReactor = prev.shipConfig?.reactorType ?? "Fuel Cell Reactor"
+                        const reactorLower = rawReactor.toLowerCase()
+                        const fuelMultiplier = reactorLower.includes("ionization")
+                          ? 0.5
+                          : reactorLower.includes("power core")
+                          ? 1.5
+                          : 1.0
+
+                        // SW5e Rule: Debit 1 threshold jump unit on initial jump entry
+                        const initialJumpCost = 1 * fuelMultiplier
+                        const nextFuel = Math.max(0, Math.round((prev.currentFuel - initialJumpCost) * 10) / 10)
+
+                        return {
+                          ...prev,
+                          currentFuel: nextFuel,
+                          activeJourney: journey,
+                          targetDestinationPlanet: journey.destination,
+                        }
+                      })
+                    }}
+                    onCancelJourney={() => handleCompleteOrCancelJourney(false)}
+                    onArriveAtDestination={() => handleCompleteOrCancelJourney(true)}
+                    onEmergencyDropOut={handleEmergencyDropOut}
+                    currentLocationPlanet={currentLocationPlanet}
+                    onUpdateCurrentLocationPlanet={(planet) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        currentLocationPlanet:
+                          typeof planet === "function" ? planet(prev.currentLocationPlanet) : planet,
+                      }))
+                    }
+                    targetDestinationPlanet={targetDestinationPlanet}
+                    onUpdateTargetDestinationPlanet={(dest) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        targetDestinationPlanet:
+                          typeof dest === "function" ? dest(prev.targetDestinationPlanet) : dest,
+                      }))
+                    }
+                    onBackToEngines={() => setActive("Engines")}
+                    installedMods={installedMods}
+                    onRemoveMod={handleRemoveMod}
+                    onAddStatus={handleAddStatus}
+                    onApplyDirectHullDamage={(amt) => {
+                      setTotalHull((prev) => ({
+                        current: Math.max(0, prev.current - amt),
+                        max: totalHull.max,
+                      }))
+                    }}
+                    shipConfig={effectiveShipConfig}
+                    currentFuel={currentFuel}
+                  />
+                ) : active === "GM Station" ? (
+                  <GmStation
+                    contacts={sanitizedSensorContacts}
+                    onAddContact={handleAddContact}
+                    onAddContacts={handleAddContacts}
+                    onRemoveContact={handleRemoveContact}
+                    onClearContacts={handleClearContacts}
+                    onToggleReveal={handleToggleReveal}
+                    shipStatuses={shipStatuses}
+                    onAddStatus={handleAddStatus}
+                    onRemoveStatus={handleRemoveStatus}
+                    manifest={manifest}
+                    onToggleTurn={handleToggleTurnTaken}
+                    onUpdateInitiative={handleUpdateInitiative}
+                    onCycleReactor={handleCycleReactor}
+                    onAdvanceCombatRoundWithCycle={handleAdvanceCombatRoundWithCycle}
+                    autoCycleReactorOnTurnEnd={autoCycleReactorOnTurnEnd}
+                    currentHull={totalHull.current}
+                    maxHull={totalHull.max}
+                    onHullChange={(curr, max) => setTotalHull({ current: curr, max })}
+                    currentShields={totalShields.current}
+                    maxShields={totalShields.max}
+                    onShieldChange={(curr, max, temp) => setTotalShields({ current: curr, max, temp })}
+                    systemDamageLevel={systemDamageLevel}
+                    onUpdateSystemDamageLevel={(lvl) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        systemDamageLevel: typeof lvl === "function" ? lvl(prev.systemDamageLevel ?? 0) : lvl,
+                      }))
+                    }
+                    availablePowerDice={availablePowerDice}
+                    onUpdateAvailablePowerDice={(newPower) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        availablePowerDice:
+                          typeof newPower === "function"
+                            ? newPower(prev.availablePowerDice)
+                            : newPower,
+                      }))
+                    }
+                    maxPowerDice={shipConfig.maxPowerDice}
+                    shipConfig={effectiveShipConfig}
+                    stationPools={stationPools}
+                    onUpdateStationPools={(newPools) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        stationPools:
+                          typeof newPools === "function" ? newPools(prev.stationPools) : newPools,
+                      }))
+                    }
+                    sharedPoolDice={sharedPoolDice}
+                    onUpdateSharedPool={(newPool) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        sharedPoolDice:
+                          typeof newPool === "function" ? newPool(prev.sharedPoolDice) : newPool,
+                      }))
+                    }
+                    combatState={combatState}
+                    onUpdateCombatState={handleUpdateCombatState}
+                  />
+                ) : active === "Codex" ? (
+                  <CodexStation />
+                ) : (
+                  <OfflineStation name={active} />
+                )}
+              </main>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { ShipStats } from "./ship-stats"
 import { CombatResources } from "./combat-resources"
 import { StationModifications, type Modification } from "./ship-modifications"
@@ -26,7 +26,9 @@ import {
   Send,
   Target,
   Sparkles,
-  AlertOctagon
+  AlertOctagon,
+  Eye,
+  BellRing
 } from "lucide-react"
 import type { SensorContact } from "./gm-station"
 import type { ShipConfig } from "./ship-setup"
@@ -256,18 +258,6 @@ export function SensorsStation({
     setMaximizedCard(null)
   }
 
-  const handleSaveCustomPreset = () => {
-    const name = window.prompt("Enter name for this custom sensors layout:", "Custom Sensors Setup")
-    if (!name) return
-    if (typeof window !== "undefined") {
-      try {
-        const key = `sw5e_sensors_preset_${Date.now()}`
-        localStorage.setItem(key, JSON.stringify({ id: key, name, activeCards: openCards }))
-        alert(`Preset '${name}' saved to this device!`)
-      } catch {}
-    }
-  }
-
   // --- CREW ASSIGNMENT EXTRACTION ---
   const assignedCrew = useMemo(() => {
     return manifest
@@ -297,61 +287,6 @@ export function SensorsStation({
   const hasVersatileTransport = isMedium && shipTier >= 3
   const versatileMaxUses = 2 * shipTier
   const hasBestShip = isMedium && shipTier >= 5
-
-  // Scan States & Mastery Choice workflow
-  const [activeScan, setActiveScan] = useState(false)
-  const [scanDice, setScanDice] = useState<[number, number]>([10, 10])
-  const [scanState, setScanState] = useState<"idle" | "choice" | "reroll_preview" | "manual" | "done">("idle")
-  const [scanRerollLabel, setScanRerollLabel] = useState<string>("")
-  const [manualScanInput, setManualScanInput] = useState<string>("")
-  const [lastRollResult, setLastRollResult] = useState<{
-    roll: number
-    total: number
-    discoveredCount: number
-    tierUsed: string
-  } | null>(null)
-
-  // Probe States & Mastery Choice workflow
-  const [activeProbe, setActiveProbe] = useState(false)
-  const [probeDice, setProbeDice] = useState<[number, number]>([10, 10])
-  const [probeState, setProbeState] = useState<"idle" | "choice" | "reroll_preview" | "done">("idle")
-  const [rerollActionLabel, setRerollActionLabel] = useState<string>("")
-  const [probeFinalResult, setProbeFinalResult] = useState<{
-    roll: number
-    total: number
-    tierUsed: string
-  } | null>(null)
-
-  // Clear Contact Warning State
-  const [clearingContactId, setClearingContactId] = useState<string | null>(null)
-
-  // Hardware Feature Detection
-  const hasScannerPremium = installedMods.some((m) => m.name.toUpperCase().includes("SCANNER, PREMIUM"))
-  const hasScannerPrototype = installedMods.some((m) => m.name.toUpperCase().includes("SCANNER, PROTOTYPE"))
-  const hasScannerRenowned = installedMods.some((m) => m.name.toUpperCase().includes("SCANNER, RENOWNED"))
-  const hasFlarePods = installedMods.some((m) => m.name.toUpperCase().includes("FLARE PODS"))
-  const hasBuzzDroids = installedMods.some((m) => m.name.toUpperCase().includes("BUZZ DROID CLOUD"))
-  const hasSensorDampener = installedMods.some((m) => m.name.toUpperCase().includes("SENSOR DAMPENER"))
-  const hasShieldDisruptor = installedMods.some((m) => m.name.toUpperCase().includes("SHIELD DISRUPTOR"))
-  const hasThreatTracker = installedMods.some((m) => m.name.toUpperCase().includes("THREAT TRACKER"))
-  const hasStealthDevice = installedMods.some((m) => m.name.toUpperCase().includes("STEALTH DEVICE"))
-  const hasActiveCamouflage = installedMods.some((m) => m.name.toUpperCase().includes("ACTIVE CAMOUFLAGE"))
-  const hasCloakingDevice = installedMods.some((m) => m.name.toUpperCase().includes("CLOAKING DEVICE"))
-
-  // Synchronized or Local Tactical Sensor Charge Trackers
-  const [localEcmUses, setLocalEcmUses] = useState<SensorsEcmState>({
-    flares: 0,
-    buzzDroids: 0,
-    dampener: 0,
-    disruptor: 0,
-    threatTracker: 0,
-  })
-
-  const currentEcmUses = externalEcmUses ?? localEcmUses
-  const updateEcmUses = onUpdateEcmUses ?? setLocalEcmUses
-
-  const [stealthActive, setStealthActive] = useState<boolean>(false)
-  const [tacticalFeedback, setTacticalFeedback] = useState<string | null>(null)
 
   const powerCoupling = shipConfig?.powerCoupling ?? shipConfig?.couplingType ?? "Direct Power Coupling"
   const isDistributed = powerCoupling.toLowerCase().includes("distributed")
@@ -463,9 +398,119 @@ export function SensorsStation({
 
   const baseScanSkill = shipConfig?.skills?.scan ?? sensorSkillMod ?? (wisMod + profBonus)
   const calculatedScanSkill = baseScanSkill + scoutBonus
+  const passiveScanPerception = 10 + calculatedScanSkill
 
   const baseProbeSkill = shipConfig?.skills?.probe ?? probeSkillMod ?? (intMod + profBonus)
   const calculatedProbeSkill = baseProbeSkill + scoutBonus
+
+  // --- PASSIVE SCAN AUTOMATION & FLASHING ACKNOWLEDGMENT SYSTEM ---
+  const [unacknowledgedContactIds, setUnacknowledgedContactIds] = useState<string[]>([])
+  const knownContactIdsRef = useRef<Set<string>>(new Set())
+
+  // Automatically sweep against passive perception if array is not blinded
+  useEffect(() => {
+    if (isBlinded) return
+
+    contacts.forEach((contact) => {
+      if (!contact.isRevealed && contact.scanDc <= passiveScanPerception) {
+        onUpdateContact?.(contact.id, { isRevealed: true })
+      }
+    })
+  }, [contacts, isBlinded, passiveScanPerception, onUpdateContact])
+
+  // Track newly revealed contacts to trigger the alert/flashing pulse
+  useEffect(() => {
+    const newlyDiscovered: string[] = []
+
+    contacts.forEach((contact) => {
+      if (contact.isRevealed) {
+        if (!knownContactIdsRef.current.has(contact.id)) {
+          knownContactIdsRef.current.add(contact.id)
+          newlyDiscovered.push(contact.id)
+        }
+      } else {
+        knownContactIdsRef.current.delete(contact.id)
+      }
+    })
+
+    if (newlyDiscovered.length > 0) {
+      setUnacknowledgedContactIds((prev) => Array.from(new Set([...prev, ...newlyDiscovered])))
+      if (soundEnabled) {
+        playSubtleEngage()
+        triggerTactilePulse("heavy")
+      }
+    }
+  }, [contacts, soundEnabled])
+
+  const handleAcknowledgeContact = (id: string) => {
+    if (soundEnabled) playFlatGlassClick()
+    setUnacknowledgedContactIds((prev) => prev.filter((cId) => cId !== id))
+  }
+
+  const handleAcknowledgeAllContacts = () => {
+    if (soundEnabled) playFlatGlassClick()
+    setUnacknowledgedContactIds([])
+  }
+
+  // Filter revealed contacts strictly for player display
+  const revealedContacts = useMemo(() => {
+    return contacts.filter((c) => c.isRevealed)
+  }, [contacts])
+
+  // Scan States & Mastery Choice workflow
+  const [activeScan, setActiveScan] = useState(false)
+  const [scanDice, setScanDice] = useState<[number, number]>([10, 10])
+  const [scanState, setScanState] = useState<"idle" | "choice" | "reroll_preview" | "manual" | "done">("idle")
+  const [scanRerollLabel, setScanRerollLabel] = useState<string>("")
+  const [manualScanInput, setManualScanInput] = useState<string>("")
+  const [lastRollResult, setLastRollResult] = useState<{
+    roll: number
+    total: number
+    discoveredCount: number
+    tierUsed: string
+  } | null>(null)
+
+  // Probe States & Mastery Choice workflow
+  const [activeProbe, setActiveProbe] = useState(false)
+  const [probeDice, setProbeDice] = useState<[number, number]>([10, 10])
+  const [probeState, setProbeState] = useState<"idle" | "choice" | "reroll_preview" | "done">("idle")
+  const [rerollActionLabel, setRerollActionLabel] = useState<string>("")
+  const [probeFinalResult, setProbeFinalResult] = useState<{
+    roll: number
+    total: number
+    tierUsed: string
+  } | null>(null)
+
+  // Clear Contact Warning State
+  const [clearingContactId, setClearingContactId] = useState<string | null>(null)
+
+  // Hardware Feature Detection
+  const hasScannerPremium = installedMods.some((m) => m.name.toUpperCase().includes("SCANNER, PREMIUM"))
+  const hasScannerPrototype = installedMods.some((m) => m.name.toUpperCase().includes("SCANNER, PROTOTYPE"))
+  const hasScannerRenowned = installedMods.some((m) => m.name.toUpperCase().includes("SCANNER, RENOWNED"))
+  const hasFlarePods = installedMods.some((m) => m.name.toUpperCase().includes("FLARE PODS"))
+  const hasBuzzDroids = installedMods.some((m) => m.name.toUpperCase().includes("BUZZ DROID CLOUD"))
+  const hasSensorDampener = installedMods.some((m) => m.name.toUpperCase().includes("SENSOR DAMPENER"))
+  const hasShieldDisruptor = installedMods.some((m) => m.name.toUpperCase().includes("SHIELD DISRUPTOR"))
+  const hasThreatTracker = installedMods.some((m) => m.name.toUpperCase().includes("THREAT TRACKER"))
+  const hasStealthDevice = installedMods.some((m) => m.name.toUpperCase().includes("STEALTH DEVICE"))
+  const hasActiveCamouflage = installedMods.some((m) => m.name.toUpperCase().includes("ACTIVE CAMOUFLAGE"))
+  const hasCloakingDevice = installedMods.some((m) => m.name.toUpperCase().includes("CLOAKING DEVICE"))
+
+  // Synchronized or Local Tactical Sensor Charge Trackers
+  const [localEcmUses, setLocalEcmUses] = useState<SensorsEcmState>({
+    flares: 0,
+    buzzDroids: 0,
+    dampener: 0,
+    disruptor: 0,
+    threatTracker: 0,
+  })
+
+  const currentEcmUses = externalEcmUses ?? localEcmUses
+  const updateEcmUses = onUpdateEcmUses ?? setLocalEcmUses
+
+  const [stealthActive, setStealthActive] = useState<boolean>(false)
+  const [tacticalFeedback, setTacticalFeedback] = useState<string | null>(null)
 
   const handleInitiateActiveScan = () => {
     if (activeScan || isBlinded) return
@@ -719,6 +764,8 @@ export function SensorsStation({
     }
   }
 
+  const hasUnacknowledged = unacknowledgedContactIds.length > 0
+
   // RENDER DOCKED SNAPSHOT CARD TILE
   const renderSnapshotCard = (
     id: SensorsCardId,
@@ -800,6 +847,12 @@ export function SensorsStation({
             </span>
           )}
 
+          {hasUnacknowledged && (
+            <span className="rounded border border-amber-400/80 bg-amber-500/20 px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider text-amber-300 animate-pulse flex items-center gap-1 shadow-[0_0_10px_rgba(251,191,36,0.3)]">
+              <BellRing className="w-3 h-3 text-amber-400" /> NEW CONTACT DETECTED
+            </span>
+          )}
+
           {hasScannerRenowned ? (
             <span className="rounded border border-purple-400/50 bg-purple-950/40 px-2 py-0.5 text-[9px] font-mono font-bold text-purple-300">
               TRUESIGHT (1000 FT)
@@ -860,7 +913,6 @@ export function SensorsStation({
           >
             Clear All
           </button>
-          
         </div>
 
         <div className="flex items-center gap-2">
@@ -971,7 +1023,7 @@ export function SensorsStation({
           "arrayStatus",
           "Array Status",
           isBlinded ? "BLINDED" : hasScannerRenowned ? "Truesight" : hasScannerPremium ? "Blindsight" : "Standard",
-          isBlinded ? "Sensors Jammed" : "Detection Ready",
+          isBlinded ? "Sensors Jammed" : `Passive: ${passiveScanPerception}`,
           <Radar className="w-3 h-3 text-cyan-neon" />,
           isBlinded ? "text-red-400 animate-pulse" : "text-cyan-neon"
         )}
@@ -979,7 +1031,11 @@ export function SensorsStation({
         {renderSnapshotCard(
           "powerDice",
           "Sensors Power",
-          isDistributed ? `${currentStationDice}/2 Dice` : `${effectiveAvailable}/${effectiveMax} Dice`,
+          isDirect
+            ? `${availablePowerDice}/${maxPowerDice} Dice`
+            : isDistributed
+            ? `${currentStationDice}/2 Dice`
+            : `${currentStationDice}/1 Die`,
           isHubAndSpoke ? `${sharedPoolDice}/2 Shared` : powerCoupling.replace(" Power Coupling", ""),
           <Zap className="w-3 h-3 text-amber-400" />,
           "text-amber-300"
@@ -989,7 +1045,7 @@ export function SensorsStation({
           "activeScan",
           "Active Scan",
           `+${calculatedScanSkill} Mod`,
-          scanMasteryBadge ? `Tier: ${scanMasteryBadge}` : "Standard Sweep",
+          `Pass: ${passiveScanPerception} • ${scanMasteryBadge ? `Tier ${scanMasteryBadge}` : "Sweep"}`,
           <Target className="w-3 h-3 text-cyan-neon" />,
           "text-cyan-neon"
         )}
@@ -1006,10 +1062,10 @@ export function SensorsStation({
         {renderSnapshotCard(
           "contacts",
           "Sector Contacts",
-          `${contacts.filter(c => c.isRevealed).length} Revealed`,
-          `${contacts.length} Tracked`,
-          <Radio className="w-3 h-3 text-cyan-neon" />,
-          contacts.filter(c => c.isRevealed).length > 0 ? "text-cyan-neon font-bold" : "text-slate-400"
+          `${revealedContacts.length} Detected`,
+          hasUnacknowledged ? `${unacknowledgedContactIds.length} ALERT` : revealedContacts.length > 0 ? "Tracking" : "None Detected",
+          <Radio className={`w-3 h-3 ${hasUnacknowledged ? "text-amber-400 animate-pulse" : "text-cyan-neon"}`} />,
+          hasUnacknowledged ? "text-amber-300 animate-pulse font-bold" : revealedContacts.length > 0 ? "text-cyan-neon font-bold" : "text-slate-400"
         )}
 
         {renderSnapshotCard(
@@ -1120,15 +1176,16 @@ export function SensorsStation({
                         </span>
                       </div>
                       <div className="p-2.5 rounded border border-bridge-border bg-black/40">
-                        <span className="text-[9px] text-muted-foreground uppercase block">Array Operational Mode</span>
-                        <span className={`font-bold font-mono ${isBlinded ? "text-red-400" : "text-emerald-400"}`}>
-                          {isBlinded ? "BLINDED (LOCKED)" : "ACTIVE DETECTION GRID"}
+                        <span className="text-[9px] text-muted-foreground uppercase block">Passive Scan Perception</span>
+                        <span className="font-bold text-amber-300 font-mono flex items-center gap-1">
+                          <Eye className="w-3.5 h-3.5 text-amber-400" />
+                          {passiveScanPerception} (Auto-Detect DC ≤ {passiveScanPerception})
                         </span>
                       </div>
                     </div>
 
                     <p className="text-[10px] text-muted-foreground leading-relaxed">
-                      Main sensor array sweeps surrounding local space for navigational hazards, active electronic signatures, and hostile vessels.
+                      Main sensor array sweeps surrounding local space for navigational hazards, active electronic signatures, and hostile vessels. Targets with Stealth DC ≤ {passiveScanPerception} are auto-detected by passive sweeps.
                     </p>
                   </div>
                 )}
@@ -1153,36 +1210,40 @@ export function SensorsStation({
                       shipSize={shipConfig?.size}
                     />
 
-                    {isHubAndSpoke && (
-                      <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
-                          <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 w-full">
-                          {Array.from({ length: 2 }).map((_, i) => (
-                            <span
-                              key={i}
-                              className={`h-2.5 flex-1 rounded-xs inline-block ${
-                                i < sharedPoolDice 
-                                  ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
-                                  : "bg-black/80 border border-bridge-border"
-                              }`}
-                            />
-                          ))}
-                        </div>
+                    {isHubAndSpoke && (() => {
+                      const canSpendStationDice = currentStationDice > 0;
+                      const canSpendSharedDice = sharedPoolDice > 0;
+                      return (
+                        <div className="flex flex-col gap-2 pt-2 border-t border-bridge-border/60 w-full">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-amber-400 font-bold tracking-wider uppercase text-[10px]">Shared Reactor Pool</span>
+                            <span className="font-bold text-amber-400 text-xs">{sharedPoolDice} / 2</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 w-full">
+                            {Array.from({ length: 2 }).map((_, i) => (
+                              <span
+                                key={i}
+                                className={`h-2.5 flex-1 rounded-xs inline-block ${
+                                  i < sharedPoolDice 
+                                    ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
+                                    : "bg-black/80 border border-bridge-border"
+                                }`}
+                              />
+                            ))}
+                          </div>
 
-                        {!canSpendStation && canSpendShared && (
-                          <button
-                            type="button"
-                            onClick={() => handleCustomConsume(1)}
-                            className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
-                          >
-                            CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
-                          </button>
-                        )}
-                      </div>
-                    )}
+                          {!canSpendStationDice && canSpendSharedDice && (
+                            <button
+                              type="button"
+                              onClick={() => handleCustomConsume(1)}
+                              className="w-full mt-1 rounded bg-amber-500/20 border border-amber-400/60 py-1.5 text-xs font-bold tracking-wider text-amber-300 hover:bg-amber-500/30 transition-colors shadow-[0_0_10px_rgba(251,191,36,0.2)] cursor-pointer"
+                            >
+                              CONSUME SHARED REACTOR DIE ({sharedPoolDice} REMAINING)
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -1200,7 +1261,7 @@ export function SensorsStation({
                           )}
                         </div>
                         <span className="text-[10px] text-muted-foreground block mt-0.5">
-                          Formula: <strong>d20 + {calculatedScanSkill}</strong> (Wis Mod + Prof{isScout ? " + Scout" : ""})
+                          Formula: <strong>d20 + {calculatedScanSkill}</strong> (Wis + Prof{isScout ? " + Scout" : ""}) • <strong>Passive: {passiveScanPerception}</strong>
                         </span>
                       </div>
 
@@ -1458,47 +1519,92 @@ export function SensorsStation({
                 {cardId === "contacts" && (
                   <div className="flex flex-col gap-3">
                     <div className="flex justify-between items-center border-b border-bridge-border/40 pb-1.5">
-                      <span className="text-xs text-muted-foreground">Revealed Sector Contacts</span>
-                      <span className="text-[10px] font-mono text-cyan-neon font-bold">
-                        {contacts.filter(c => c.isRevealed).length} / {contacts.length} Discovered
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Detected Sector Contacts</span>
+                        <span className="text-[10px] font-mono text-cyan-neon font-bold">
+                          {revealedContacts.length} Contact{revealedContacts.length === 1 ? "" : "s"} Detected
+                        </span>
+                      </div>
+
+                      {hasUnacknowledged && (
+                        <button
+                          type="button"
+                          onClick={handleAcknowledgeAllContacts}
+                          className="px-2 py-0.5 rounded border border-amber-400/80 bg-amber-500/20 text-amber-300 text-[9px] font-bold uppercase tracking-wider hover:bg-amber-500/30 transition cursor-pointer flex items-center gap-1"
+                        >
+                          <CheckCircle2 className="w-3 h-3 text-amber-400" />
+                          Acknowledge All ({unacknowledgedContactIds.length})
+                        </button>
+                      )}
                     </div>
 
                     {isBlinded ? (
                       <div className="p-4 rounded border border-dashed border-red-500/40 text-center text-xs text-red-300">
                         Tactical radar scrambled. Clear Blinded condition from Defense console.
                       </div>
-                    ) : contacts.filter(c => c.isRevealed).length === 0 ? (
+                    ) : revealedContacts.length === 0 ? (
                       <div className="p-4 rounded border border-dashed border-bridge-border/40 text-center text-xs text-muted-foreground">
                         No active sector contacts discovered. Run an Active Scan or deploy a Probe.
                       </div>
                     ) : (
                       <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
-                        {contacts.filter(c => c.isRevealed).map((contact) => (
-                          <div key={contact.id} className="p-2.5 rounded border border-cyan-neon/40 bg-black/40 flex justify-between items-center gap-2">
-                            <div>
-                              <span className="text-xs font-bold text-cyan-neon font-mono block">{contact.name}</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">
-                                Type: <strong className="text-amber-300">{contact.classification}</strong> • Range: <strong className="text-amber-300">{contact.distance}</strong>
-                              </span>
+                        {revealedContacts.map((contact) => {
+                          const isNewContact = unacknowledgedContactIds.includes(contact.id)
+
+                          return (
+                            <div
+                              key={contact.id}
+                              className={`p-2.5 rounded border flex justify-between items-center gap-2 transition-all ${
+                                isNewContact
+                                  ? "bg-amber-950/40 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.4)] animate-pulse"
+                                  : "border-cyan-neon/40 bg-black/40"
+                              }`}
+                            >
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`text-xs font-bold font-mono block ${isNewContact ? "text-amber-300" : "text-cyan-neon"}`}>
+                                    {contact.name}
+                                  </span>
+                                  {isNewContact && (
+                                    <span className="rounded bg-amber-500/20 border border-amber-400/60 px-1 py-0.2 text-[8px] font-mono font-bold text-amber-300 uppercase">
+                                      NEW CONTACT
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  Type: <strong className="text-amber-300">{contact.classification}</strong> • Range: <strong className="text-amber-300">{contact.distance}</strong>
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="rounded bg-cyan-neon/10 border border-cyan-neon/30 px-1.5 py-0.2 text-[9px] font-mono font-bold text-cyan-neon">
+                                  DC {contact.scanDc}
+                                </span>
+
+                                {isNewContact && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAcknowledgeContact(contact.id)}
+                                    className="px-2 py-0.5 rounded border border-amber-400 bg-amber-500/20 text-[9px] font-bold text-amber-200 hover:bg-amber-500/40 uppercase tracking-widest cursor-pointer transition shadow-sm"
+                                  >
+                                    Acknowledge
+                                  </button>
+                                )}
+
+                                {onRemoveContact && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setClearingContactId(contact.id)}
+                                    className="p-1 rounded bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 cursor-pointer"
+                                    title="Clear contact"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <span className="rounded bg-cyan-neon/10 border border-cyan-neon/30 px-1.5 py-0.2 text-[9px] font-mono font-bold text-cyan-neon">
-                                DC {contact.scanDc}
-                              </span>
-                              {onRemoveContact && (
-                                <button
-                                  type="button"
-                                  onClick={() => setClearingContactId(contact.id)}
-                                  className="p-1 rounded bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 cursor-pointer"
-                                  title="Clear contact"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
 

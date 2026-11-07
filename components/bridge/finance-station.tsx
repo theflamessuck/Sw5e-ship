@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Coins, TrendingUp, ShieldAlert, CreditCard, Wrench, CheckCircle2, ChevronUp, PlusCircle, RotateCcw, Landmark, Trash2, Filter, PackagePlus } from "lucide-react"
+import { Coins, TrendingUp, ShieldAlert, CreditCard, Wrench, CheckCircle2, ChevronUp, PlusCircle, RotateCcw, Landmark, Trash2, Filter, PackagePlus, ShoppingBag } from "lucide-react"
 
 export type ShipSize = "tiny" | "small" | "medium" | "large" | "huge" | "gargantuan"
 
@@ -198,6 +198,11 @@ export function FinanceStation({
   const [customDesc, setCustomDesc] = useState<string>("")
   const [customAmount, setCustomAmount] = useState<string>("")
 
+  // Custom Purchase/Expense State
+  const [purchaseDesc, setPurchaseDesc] = useState<string>("")
+  const [purchaseAmount, setPurchaseAmount] = useState<string>("")
+  const [purchaseCategory, setPurchaseCategory] = useState<Transaction["category"]>("Expense")
+
   const handleReceiveIncome = (description: string, amount: number) => {
     if (amount <= 0) return
     if (onAddTransaction) {
@@ -212,6 +217,30 @@ export function FinanceStation({
     handleReceiveIncome(customDesc.trim(), parsedAmount)
     setCustomDesc("")
     setCustomAmount("")
+  }
+
+  const handleCustomPurchaseSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const parsedAmount = parseFloat(purchaseAmount)
+    if (!purchaseDesc.trim() || isNaN(parsedAmount) || parsedAmount <= 0) return
+
+    if (credits < parsedAmount) {
+      alert(`Insufficient funds! Available balance is ${credits.toLocaleString()} CR, but purchase costs ${parsedAmount.toLocaleString()} CR.`)
+      return
+    }
+
+    if (onAddTransaction) {
+      onAddTransaction({
+        date: `Day ${currentDay}`,
+        description: purchaseDesc.trim(),
+        category: purchaseCategory,
+        amount: parsedAmount,
+        type: "debit"
+      })
+    }
+
+    setPurchaseDesc("")
+    setPurchaseAmount("")
   }
 
   const handleCancelTransaction = (tx: Transaction) => {
@@ -712,7 +741,7 @@ export function FinanceStation({
           </div>
         </div>
 
-        {/* Right Column: Port Services Queue & Income Generation */}
+        {/* Right Column: Port Services Queue, Income, and Purchases */}
         <div className="flex flex-col gap-4 font-mono">
           
           <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col">
@@ -932,6 +961,7 @@ export function FinanceStation({
             </div>
           </div>
 
+          {/* Income & Contracts Dispatch */}
           <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col">
             <h3 className="text-xs font-bold tracking-[0.2em] text-muted-foreground mb-3 flex items-center gap-2">
               <PlusCircle className="h-4 w-4 text-emerald-400" />
@@ -942,7 +972,7 @@ export function FinanceStation({
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Log Contract Payout</span>
               <input
                 type="text"
-                placeholder="Contract Description..."
+                placeholder="Contract Description / Bounty / Cargo Pay..."
                 value={customDesc}
                 onChange={(e) => setCustomDesc(e.target.value)}
                 className="w-full bg-black border border-bridge-border text-xs text-slate-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-emerald-500/50"
@@ -963,6 +993,62 @@ export function FinanceStation({
                   Deposit
                 </button>
               </div>
+            </form>
+          </div>
+
+          {/* Payments & Purchases Console */}
+          <div className="rounded-md border border-bridge-border bg-bridge-panel p-4 flex flex-col">
+            <h3 className="text-xs font-bold tracking-[0.2em] text-muted-foreground mb-3 flex items-center gap-2">
+              <ShoppingBag className="h-4 w-4 text-rose-400" />
+              PAYMENTS & PURCHASES
+            </h3>
+
+            <form onSubmit={handleCustomPurchaseSubmit} className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Log Item Purchase / Expense</span>
+                <span className="text-[9px] text-cyan-neon font-bold">Balance: {credits.toLocaleString()} CR</span>
+              </div>
+              <input
+                type="text"
+                placeholder="Item / Clothes / Bribes / Provisions Note..."
+                value={purchaseDesc}
+                onChange={(e) => setPurchaseDesc(e.target.value)}
+                className="w-full bg-black border border-bridge-border text-xs text-slate-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-rose-500/50"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[9px] text-muted-foreground uppercase block mb-1">Category</span>
+                  <select
+                    value={purchaseCategory}
+                    onChange={(e) => setPurchaseCategory(e.target.value as Transaction["category"])}
+                    className="w-full bg-black border border-bridge-border text-xs text-slate-200 rounded px-2 py-1.5 focus:outline-none focus:border-rose-500/50 cursor-pointer"
+                  >
+                    <option value="Expense">Expense</option>
+                    <option value="Supplies">Supplies</option>
+                    <option value="Payroll">Payroll</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Refit">Refit</option>
+                  </select>
+                </div>
+                <div>
+                  <span className="text-[9px] text-muted-foreground uppercase block mb-1">Amount (CR)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Cost (CR)..."
+                    value={purchaseAmount}
+                    onChange={(e) => setPurchaseAmount(e.target.value)}
+                    className="w-full bg-black border border-bridge-border text-xs text-slate-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-rose-500/50"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={!purchaseDesc.trim() || !purchaseAmount || parseFloat(purchaseAmount) <= 0}
+                className="w-full py-1.5 rounded border border-rose-500/60 bg-rose-500/20 text-xs font-bold text-rose-400 hover:bg-rose-500/30 disabled:opacity-40 uppercase tracking-widest transition-colors cursor-pointer mt-1"
+              >
+                Debit Account
+              </button>
             </form>
           </div>
 
