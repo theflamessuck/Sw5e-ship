@@ -1206,8 +1206,8 @@ export function WeaponsStation({
                     <span className="w-2 h-2 rounded-xs bg-cyan-neon shadow-[0_0_6px_#06b6d4]" />
                     <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
                       {cardId === "masterArm" && "Weapon Safety & Master Arm Controls"}
-                      {cardId === "powerDice" && "Weapons Power Coupling Matrix"}
-                      {cardId === "batteries" && "Active Batteries & Hardpoint Controls"}
+                      {cardId === "powerDice" && "Weapons Power Dice (VAR)"}
+                      {cardId === "batteries" && "Active Batteries & Hardpoint Controls (A)"}
                       {cardId === "ordnance" && "Ordnance Magazine & Requisition"}
                       {cardId === "stances" && "Tactical Targeting & Firing Stances"}
                       {cardId === "chassisSurges" && "Tactical Chassis Surges & Reactions"}

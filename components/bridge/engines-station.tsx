@@ -1659,9 +1659,9 @@ export function EnginesStation({
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-xs bg-cyan-neon shadow-[0_0_6px_#06b6d4]" />
                     <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
-                      {cardId === "movement" && "Tactical Movement & Gyro"}
-                      {cardId === "resources" && "Station & Shared Combat Power"}
-                      {cardId === "weapons" && "Forward Hardpoint Fire Array"}
+                      {cardId === "movement" && "Tactical Movement"}
+                      {cardId === "resources" && "Station & Shared Combat Power (VAR)"}
+                      {cardId === "weapons" && "Forward Hardpoint Weapon Control (A)"}
                       {cardId === "fuel" && "Engine Propulsion & Fuel Burn"}
                       {cardId === "time" && "Campaign Time & Shore Leave"}
                       {cardId === "ftl" && "Hyperdrive Vector & Astrogation"}

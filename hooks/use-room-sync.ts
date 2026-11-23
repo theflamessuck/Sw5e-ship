@@ -1,3 +1,5 @@
+"use client"
+
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 
@@ -6,9 +8,10 @@ export interface RoomSyncStatus {
   isUnlocked: boolean;
   hasStoredPin: boolean;
   isCreationBlocked: boolean;
+  isLoaded: boolean;
 }
 
-export function useRoomSync<T>(
+export function useRoomSync<T extends Record<string, any>>(
   roomCode: string,
   initialData: T,
   providedPin?: string,
@@ -21,11 +24,13 @@ export function useRoomSync<T>(
     isUnlocked: false,
     hasStoredPin: false,
     isCreationBlocked: false,
+    isLoaded: false,
   });
 
   const lastLocalUpdateRef = useRef<number>(Date.now());
   const pendingSyncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const latestDataRef = useRef<T>(initialData);
+  const isInitializedRef = useRef<boolean>(false);
 
   useEffect(() => {
     latestDataRef.current = data;
@@ -33,7 +38,10 @@ export function useRoomSync<T>(
 
   // 1. Initial Load & Realtime Subscription
   useEffect(() => {
-    if (!roomCode) return;
+    if (!roomCode) {
+      isInitializedRef.current = false;
+      return;
+    }
 
     const code = roomCode.trim().toUpperCase();
     const pin = providedPin ? providedPin.trim() : null;
@@ -52,42 +60,54 @@ export function useRoomSync<T>(
         const requiresPin = Boolean(storedPin && storedPin.trim() !== '');
 
         if (requiresPin && storedPin !== pin) {
+          isInitializedRef.current = false;
           setSyncStatus({
             isPinRequired: true,
             isUnlocked: false,
             hasStoredPin: true,
             isCreationBlocked: false,
+            isLoaded: false,
           });
           setIsConnected(false);
           return;
         }
 
-        // Room is authorized
+        // Merge remote state over initial state to preserve new schema fields
+        let mergedState = initialData;
+        if (room.ship_state && Object.keys(room.ship_state).length > 0) {
+          mergedState = {
+            ...initialData,
+            ...room.ship_state,
+          };
+        }
+
+        setData(mergedState);
+        latestDataRef.current = mergedState;
+        isInitializedRef.current = true;
+
         setSyncStatus({
           isPinRequired: false,
           isUnlocked: true,
           hasStoredPin: requiresPin,
           isCreationBlocked: false,
+          isLoaded: true,
         });
-
-        if (room.ship_state && Object.keys(room.ship_state).length > 0) {
-          setData(room.ship_state as T);
-          latestDataRef.current = room.ship_state as T;
-        }
       } else if (!room && !error) {
         // Room does not exist -> verify Master Shipyard Key
         if (expectedCreationKey && masterCreationKey !== expectedCreationKey) {
+          isInitializedRef.current = false;
           setSyncStatus({
             isPinRequired: false,
             isUnlocked: false,
             hasStoredPin: false,
             isCreationBlocked: true,
+            isLoaded: false,
           });
           setIsConnected(false);
           return;
         }
 
-        // Key matched or no restriction configured -> create the room
+        // Create the new room with initialData
         await supabase
           .from('game_rooms')
           .insert({
@@ -97,11 +117,13 @@ export function useRoomSync<T>(
             updated_at: new Date().toISOString(),
           });
 
+        isInitializedRef.current = true;
         setSyncStatus({
           isPinRequired: false,
           isUnlocked: true,
           hasStoredPin: Boolean(pin),
           isCreationBlocked: false,
+          isLoaded: true,
         });
       }
     }
@@ -123,24 +145,26 @@ export function useRoomSync<T>(
           if (!payload.new || !payload.new.ship_state) return;
 
           if (payload.new.access_pin && payload.new.access_pin !== pin) {
+            isInitializedRef.current = false;
             setSyncStatus({
               isPinRequired: true,
               isUnlocked: false,
               hasStoredPin: true,
               isCreationBlocked: false,
+              isLoaded: false,
             });
             setIsConnected(false);
             return;
           }
 
           const remoteTimestamp = new Date(payload.new.updated_at).getTime();
-
           if (remoteTimestamp <= lastLocalUpdateRef.current) {
             return;
           }
 
           setData(payload.new.ship_state as T);
           latestDataRef.current = payload.new.ship_state as T;
+          isInitializedRef.current = true;
         }
       )
       .subscribe((status) => {
@@ -148,6 +172,7 @@ export function useRoomSync<T>(
       });
 
     return () => {
+      isInitializedRef.current = false;
       supabase.removeChannel(channel);
       if (pendingSyncTimeoutRef.current) {
         clearTimeout(pendingSyncTimeoutRef.current);
@@ -155,9 +180,14 @@ export function useRoomSync<T>(
     };
   }, [roomCode, providedPin, masterCreationKey]);
 
-  // 2. Debounced Cloud Sync
+  // 2. Debounced Cloud Sync with Initialization Guard
   const updateRoomData = useCallback(
     (updater: (prev: T) => T) => {
+      // Prevent saving default template data before remote state has loaded
+      if (!isInitializedRef.current) {
+        return;
+      }
+
       if ((syncStatus.isPinRequired && !syncStatus.isUnlocked) || syncStatus.isCreationBlocked) {
         return;
       }
@@ -176,7 +206,7 @@ export function useRoomSync<T>(
       }
 
       pendingSyncTimeoutRef.current = setTimeout(async () => {
-        if (!roomCode) return;
+        if (!roomCode || !isInitializedRef.current) return;
         const code = roomCode.trim().toUpperCase();
 
         const payload: Record<string, any> = {

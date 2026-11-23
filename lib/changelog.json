@@ -1,5 +1,15 @@
 [
   {
+    "hash": "8141dde",
+    "date": "2026-11-07",
+    "message": "feat(bridge): add hyperspace background, 10m warmup rules, purchases log, and dual master arm toggle"
+  },
+  {
+    "hash": "a4d6127",
+    "date": "2026-11-06",
+    "message": "Feat: Added 10min auto success button for reactor and astrogation checks"
+  },
+  {
     "hash": "6462329",
     "date": "2026-11-01",
     "message": "Patch: repaired panels in defense station, and sidebar layout"
@@ -88,15 +98,5 @@
     "hash": "ed3f420",
     "date": "2026-10-23",
     "message": "add synchronized reactor startup and scram shutdown"
-  },
-  {
-    "hash": "3898181",
-    "date": "2026-10-22",
-    "message": "Add hydration guard, master shipyard creation key, and blank landing gate"
-  },
-  {
-    "hash": "1ccf028",
-    "date": "2026-10-22",
-    "message": "Enable PIN security authentication in room selector and sync hook"
   }
 ]

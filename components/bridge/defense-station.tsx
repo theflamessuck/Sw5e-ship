@@ -451,7 +451,8 @@ export function DefenseStation({
   const feedbackDie = getFeedbackDieBySize(shipConfig?.size)
 
   const handleTriggerFeedbackShield = () => {
-    const maxVal = parseInt(feedbackDie.replace(/[^0-9]/g, ""), 10) || 6
+    const match = feedbackDie.match(/d(\d+)/i)
+    const maxVal = match ? parseInt(match[1], 10) : 8
     const roll = Math.floor(Math.random() * maxVal) + 1
     setFeedbackRollLog(`Retaliation Triggered: ${roll} damage reflected back to attacker (${feedbackDie} roll).`)
   }
@@ -1261,7 +1262,7 @@ export function DefenseStation({
                       {cardId === "systemDamage" && "System Damage & Blackout Progression"}
                       {cardId === "statuses" && "Active Conditions & Status Modifiers"}
                       {cardId === "tacticalDefense" && "Active Tactical Defense Modules"}
-                      {cardId === "powerDice" && "Defense Power Coupling Matrix"}
+                      {cardId === "powerDice" && "Defense Power Dice (VAR)"}
                       {cardId === "mods" && "Installed Defense Hardware"}
                       {cardId === "ship_stats" && "Ship Ability Scores & Statistics"}
                     </h3>
@@ -1710,7 +1711,7 @@ export function DefenseStation({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                       {hasFeedbackShield && (
                         <div className="p-2.5 rounded border border-bridge-border bg-black/40 flex flex-col justify-between gap-1.5">
-                          <span className="font-bold text-cyan-neon uppercase">Feedback Shield</span>
+                          <span className="font-bold text-cyan-neon uppercase">Feedback Shield (R)</span>
                           <p className="text-[9px] text-muted-foreground leading-relaxed">
                             Reaction: Retaliate with {feedbackDie} damage matching attack type.
                           </p>

@@ -722,7 +722,7 @@ export function SensorsStation({
     const current = currentEcmUses.buzzDroids ?? 0
     if (current >= tierUses) return
     updateEcmUses((prev) => ({ ...prev, buzzDroids: current + 1 }))
-    setTacticalFeedback("Buzz Droid Cloud Deployed: 200-ft sphere created within 1,500 ft. Area is difficult terrain; deals 2d4 kinetic hull damage per 50 ft travelled!")
+    setTacticalFeedback("Buzz Droid Cloud Deployed: 200-ft sphere created within 1,500 ft. Area is difficult terrain; Any creature or ship that can’t see the area at the time the area is created must make a Wisdom (Scan) check (DC 15) to notice; deals 2d4 kinetic hull damage per 50 ft travelled!")
   }
 
   const handleTriggerSensorDampener = () => {
@@ -1129,8 +1129,8 @@ export function SensorsStation({
                     <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
                       {cardId === "arrayStatus" && "Sensor Array Calibration & Range"}
                       {cardId === "powerDice" && "Sensors Power Coupling Matrix"}
-                      {cardId === "activeScan" && "Active Sensor Sweep System"}
-                      {cardId === "sensorProbe" && "Deep-Space Sensor Probe Launch"}
+                      {cardId === "activeScan" && "Active Sensor Sweep System (A)"}
+                      {cardId === "sensorProbe" && "Deep-Space Sensor Probe Launch (A)"}
                       {cardId === "contacts" && "Detected Sector Contacts & Radar"}
                       {cardId === "tacticalModules" && "Active Tactical Sensor Countermeasures"}
                       {cardId === "mods" && "Installed Sensor Hardware Modifications"}
@@ -1676,7 +1676,10 @@ export function SensorsStation({
                                 </span>
                               </div>
                               <p className="text-[9px] text-muted-foreground leading-relaxed">
-                                200-ft sphere (1500 ft): 2d4 hull kinetic damage per 50 ft. Recharges on maintenance refit.
+                                a crewmember may scatter a large number of Buzz Droids across space in a 200-foot radius sphere centered on a point within 1500 feet. These Buzz Droids tear apart the hull of any ship that encounters them. The area becomes difficult terrain for up to a number of minutes equal to you ship’s tier. When a ship moves into or within the area, it takes 2d4 kinetic damage directly to the hull for every 50 feet it travels.
+The Buzz Droids are nearly invisible in the darkness of space. Any creature or ship that can’t see the area at the time the area is created must make a Wisdom (Scan) check (DC 15) to notice the Buzz Droids before entering the area.
+The effects of this feature last until the beginning of your next turn unless the crewmember uses a bonus action to maintain it.
+This feature can be used a number of times equal to your ship’s tier (a minimum of once). All expended uses are regained when the ship is refitted.
                               </p>
                             </div>
                             <button

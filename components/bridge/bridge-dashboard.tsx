@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useCallback } from "react"
 import { HeaderBar } from "./header-bar"
 import { StationSidebar, type Station } from "./station-sidebar"
 import { WeaponsStation, type OrdnanceItem } from "./weapons-station"
-import { SensorsStation } from "./sensors-station"
+import { SensorsStation, type SensorsEcmState } from "./sensors-station"
 import { DefenseStation, type ActiveStatus } from "./defense-station"
 import { ShipModifications, MASTER_MODIFICATIONS, type Modification, type InstalledSuite } from "./ship-modifications"
 import { CargoStation } from "./cargo-station"
@@ -196,6 +196,7 @@ export interface SyncedBridgeState {
   boostFeedback: string | null
   standingByUsed: boolean
   leafOnTheWindUsed: boolean
+  sensorsEcmUses: SensorsEcmState
   ordnanceList: OrdnanceItem[]
   shipConfig: ShipConfig
   installedMods: Modification[]
@@ -278,6 +279,13 @@ const INITIAL_SYNCED_STATE: SyncedBridgeState = {
   boostFeedback: null,
   standingByUsed: false,
   leafOnTheWindUsed: false,
+  sensorsEcmUses: {
+    flares: 0,
+    buzzDroids: 0,
+    dampener: 0,
+    disruptor: 0,
+    threatTracker: 0,
+  },
   ordnanceList: STARSHIP_AMMUNITION.map((ammo) => ({
     id: ammo.id,
     name: ammo.name,
@@ -527,6 +535,13 @@ export default function BridgeDashboard() {
     boostFeedback,
     standingByUsed,
     leafOnTheWindUsed,
+    sensorsEcmUses = {
+      flares: 0,
+      buzzDroids: 0,
+      dampener: 0,
+      disruptor: 0,
+      threatTracker: 0,
+    },
     ordnanceList,
     shipConfig,
     installedMods,
@@ -772,7 +787,6 @@ export default function BridgeDashboard() {
         const alreadyTraveled = Math.max(0, prev.currentDay - prev.activeJourney.startDay)
         const remainingJumpDays = Math.max(0, prev.activeJourney.totalDays - alreadyTraveled)
 
-        // Only burn fuel for actual days remaining in hyperspace (stops excess fuel burn after arrival)
         const burnableDays = Math.min(requestedDays, remainingJumpDays)
         const neededFuel = burnableDays * fuelMultiplier
 
@@ -780,14 +794,12 @@ export default function BridgeDashboard() {
           if (prev.currentFuel >= neededFuel) {
             nextFuel = Math.max(0, Math.round((prev.currentFuel - neededFuel) * 10) / 10)
 
-            // Auto-revert if trip reaches completion
             if (alreadyTraveled + burnableDays >= prev.activeJourney.totalDays) {
               nextLocation = prev.activeJourney.destination
               nextTarget = ""
               nextJourney = null
             }
           } else {
-            // Out-of-Fuel Emergency Dropout
             const possibleDays = Math.floor(prev.currentFuel / fuelMultiplier)
             daysPassed = Math.max(0, possibleDays)
             nextFuel = 0
@@ -809,7 +821,6 @@ export default function BridgeDashboard() {
             }
           }
         } else {
-          // Already at destination, no hyperspace fuel burn needed
           nextLocation = prev.activeJourney.destination
           nextTarget = ""
           nextJourney = null
@@ -1390,6 +1401,13 @@ export default function BridgeDashboard() {
       boostFeedback: null,
       standingByUsed: false,
       leafOnTheWindUsed: false,
+      sensorsEcmUses: {
+        flares: 0,
+        buzzDroids: 0,
+        dampener: 0,
+        disruptor: 0,
+        threatTracker: 0,
+      },
       sFoilsMode: "unlocked",
       currentFuel: prev.maxFuel,
       hullState: { current: 40, max: 40 },
@@ -2251,6 +2269,16 @@ export default function BridgeDashboard() {
                     manifest={manifest}
                     onAssignCrew={handleAssignLocation}
                     onToggleTurn={handleToggleTurnTaken}
+                    ecmUses={sensorsEcmUses}
+                    onUpdateEcmUses={(updater) =>
+                      updateRoomData((prev) => ({
+                        ...prev,
+                        sensorsEcmUses:
+                          typeof updater === "function"
+                            ? updater(prev.sensorsEcmUses || {})
+                            : updater,
+                      }))
+                    }
                   />
                 ) : active === "Defense" ? (
                   <DefenseStation
@@ -2591,6 +2619,13 @@ export default function BridgeDashboard() {
                           evasiveManeuversUsed: 0,
                           versatileStarshipUsed: 0,
                           adaptiveArmorUsed: 0,
+                          sensorsEcmUses: {
+                            flares: 0,
+                            buzzDroids: 0,
+                            dampener: 0,
+                            disruptor: 0,
+                            threatTracker: 0,
+                          },
                           lastAstrogationDay: nextLastAstrogation,
                           ordnanceList: updatedOrdnance,
                           shipStatuses: clearedStatuses,

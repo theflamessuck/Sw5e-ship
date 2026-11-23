@@ -751,7 +751,7 @@ export function CommunicationsStation({
                     <span className="w-2 h-2 rounded-xs bg-cyan-neon shadow-[0_0_6px_#06b6d4]" />
                     <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
                       {cardId === "commsLink" && "Sub-Space Array & Transmission Grid"}
-                      {cardId === "powerDice" && "Communications Power Matrix"}
+                      {cardId === "powerDice" && "Communications Power Dice (VAR)"}
                       {cardId === "electronicWarfare" && "Tactical Slicer & EW Modules"}
                       {cardId === "interfere" && "Interference Warfare Protocols"}
                       {cardId === "broadcast" && "Hail & Social Broadcast Channels"}
@@ -1035,7 +1035,7 @@ export function CommunicationsStation({
                   <div className="flex flex-col gap-3">
                     <div className="bg-black/40 border border-bridge-border/60 p-3 rounded flex flex-col justify-between gap-2.5">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-cyan-neon text-sm uppercase">Interfere Check</span>
+                        <span className="font-bold text-cyan-neon text-sm uppercase">Interfere Check (A)</span>
                         <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${
                           isScrambler
                             ? "bg-cyan-500/20 text-cyan-300 border-cyan-400 animate-pulse"

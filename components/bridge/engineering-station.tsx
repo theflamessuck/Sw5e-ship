@@ -1265,8 +1265,8 @@ export function EngineeringStation({
                     <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-neon">
                       {cardId === "reactor" && "Reactor Core & Round Cycle"}
                       {cardId === "powerDice" && (isDirect ? "Central Power Matrix" : "Power Coupling & Station Routing")}
-                      {cardId === "boosts" && "Engineering Boost Actions"}
-                      {cardId === "patch" && "Emergency Patch Protocol"}
+                      {cardId === "boosts" && "Engineering Boost Actions (A)"}
+                      {cardId === "patch" && "Emergency Patch Protocol (A)"}
                       {cardId === "recharge" && "Ship Recharge & Maintenance"}
                       {cardId === "tacticalAux" && "Auxiliary Tactical Systems"}
                       {cardId === "mods" && "Installed Engineering Hardware"}
@@ -1391,7 +1391,7 @@ export function EngineeringStation({
                           }`}
                         >
                           {isPowerRoutingUnlocked ? <Unlock className="h-3 w-3 text-amber-400" /> : <Lock className="h-3 w-3 text-slate-400" />}
-                          <span>{isPowerRoutingUnlocked ? "Lock Prioritization" : "Route Power (Bonus Action)"}</span>
+                          <span>{isPowerRoutingUnlocked ? "Lock Prioritization" : "Route Power (BA)"}</span>
                         </button>
                       )}
                     </div>
@@ -1694,6 +1694,7 @@ export function EngineeringStation({
                         <div className="text-[11px] text-muted-foreground space-y-1">
                           <p>• Shields will auto-restore to 100% ({effectiveShieldMax} SP) and recover +{shieldDiceToRestore} Shield Dice.</p>
                           <p>• Spend available Hull Dice with Mechanic's Kit checks for field repairs.</p>
+                          <p>• Must not be in combat.</p>
                         </div>
                         <button
                           type="button"
